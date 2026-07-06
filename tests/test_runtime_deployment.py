@@ -19,6 +19,8 @@ class RuntimeDeploymentContractTests(unittest.TestCase):
         self.assertIn("EnvironmentFile=%h/.config/sda-orchestrator/api.env", rendered)
         self.assertIn("NoNewPrivileges=true", rendered)
         self.assertIn("ProtectSystem=strict", rendered)
+        self.assertIn("ProtectHome=read-only", rendered)
+        self.assertIn("PrivateDevices=true", rendered)
         self.assertIn("UMask=0077", rendered)
         self.assertNotIn("User=root", rendered)
         self.assertNotIn("sudo", rendered)
@@ -32,7 +34,9 @@ class RuntimeDeploymentContractTests(unittest.TestCase):
     def test_runtime_example_keeps_apply_disabled_and_has_no_secret_values(self):
         rendered = ENVIRONMENT.read_text(encoding="utf-8")
         self.assertIn("ORCHESTRATOR_EXECUTION_ENABLED=false", rendered)
-        self.assertIn("PGPASSFILE=", rendered)
+        self.assertIn("ORCHESTRATOR_TOKEN_IDENTITIES_FILE=", rendered)
+        self.assertIn("host=/var/run/postgresql", rendered)
+        self.assertNotIn("ORCHESTRATOR_TOKEN_IDENTITIES={", rendered)
         self.assertNotIn("password=", rendered.lower())
         self.assertNotIn("inline-private-marker", rendered)
 
@@ -44,6 +48,7 @@ class RuntimeDeploymentContractTests(unittest.TestCase):
         self.assertIn("NoNewPrivileges=true", unit)
         self.assertIn("ORCHESTRATOR_EXECUTION_ENABLED=false", environment)
         self.assertIn("ORCHESTRATOR_WORKER_ENABLED=false", environment)
+        self.assertIn("host=/var/run/postgresql", environment)
         self.assertNotIn("password=", environment.lower())
 
 

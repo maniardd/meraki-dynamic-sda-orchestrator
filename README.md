@@ -70,15 +70,19 @@ python tools\validate_intent.py examples\fabric-intent.lab.yaml
 python -m unittest discover -s tests -v
 ```
 
-Start the development API only with a local development token:
+Start the development API with a private hashed-token identity file. The helper
+returns the new bearer value once; only its SHA-256 digest is stored:
 
 ```powershell
-$env:ORCHESTRATOR_API_TOKEN = '<local-development-token>'
+$authFile = Join-Path $env:TEMP 'sda-token-identities.json'
+$token = python tools\create_api_identity.py --output $authFile --actor local-planner --roles viewer,planner
+$env:ORCHESTRATOR_TOKEN_IDENTITIES_FILE = $authFile
 python -m orchestrator.api
 ```
 
-The API listens on `127.0.0.1:8080` by default. Device execution is disabled
-unless explicitly enabled in a reviewed worker runtime.
+The API listens on `127.0.0.1:8080` by default. `/ready` and every `/v1/`
+endpoint require `Authorization: Bearer <token>`. Device execution is disabled
+unless explicitly enabled in a separately reviewed worker runtime.
 
 ## Repository safety
 

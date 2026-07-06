@@ -58,10 +58,12 @@ python -m unittest discover -s tests -v
 
 ## Run the Development API
 
-Set a development token through the environment. Never commit the token.
+Generate a development token identity. Never commit either file or token.
 
 ```powershell
-$env:ORCHESTRATOR_API_TOKEN = '<development-token>'
+$authFile = Join-Path $env:TEMP 'sda-token-identities.json'
+$token = python tools\create_api_identity.py --output $authFile --actor local-planner --roles viewer,planner
+$env:ORCHESTRATOR_TOKEN_IDENTITIES_FILE = $authFile
 python -m orchestrator.api
 ```
 
@@ -76,13 +78,13 @@ Invoke-RestMethod http://127.0.0.1:8080/health
 Readiness (authentication, guardrails, database, and audit chain):
 
 ```powershell
-Invoke-RestMethod http://127.0.0.1:8080/ready
+$headers = @{ Authorization = "Bearer $token" }
+Invoke-RestMethod http://127.0.0.1:8080/ready -Headers $headers
 ```
 
 Validation:
 
 ```powershell
-$headers = @{ Authorization = 'Bearer <development-token>' }
 $intent = Get-Content -Raw examples\fabric-intent.lab.yaml
 # Convert YAML to JSON in the caller before using the JSON API.
 ```
@@ -138,9 +140,11 @@ approval, locking, credential, and rollback contracts are complete.
 
 ## Authentication roles
 
-For role separation, configure `ORCHESTRATOR_TOKEN_IDENTITIES` as a secret JSON
-mapping in the runtime environment. Do not commit token values. A legacy single
-`ORCHESTRATOR_API_TOKEN` receives only viewer and planner permissions.
+For role separation, configure `ORCHESTRATOR_TOKEN_IDENTITIES_FILE` with a
+mode-`0600` JSON document containing SHA-256 token digests, actor names, and
+roles. Bearer-token values are never stored by the service. The `/ready`
+endpoint is authenticated; only `/health` is public. Plaintext token mappings
+are not supported by the service.
 
 ## Next Engineering Milestone
 

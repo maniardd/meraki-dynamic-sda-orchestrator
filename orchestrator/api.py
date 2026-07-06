@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
-import json
 import os
 import re
 import uuid
@@ -15,6 +13,7 @@ from flask import Flask, g, jsonify, request
 import yaml
 
 from .allocator import AllocationError
+from .auth import load_hashed_token_identities, match_hashed_principal
 from .intent import validate_intent
 from .planner import PlanValidationError, create_plan
 from .renderer import RenderError, render_configuration
@@ -31,7 +30,7 @@ from .store import (
 )
 
 
-API_VERSION = "0.4.0"
+API_VERSION = "0.5.0"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
 
 
@@ -42,28 +41,11 @@ def _boolean_environment(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _environment_token_identities() -> Dict[str, Dict[str, Any]]:
-    raw = os.getenv("ORCHESTRATOR_TOKEN_IDENTITIES", "").strip()
-    if not raw:
+def _environment_hashed_token_identities() -> Dict[str, Dict[str, Any]]:
+    path = os.getenv("ORCHESTRATOR_TOKEN_IDENTITIES_FILE", "").strip()
+    if not path:
         return {}
-    try:
-        parsed = json.loads(raw)
-    except ValueError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _match_principal(
-    supplied_token: str,
-    identities: Mapping[str, Mapping[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    for configured_token, principal in identities.items():
-        if hmac.compare_digest(supplied_token, str(configured_token)):
-            actor = str(principal.get("actor", "")).strip()
-            roles = principal.get("roles", [])
-            if actor and isinstance(roles, list):
-                return {"actor": actor, "roles": {str(role) for role in roles}}
-    return None
+    return load_hashed_token_identities(path)
 
 
 def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
@@ -72,8 +54,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     default_guardrails = str(Path(__file__).resolve().parents[1] / "policy" / "guardrails.yaml")
     app.config.update(
         MAX_CONTENT_LENGTH=1024 * 1024,
-        ORCHESTRATOR_API_TOKEN=os.getenv("ORCHESTRATOR_API_TOKEN", ""),
-        ORCHESTRATOR_TOKEN_IDENTITIES=_environment_token_identities(),
+        ORCHESTRATOR_TOKEN_HASH_IDENTITIES=_environment_hashed_token_identities(),
         ORCHESTRATOR_DATABASE_PATH=os.getenv("ORCHESTRATOR_DATABASE_PATH", default_database),
         ORCHESTRATOR_DATABASE_URL=os.getenv("ORCHESTRATOR_DATABASE_URL", ""),
         ORCHESTRATOR_EXECUTION_ENABLED=_boolean_environment("ORCHESTRATOR_EXECUTION_ENABLED"),
@@ -114,7 +95,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             if REQUEST_ID.fullmatch(supplied_request_id)
             else "req_" + uuid.uuid4().hex
         )
-        if not request.path.startswith("/v1/"):
+        if not (request.path.startswith("/v1/") or request.path == "/ready"):
             return None
         supplied = request.headers.get("Authorization", "")
         prefix = "Bearer "
@@ -122,17 +103,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if not candidate:
             return jsonify({"error": "unauthorized"}), 401
 
-        identities = app.config.get("ORCHESTRATOR_TOKEN_IDENTITIES") or {}
-        principal = _match_principal(candidate, identities)
+        hashed_identities = app.config.get("ORCHESTRATOR_TOKEN_HASH_IDENTITIES") or {}
+        principal = match_hashed_principal(candidate, hashed_identities)
         if principal is None:
-            legacy_token = str(app.config.get("ORCHESTRATOR_API_TOKEN", ""))
-            if legacy_token and hmac.compare_digest(candidate, legacy_token):
-                principal = {
-                    "actor": "legacy-planning-client",
-                    "roles": {"viewer", "planner"},
-                }
-        if principal is None:
-            configured = bool(identities or app.config.get("ORCHESTRATOR_API_TOKEN"))
+            configured = bool(hashed_identities)
             return jsonify(
                 {
                     "error": "unauthorized" if configured else "service_not_configured",
@@ -217,8 +191,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     def ready():
         checks: Dict[str, Any] = {
             "authentication": bool(
-                app.config.get("ORCHESTRATOR_TOKEN_IDENTITIES")
-                or app.config.get("ORCHESTRATOR_API_TOKEN")
+                app.config.get("ORCHESTRATOR_TOKEN_HASH_IDENTITIES")
             ),
             "guardrails": False,
             "database": False,

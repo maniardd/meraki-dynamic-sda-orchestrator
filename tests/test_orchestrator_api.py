@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from orchestrator.api import create_app
+from orchestrator.auth import token_sha256
 from orchestrator.intent import load_intent
 
 
@@ -18,13 +19,18 @@ class OrchestratorApiTests(unittest.TestCase):
         app = create_app(
             {
                 "TESTING": True,
-                "ORCHESTRATOR_API_TOKEN": "test-token",
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256("test-token-value-with-required-length"): {
+                        "actor": "test-planner",
+                        "roles": ["viewer", "planner"],
+                    }
+                },
                 "ORCHESTRATOR_DATABASE_PATH": ":memory:",
             }
         )
         self.client = app.test_client()
         self.headers = {
-            "Authorization": "Bearer test-token",
+            "Authorization": "Bearer test-token-value-with-required-length",
             "Content-Type": "application/json",
         }
 
@@ -34,7 +40,7 @@ class OrchestratorApiTests(unittest.TestCase):
         self.assertFalse(response.get_json()["execution_enabled"])
 
     def test_readiness_proves_auth_guardrails_database_and_audit(self):
-        response = self.client.get("/ready")
+        response = self.client.get("/ready", headers=self.headers)
         self.assertEqual(200, response.status_code, response.get_json())
         body = response.get_json()
         self.assertEqual("ready", body["status"])
@@ -44,18 +50,25 @@ class OrchestratorApiTests(unittest.TestCase):
         self.assertTrue(body["checks"]["audit_chain"])
         self.assertEqual("sqlite", body["checks"]["backend"])
 
+    def test_readiness_requires_authentication(self):
+        response = self.client.get("/ready")
+        self.assertEqual(401, response.status_code)
+        self.assertEqual("no-store", response.headers["Cache-Control"])
+
     def test_readiness_fails_closed_without_authentication_configuration(self):
         app = create_app(
             {
                 "TESTING": True,
-                "ORCHESTRATOR_API_TOKEN": "",
-                "ORCHESTRATOR_TOKEN_IDENTITIES": {},
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {},
                 "ORCHESTRATOR_DATABASE_PATH": ":memory:",
             }
         )
-        response = app.test_client().get("/ready")
+        response = app.test_client().get(
+            "/ready",
+            headers={"Authorization": "Bearer " + ("x" * 32)},
+        )
         self.assertEqual(503, response.status_code)
-        self.assertFalse(response.get_json()["checks"]["authentication"])
+        self.assertEqual("service_not_configured", response.get_json()["error"])
 
     def test_v1_requires_authentication(self):
         response = self.client.post("/v1/intents/validate", json=self.intent)
@@ -80,6 +93,31 @@ class OrchestratorApiTests(unittest.TestCase):
         )
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.get_json()["valid"])
+
+    def test_hashed_production_identity_authenticates_readiness(self):
+        token = "phase3-api-integration-token-value-0001"
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(token): {
+                        "actor": "runtime-auditor",
+                        "roles": ["auditor"],
+                    }
+                },
+                "ORCHESTRATOR_DATABASE_PATH": ":memory:",
+            }
+        )
+        client = app.test_client()
+        response = client.get(
+            "/ready", headers={"Authorization": "Bearer " + token}
+        )
+        self.assertEqual(200, response.status_code, response.get_json())
+        rejected = client.get(
+            "/ready",
+            headers={"Authorization": "Bearer phase3-api-integration-token-value-9999"},
+        )
+        self.assertEqual(401, rejected.status_code)
 
     def test_invalid_intent_returns_422(self):
         candidate = copy.deepcopy(self.intent)

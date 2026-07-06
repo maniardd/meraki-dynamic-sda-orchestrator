@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from orchestrator.api import create_app
+from orchestrator.auth import token_sha256
 from orchestrator.intent import load_intent
 import yaml
 
@@ -14,6 +15,12 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "fabric-intent.lab.yaml"
 REQUIREMENTS_EXAMPLE = ROOT / "examples" / "fabric-requirements.lab.yaml"
+TOKENS = {
+    "planner-token": "planner-token-value-with-required-length",
+    "approver-token": "approver-token-value-with-required-length",
+    "operator-token": "operator-token-value-with-required-length",
+    "auditor-token": "auditor-token-value-with-required-length",
+}
 
 
 class PersistentWorkflowTests(unittest.TestCase):
@@ -29,12 +36,23 @@ class PersistentWorkflowTests(unittest.TestCase):
                 "TESTING": True,
                 "ORCHESTRATOR_DATABASE_PATH": database_path,
                 "ORCHESTRATOR_EXECUTION_ENABLED": False,
-                "ORCHESTRATOR_API_TOKEN": "",
-                "ORCHESTRATOR_TOKEN_IDENTITIES": {
-                    "planner-token": {"actor": "meraki-planner", "roles": ["planner"]},
-                    "approver-token": {"actor": "change-approver", "roles": ["approver"]},
-                    "operator-token": {"actor": "fabric-operator", "roles": ["operator"]},
-                    "auditor-token": {"actor": "audit-reader", "roles": ["auditor"]},
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(TOKENS["planner-token"]): {
+                        "actor": "meraki-planner",
+                        "roles": ["planner"],
+                    },
+                    token_sha256(TOKENS["approver-token"]): {
+                        "actor": "change-approver",
+                        "roles": ["approver"],
+                    },
+                    token_sha256(TOKENS["operator-token"]): {
+                        "actor": "fabric-operator",
+                        "roles": ["operator"],
+                    },
+                    token_sha256(TOKENS["auditor-token"]): {
+                        "actor": "audit-reader",
+                        "roles": ["auditor"],
+                    },
                 },
             }
         )
@@ -45,7 +63,10 @@ class PersistentWorkflowTests(unittest.TestCase):
 
     @staticmethod
     def headers(token):
-        return {"Authorization": "Bearer " + token, "Content-Type": "application/json"}
+        return {
+            "Authorization": "Bearer " + TOKENS.get(token, token),
+            "Content-Type": "application/json",
+        }
 
     def create_intent_and_plan(self):
         intent_response = self.client.post(
