@@ -21,10 +21,17 @@ GUARDRAILS = ROOT / "policy" / "guardrails.yaml"
 
 
 class FakeAdapter:
-    def __init__(self, device, fail_apply=False, fail_rollback=False):
+    def __init__(
+        self,
+        device,
+        fail_apply=False,
+        fail_rollback=False,
+        unverified_rollback=False,
+    ):
         self.device = device
         self.fail_apply = fail_apply
         self.fail_rollback = fail_rollback
+        self.unverified_rollback = unverified_rollback
         self.connected = False
         self.rollback_calls = []
 
@@ -84,7 +91,12 @@ peer-b L2 Twe1/0/2 10.255.0.3 UP 24 0B
         if self.fail_rollback:
             raise RuntimeError("simulated rollback failure")
         self.rollback_calls.append(checkpoint)
-        return {"checkpoint": checkpoint, "output_hash": hashlib.sha256(b"rollback").hexdigest()}
+        return {
+            "checkpoint": checkpoint,
+            "output_hash": hashlib.sha256(b"rollback").hexdigest(),
+            "verification_output_hash": hashlib.sha256(b"diff").hexdigest(),
+            "verified": not self.unverified_rollback,
+        }
 
 
 class TransactionWorkerTests(unittest.TestCase):
@@ -229,6 +241,25 @@ class TransactionWorkerTests(unittest.TestCase):
             self.store, factory, lambda _ref: "resolved-test-secret"
         ).process_apply(run["run_id"], self.intent, self.plan_record["document"], self.artifact)
         self.assertFalse(result["rolled_back"], result)
+        stored = self.store.get_design_reservation(reservation["reservation_id"])
+        self.assertEqual("quarantined", stored["state"])
+
+    def test_false_rollback_verification_quarantines_allocations(self):
+        reservation = self.use_dynamic_plan("false-verification")
+
+        def factory(device):
+            return FakeAdapter(
+                device,
+                fail_apply=(device["id"] == "border-cp-01"),
+                unverified_rollback=True,
+            )
+
+        run = self.create_apply_run("dynamic-false-verification")
+        result = TransactionWorker(
+            self.store, factory, lambda _ref: "resolved-test-secret"
+        ).process_apply(run["run_id"], self.intent, self.plan_record["document"], self.artifact)
+        self.assertFalse(result["rolled_back"], result)
+        self.assertEqual("rollback_failed", result["run"]["status"])
         stored = self.store.get_design_reservation(reservation["reservation_id"])
         self.assertEqual("quarantined", stored["state"])
 

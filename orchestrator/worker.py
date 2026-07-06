@@ -205,6 +205,8 @@ class TransactionWorker:
                 for device_id in reversed(changed_devices or sorted(checkpoints)):
                     try:
                         result = adapters[device_id].rollback(checkpoints[device_id])
+                        if not result.get("verified"):
+                            raise WorkerError("Rollback did not return verified evidence")
                         self.store.add_evidence(
                             run_id=run_id,
                             phase_id="rollback",

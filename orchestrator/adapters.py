@@ -28,6 +28,10 @@ CLI_ERROR = re.compile(
     r"^%\s*(Invalid input|Incomplete command|Ambiguous command|Error|Failed)",
     flags=re.IGNORECASE | re.MULTILINE,
 )
+NO_CONFIG_DIFFERENCES = re.compile(
+    r"^\s*!?\s*No changes were found\s*$",
+    flags=re.IGNORECASE | re.MULTILINE,
+)
 
 
 class DisabledAdapter:
@@ -166,7 +170,23 @@ class IosXeSshAdapter:
         )
         if CLI_ERROR.search(output):
             raise AdapterError("IOS XE configure-replace rollback failed")
+        verification = str(
+            connection.send_command(
+                "show archive config differences {} system:running-config".format(
+                    checkpoint
+                ),
+                read_timeout=60,
+            )
+        )
+        if CLI_ERROR.search(verification) or not NO_CONFIG_DIFFERENCES.search(
+            verification
+        ):
+            raise AdapterError("Rollback verification found configuration differences")
         return {
             "checkpoint": checkpoint,
             "output_hash": hashlib.sha256(output.encode("utf-8")).hexdigest(),
+            "verification_output_hash": hashlib.sha256(
+                verification.encode("utf-8")
+            ).hexdigest(),
+            "verified": True,
         }
