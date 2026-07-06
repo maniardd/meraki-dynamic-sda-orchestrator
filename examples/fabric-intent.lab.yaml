@@ -1,0 +1,83 @@
+schema_version: "1.0"
+
+metadata:
+  name: SJC23 SDA-style lab fabric
+  environment: lab
+  organization: LAB-ORG
+  region: AMER-WEST
+  change_reference: LAB-001
+
+fabric:
+  id: fab-sjc23-001
+  name: SJC23-FABRIC
+  underlay_protocol: isis
+  mtu: 9100
+
+devices:
+  - id: border-cp-01
+    hostname: SJC23-BORDER-CP-01
+    site: SJC23
+    platform: C9500-32C
+    software_version: 17.18.3
+    management_ip: 192.0.2.10
+    loopback0_ip: 10.255.1.1
+    roles: [border, control_plane]
+    credential_ref: secret://sda-lab/devices/border-cp-01
+
+  - id: edge-01
+    hostname: SJC23-EDGE-01
+    site: SJC23
+    platform: C9300X-48HXN
+    software_version: 17.18.3
+    management_ip: 192.0.2.11
+    loopback0_ip: 10.255.1.11
+    roles: [fabric_edge]
+    credential_ref: secret://sda-lab/devices/edge-01
+
+links:
+  - id: border-cp-01--edge-01
+    subnet: 10.255.0.0/31
+    endpoints:
+      - device_id: border-cp-01
+        interface: TwentyFiveGigE1/0/2
+        ip: 10.255.0.0
+      - device_id: edge-01
+        interface: TwentyFiveGigE1/0/1
+        ip: 10.255.0.1
+
+lisp:
+  site_name: site_sjc23
+  auth_key_ref: secret://sda-lab/lisp/site-sjc23
+  map_servers: [border-cp-01]
+
+virtual_networks:
+  - name: Corporate
+    vrf: CORP_VN
+    l3_instance_id: 4099
+    rd: "65001:4099"
+    route_targets: ["65001:4099"]
+
+  - name: Guest
+    vrf: GUEST_VN
+    l3_instance_id: 4100
+    rd: "65001:4100"
+    route_targets: ["65001:4100"]
+
+endpoint_pools:
+  - id: sjc23-corporate-data
+    site: SJC23
+    virtual_network: Corporate
+    vlan_id: 100
+    l2_instance_id: 8100
+    prefix: 10.30.100.0/24
+    gateway: 10.30.100.1
+    dhcp_helpers: [10.20.0.10, 10.20.0.11]
+
+  - id: sjc23-guest-wifi
+    site: SJC23
+    virtual_network: Guest
+    vlan_id: 200
+    l2_instance_id: 8200
+    prefix: 10.30.200.0/24
+    gateway: 10.30.200.1
+    dhcp_helpers: [10.20.0.10, 10.20.0.11]

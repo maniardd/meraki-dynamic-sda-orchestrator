@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.cisco.local/sda/schemas/fabric-intent-1.0.json",
+  "title": "Meraki Workflows SDA-Style Fabric Intent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "metadata",
+    "fabric",
+    "devices",
+    "links",
+    "lisp",
+    "virtual_networks",
+    "endpoint_pools"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "environment", "organization", "region"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "environment": {"enum": ["lab", "staging", "production"]},
+        "organization": {"type": "string", "minLength": 1},
+        "region": {"type": "string", "minLength": 1},
+        "change_reference": {"type": "string"}
+      }
+    },
+    "fabric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "underlay_protocol", "mtu"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "underlay_protocol": {"const": "isis"},
+        "mtu": {"type": "integer", "minimum": 1550, "maximum": 9216},
+        "isis_process": {"type": "string", "minLength": 1},
+        "isis_area": {"type": "string", "pattern": "^49\\.[0-9]{4}$"},
+        "multicast": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "rp_address": {"type": "string", "format": "ipv4"},
+            "rp_loopback_id": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+            "ssm_default": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "hostname",
+          "site",
+          "platform",
+          "software_version",
+          "management_ip",
+          "loopback0_ip",
+          "roles",
+          "credential_ref"
+        ],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "hostname": {"type": "string", "minLength": 1},
+          "site": {"type": "string", "minLength": 1},
+          "platform": {"type": "string", "minLength": 1},
+          "software_version": {"type": "string", "minLength": 1},
+          "management_ip": {"type": "string", "format": "ipv4"},
+          "dashboard_management_ip": {"type": "string", "format": "ipv4"},
+          "loopback0_ip": {"type": "string", "format": "ipv4"},
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": ["border", "control_plane", "fabric_edge", "fusion", "underlay"]
+            }
+          },
+          "credential_ref": {"type": "string", "pattern": "^secret://"}
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "subnet", "endpoints"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "subnet": {"type": "string"},
+          "pim_sparse_mode": {"type": "boolean"},
+          "bfd": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["enabled"],
+            "properties": {
+              "enabled": {"type": "boolean"},
+              "interval_ms": {"type": "integer", "minimum": 50, "maximum": 1000},
+              "min_rx_ms": {"type": "integer", "minimum": 50, "maximum": 1000},
+              "multiplier": {"type": "integer", "minimum": 3, "maximum": 50}
+            }
+          },
+          "endpoints": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["device_id", "interface", "ip"],
+              "properties": {
+                "device_id": {"type": "string"},
+                "interface": {"type": "string"},
+                "ip": {"type": "string", "format": "ipv4"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "lisp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site_name", "auth_key_ref", "map_servers"],
+      "properties": {
+        "site_name": {"type": "string", "minLength": 1},
+        "auth_key_ref": {"type": "string", "pattern": "^secret://"},
+        "locator_set": {"type": "string", "minLength": 1},
+        "map_servers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "virtual_networks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "vrf", "l3_instance_id", "rd", "route_targets"],
+        "properties": {
+          "name": {"type": "string"},
+          "vrf": {"type": "string"},
+          "l3_instance_id": {"type": "integer", "minimum": 1, "maximum": 16777215},
+          "rd": {"type": "string"},
+          "route_targets": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string"}
+          }
+        }
+      }
+    },
+    "endpoint_pools": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "site",
+          "virtual_network",
+          "vlan_id",
+          "l2_instance_id",
+          "prefix",
+          "gateway",
+          "dhcp_helpers"
+        ],
+        "properties": {
+          "id": {"type": "string"},
+          "site": {"type": "string"},
+          "virtual_network": {"type": "string"},
+          "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+          "l2_instance_id": {"type": "integer", "minimum": 1, "maximum": 16777215},
+          "prefix": {"type": "string"},
+          "gateway": {"type": "string", "format": "ipv4"},
+          "dhcp_helpers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "format": "ipv4"}
+          }
+        }
+      }
+    },
+    "border_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "mode": {"enum": ["bgp", "isolated"]},
+        "local_as": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "peers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "device_id",
+              "vrf",
+              "vlan_id",
+              "interface",
+              "prefix",
+              "local_ip",
+              "neighbor_ip",
+              "remote_as"
+            ],
+            "properties": {
+              "device_id": {"type": "string", "minLength": 1},
+              "vrf": {"type": "string", "minLength": 1},
+              "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+              "interface": {"type": "string", "minLength": 1},
+              "prefix": {"type": "string"},
+              "local_ip": {"type": "string", "format": "ipv4"},
+              "neighbor_ip": {"type": "string", "format": "ipv4"},
+              "remote_as": {"type": "integer", "minimum": 1, "maximum": 4294967295}
+            }
+          }
+        }
+      }
+    }
+  }
+}

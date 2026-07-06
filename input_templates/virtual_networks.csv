@@ -1,0 +1,3 @@
+name,vrf,l3_instance_id,rd,route_targets,bgp_export_policy,bgp_import_policy,owner,purpose
+Corporate,CORP_VN,4099,REPLACE_ME,REPLACE_ME,REPLACE_ME,REPLACE_ME,REPLACE_ME,Corporate endpoints
+Guest,GUEST_VN,4100,REPLACE_ME,REPLACE_ME,REPLACE_ME,REPLACE_ME,REPLACE_ME,Guest internet access

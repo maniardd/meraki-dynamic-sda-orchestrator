@@ -1,0 +1,64 @@
+schema_version: "1.0"
+allocation_domain: example-lab
+
+metadata:
+  name: Example dynamically allocated fabric
+  environment: lab
+  organization: EXAMPLE-ORGANIZATION
+  region: EXAMPLE-REGION
+  change_reference: CHG-EXAMPLE
+
+fabric:
+  id: fab-example-lab-001
+  name: EXAMPLE-LAB-FABRIC
+  mtu: 9100
+  control_plane_mode: classic_lisp
+  lisp_auth_key_ref: secret://example/lisp/fab-example-lab-001
+
+devices:
+  - id: border-cp-01
+    hostname: BORDER-CP-01
+    site: SITE-001
+    platform: C9500-48Y4C
+    software_version: 17.12.4
+    management_ip: 192.0.2.10
+    dashboard_management_ip: 198.51.100.10
+    roles: [border, control_plane]
+    credential_ref: secret://example/devices/border-cp-01
+  - id: edge-01
+    hostname: EDGE-01
+    site: SITE-001
+    platform: C9300-24P
+    software_version: 17.12.4
+    management_ip: 192.0.2.20
+    dashboard_management_ip: 198.51.100.20
+    roles: [fabric_edge]
+    credential_ref: secret://example/devices/edge-01
+
+links:
+  - id: border-cp-01--edge-01
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/1}
+      - {device_id: edge-01, interface: GigabitEthernet1/0/1}
+    pim_sparse_mode: true
+    bfd: {enabled: true, interval_ms: 300, min_rx_ms: 300, multiplier: 3}
+
+virtual_networks:
+  - name: Corporate
+    vrf: CORP_VN
+    sites:
+      - site: SITE-001
+        users: 500
+        headroom_percent: 25
+        dhcp_helpers: [203.0.113.10, 203.0.113.11]
+  - name: Guest
+    vrf: GUEST_VN
+    sites:
+      - site: SITE-001
+        users: 200
+        headroom_percent: 50
+        dhcp_helpers: [203.0.113.10, 203.0.113.11]
+
+border_handoff:
+  enabled: false
+  mode: isolated

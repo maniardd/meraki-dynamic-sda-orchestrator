@@ -1,0 +1,90 @@
+name: SDA Relay Read-Only Preflight
+
+# Safe diagnostic path for the private Ubuntu relay. This workflow runs only
+# when manually dispatched and never checks out or deploys repository content.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: [self-hosted, sda-relay]
+    timeout-minutes: 5
+
+    steps:
+      - name: Collect sanitized relay preflight
+        shell: bash
+        env:
+          SDA_BORDER_HOST: ${{ secrets.SDA_BORDER_HOST }}
+          SDA_EDGE_HOST: ${{ secrets.SDA_EDGE_HOST }}
+        run: |
+          set +e
+          report="$RUNNER_TEMP/sda-relay-preflight.txt"
+          {
+            echo "[host]"
+            date -u +%Y-%m-%dT%H:%M:%SZ
+            hostname
+            uname -sr
+            if [ -r /etc/os-release ]; then
+              . /etc/os-release
+              printf 'os=%s\n' "${PRETTY_NAME:-unknown}"
+            fi
+            printf 'cpu_count=%s\n' "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo unknown)"
+            awk '/MemTotal/ {printf "memory_kib=%s\n", $2}' /proc/meminfo 2>/dev/null
+            df -h / | awk 'NR == 2 {printf "root_disk size=%s used=%s available=%s use=%s\n", $2, $3, $4, $5}'
+
+            echo
+            echo "[network]"
+            ip -br -4 address 2>/dev/null || true
+            ip -4 route 2>/dev/null || true
+            ss -ltn 2>/dev/null || true
+
+            echo
+            echo "[runtime]"
+            for command_name in docker podman python3 psql redis-cli curl openssl; do
+              if command -v "$command_name" >/dev/null 2>&1; then
+                printf '%s=installed\n' "$command_name"
+              else
+                printf '%s=not_installed\n' "$command_name"
+              fi
+            done
+            for service_name in docker podman postgresql redis-server sda-orchestrator; do
+              printf '%s=%s\n' "$service_name" "$(systemctl is-active "$service_name" 2>/dev/null || true)"
+            done
+
+            echo
+            echo "[fabric_ssh_reachability]"
+            if [ -z "${SDA_BORDER_HOST:-}" ]; then
+              echo "border_ssh=not_configured"
+            elif timeout 3 bash -c "</dev/tcp/${SDA_BORDER_HOST}/22" 2>/dev/null; then
+              echo "border_ssh=reachable"
+            else
+              echo "border_ssh=unreachable"
+            fi
+            if [ -z "${SDA_EDGE_HOST:-}" ]; then
+              echo "edge_ssh=not_configured"
+            elif timeout 3 bash -c "</dev/tcp/${SDA_EDGE_HOST}/22" 2>/dev/null; then
+              echo "edge_ssh=reachable"
+            else
+              echo "edge_ssh=unreachable"
+            fi
+
+            echo
+            echo "[local_health]"
+            if command -v curl >/dev/null 2>&1; then
+              printf 'port_5000_status=%s\n' "$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 http://127.0.0.1:5000/health 2>/dev/null || true)"
+              printf 'port_8080_status=%s\n' "$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 http://127.0.0.1:8080/health 2>/dev/null || true)"
+            fi
+          } | tee "$report"
+
+      - name: Upload preflight report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sda-relay-preflight
+          path: ${{ runner.temp }}/sda-relay-preflight.txt
+          if-no-files-found: error
+          retention-days: 7

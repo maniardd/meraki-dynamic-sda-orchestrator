@@ -1,0 +1,3 @@
+device_id,hostname,serial,cloud_id,site,building,platform,software_version,license,roles,management_ip,loopback0_ip,credential_ref
+border-cp-01,SITE-BORDER-CP-01,REPLACE_ME,REPLACE_ME,SITE,BUILDING,C9500-32C,REPLACE_ME,REPLACE_ME,border|control_plane,REPLACE_ME,REPLACE_ME,secret://sda/devices/border-cp-01
+edge-01,SITE-EDGE-01,REPLACE_ME,REPLACE_ME,SITE,BUILDING,C9300X-48HXN,REPLACE_ME,REPLACE_ME,fabric_edge,REPLACE_ME,REPLACE_ME,secret://sda/devices/edge-01

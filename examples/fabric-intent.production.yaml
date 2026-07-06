@@ -1,0 +1,153 @@
+schema_version: "1.0"
+
+metadata:
+  name: Reference redundant SDA-style production fabric
+  environment: production
+  organization: REPLACE_WITH_ORGANIZATION
+  region: REPLACE_WITH_REGION
+  change_reference: CHG-REFERENCE-ONLY
+
+fabric:
+  id: fab-reference-prod-001
+  name: REFERENCE-PRODUCTION-FABRIC
+  underlay_protocol: isis
+  mtu: 9100
+  isis_process: SDA-ISIS
+  isis_area: "49.0001"
+
+devices:
+  - id: border-cp-01
+    hostname: BORDER-CP-01
+    site: SITE-001
+    platform: C9500-48Y4C
+    software_version: 17.18.3
+    management_ip: 192.0.2.10
+    loopback0_ip: 10.255.1.1
+    roles: [border, control_plane]
+    credential_ref: secret://production/devices/border-cp-01
+
+  - id: border-cp-02
+    hostname: BORDER-CP-02
+    site: SITE-001
+    platform: C9500-48Y4C
+    software_version: 17.18.3
+    management_ip: 192.0.2.11
+    loopback0_ip: 10.255.1.2
+    roles: [border, control_plane]
+    credential_ref: secret://production/devices/border-cp-02
+
+  - id: edge-01
+    hostname: EDGE-01
+    site: SITE-001
+    platform: C9300X-48HX
+    software_version: 17.18.3
+    management_ip: 192.0.2.20
+    loopback0_ip: 10.255.1.11
+    roles: [fabric_edge]
+    credential_ref: secret://production/devices/edge-01
+
+  - id: edge-02
+    hostname: EDGE-02
+    site: SITE-001
+    platform: C9300X-48HX
+    software_version: 17.18.3
+    management_ip: 192.0.2.21
+    loopback0_ip: 10.255.1.12
+    roles: [fabric_edge]
+    credential_ref: secret://production/devices/edge-02
+
+links:
+  - id: border-cp-01--edge-01
+    subnet: 10.255.0.0/31
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/1, ip: 10.255.0.0}
+      - {device_id: edge-01, interface: TwentyFiveGigE1/0/1, ip: 10.255.0.1}
+  - id: border-cp-02--edge-01
+    subnet: 10.255.0.2/31
+    endpoints:
+      - {device_id: border-cp-02, interface: TwentyFiveGigE1/0/1, ip: 10.255.0.2}
+      - {device_id: edge-01, interface: TwentyFiveGigE1/0/2, ip: 10.255.0.3}
+  - id: border-cp-01--edge-02
+    subnet: 10.255.0.4/31
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/2, ip: 10.255.0.4}
+      - {device_id: edge-02, interface: TwentyFiveGigE1/0/1, ip: 10.255.0.5}
+  - id: border-cp-02--edge-02
+    subnet: 10.255.0.6/31
+    endpoints:
+      - {device_id: border-cp-02, interface: TwentyFiveGigE1/0/2, ip: 10.255.0.6}
+      - {device_id: edge-02, interface: TwentyFiveGigE1/0/2, ip: 10.255.0.7}
+
+lisp:
+  site_name: site_001
+  auth_key_ref: secret://production/lisp/site-001
+  locator_set: rloc_fabric
+  map_servers: [border-cp-01, border-cp-02]
+
+virtual_networks:
+  - name: Corporate
+    vrf: CORP_VN
+    l3_instance_id: 4099
+    rd: "65001:4099"
+    route_targets: ["65001:4099"]
+  - name: Guest
+    vrf: GUEST_VN
+    l3_instance_id: 4100
+    rd: "65001:4100"
+    route_targets: ["65001:4100"]
+
+endpoint_pools:
+  - id: site001-corporate-data
+    site: SITE-001
+    virtual_network: Corporate
+    vlan_id: 100
+    l2_instance_id: 8100
+    prefix: 10.30.100.0/24
+    gateway: 10.30.100.1
+    dhcp_helpers: [10.20.0.10, 10.20.0.11]
+  - id: site001-guest-data
+    site: SITE-001
+    virtual_network: Guest
+    vlan_id: 200
+    l2_instance_id: 8200
+    prefix: 10.30.200.0/24
+    gateway: 10.30.200.1
+    dhcp_helpers: [10.20.0.10, 10.20.0.11]
+
+border_handoff:
+  mode: bgp
+  enabled: true
+  local_as: 65001
+  peers:
+    - device_id: border-cp-01
+      vrf: CORP_VN
+      vlan_id: 3001
+      interface: Vlan3001
+      prefix: 198.51.100.0/31
+      local_ip: 198.51.100.0
+      neighbor_ip: 198.51.100.1
+      remote_as: 65100
+    - device_id: border-cp-01
+      vrf: GUEST_VN
+      vlan_id: 3002
+      interface: Vlan3002
+      prefix: 198.51.100.2/31
+      local_ip: 198.51.100.2
+      neighbor_ip: 198.51.100.3
+      remote_as: 65100
+    - device_id: border-cp-02
+      vrf: CORP_VN
+      vlan_id: 3011
+      interface: Vlan3011
+      prefix: 198.51.100.4/31
+      local_ip: 198.51.100.4
+      neighbor_ip: 198.51.100.5
+      remote_as: 65100
+    - device_id: border-cp-02
+      vrf: GUEST_VN
+      vlan_id: 3012
+      interface: Vlan3012
+      prefix: 198.51.100.6/31
+      local_ip: 198.51.100.6
+      neighbor_ip: 198.51.100.7
+      remote_as: 65100

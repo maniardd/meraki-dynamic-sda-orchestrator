@@ -1,0 +1,2 @@
+link_id,a_device_id,a_interface,a_ip,b_device_id,b_interface,b_ip,prefix,mtu,bfd_interval_ms,bfd_multiplier
+border-cp-01--edge-01,border-cp-01,REPLACE_ME,REPLACE_ME,edge-01,REPLACE_ME,REPLACE_ME,REPLACE_ME/31,9100,100,3

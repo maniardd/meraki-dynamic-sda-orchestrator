@@ -1,0 +1,58 @@
+schema_version: "1.0"
+package:
+  name: SDA Fabric Production Automation
+  release_state: development
+  exchange_publishable: false
+
+targets:
+  - name: SDA Orchestrator - Planner
+    type: http_endpoint
+    role: planner
+    account_key_type: http_bearer_authentication
+  - name: SDA Orchestrator - Approver
+    type: http_endpoint
+    role: approver
+    account_key_type: http_bearer_authentication
+  - name: SDA Orchestrator - Operator
+    type: http_endpoint
+    role: operator
+    account_key_type: http_bearer_authentication
+  - name: SDA Orchestrator - Auditor
+    type: http_endpoint
+    role: auditor
+    account_key_type: http_bearer_authentication
+
+workflows:
+  - name: SDA Fabric - Plan, Approve, and Execute
+    kind: parent
+    production_ready: false
+    children:
+      - SDA Fabric - Validate and Plan
+      - SDA Fabric - Request Approval
+      - SDA Fabric - Start Dry Run
+      - SDA Fabric - Start Apply
+      - SDA Fabric - Export Evidence
+  - name: SDA Fabric - Validate and Plan
+    kind: child
+    target_role: planner
+  - name: SDA Fabric - Request Approval
+    kind: child
+    target_role: approver
+  - name: SDA Fabric - Start Dry Run
+    kind: child
+    target_role: operator
+  - name: SDA Fabric - Start Apply
+    kind: child
+    target_role: operator
+    enabled: false
+  - name: SDA Fabric - Export Evidence
+    kind: child
+    target_role: auditor
+
+api_operations:
+  - {method: POST, path: "/v1/workflow-actions/plan", role: planner}
+  - {method: POST, path: "/v1/workflow-actions/approve", role: approver}
+  - {method: POST, path: "/v1/workflow-actions/run", role: operator}
+  - {method: POST, path: "/v1/workflow-actions/process-dry-run", role: operator}
+  - {method: POST, path: "/v1/workflow-actions/status", role: operator}
+  - {method: POST, path: "/v1/workflow-actions/evidence", role: auditor}

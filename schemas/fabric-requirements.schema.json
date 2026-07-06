@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/sda/schemas/fabric-requirements-1.0.json",
+  "title": "Dynamic LISP VXLAN Fabric Requirements",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "allocation_domain",
+    "metadata",
+    "fabric",
+    "devices",
+    "links",
+    "virtual_networks"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "allocation_domain": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "environment", "organization", "region"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "environment": {"enum": ["lab", "staging", "production"]},
+        "organization": {"type": "string", "minLength": 1, "maxLength": 128},
+        "region": {"type": "string", "minLength": 1, "maxLength": 64},
+        "change_reference": {"type": "string", "maxLength": 128}
+      }
+    },
+    "fabric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "mtu", "control_plane_mode", "lisp_auth_key_ref"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "mtu": {"type": "integer", "minimum": 1550, "maximum": 9216},
+        "control_plane_mode": {"enum": ["classic_lisp", "lisp_bgp_transit", "lisp_pubsub"]},
+        "isis_process": {"type": "string", "minLength": 1, "maxLength": 64},
+        "isis_area": {"type": "string", "pattern": "^49\\.[0-9]{4}$"},
+        "lisp_site_name": {"type": "string", "minLength": 1, "maxLength": 64},
+        "lisp_auth_key_ref": {"type": "string", "pattern": "^secret://"},
+        "locator_set": {"type": "string", "minLength": 1, "maxLength": 64}
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2048,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "site", "platform", "software_version", "management_ip", "roles", "credential_ref"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "hostname": {"type": "string", "minLength": 1, "maxLength": 63},
+          "site": {"type": "string", "minLength": 1, "maxLength": 64},
+          "platform": {"type": "string", "minLength": 1, "maxLength": 64},
+          "software_version": {"type": "string", "minLength": 1, "maxLength": 64},
+          "management_ip": {"type": "string", "format": "ipv4"},
+          "dashboard_management_ip": {"type": "string", "format": "ipv4"},
+          "roles": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"enum": ["border", "control_plane", "fabric_edge", "fusion", "underlay"]}
+          },
+          "credential_ref": {"type": "string", "pattern": "^secret://"}
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "endpoints"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "pim_sparse_mode": {"type": "boolean"},
+          "bfd": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["enabled"],
+            "properties": {
+              "enabled": {"type": "boolean"},
+              "interval_ms": {"type": "integer", "minimum": 50, "maximum": 1000},
+              "min_rx_ms": {"type": "integer", "minimum": 50, "maximum": 1000},
+              "multiplier": {"type": "integer", "minimum": 3, "maximum": 50}
+            }
+          },
+          "endpoints": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["device_id", "interface"],
+              "properties": {
+                "device_id": {"type": "string", "minLength": 1, "maxLength": 64},
+                "interface": {"type": "string", "minLength": 1, "maxLength": 128}
+              }
+            }
+          }
+        }
+      }
+    },
+    "virtual_networks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "vrf", "sites"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 64},
+          "vrf": {"type": "string", "minLength": 1, "maxLength": 64},
+          "sites": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2048,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["site", "users", "dhcp_helpers"],
+              "properties": {
+                "site": {"type": "string", "minLength": 1, "maxLength": 64},
+                "users": {"type": "integer", "minimum": 1, "maximum": 16777214},
+                "headroom_percent": {"type": "integer", "minimum": 0, "maximum": 500},
+                "dhcp_helpers": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "uniqueItems": true,
+                  "items": {"type": "string", "format": "ipv4"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "border_handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "mode"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "mode": {"enum": ["bgp", "isolated"]},
+        "remote_as": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "peers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["device_id", "vrf"],
+            "properties": {
+              "device_id": {"type": "string", "minLength": 1},
+              "vrf": {"type": "string", "minLength": 1},
+              "interface": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    }
+  }
+}
