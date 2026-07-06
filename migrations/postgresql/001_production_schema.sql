@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS network_allocations (
     EXCLUDE USING gist (
         allocation_domain WITH =,
         resource_pool_id WITH =,
-        prefix WITH &&
+        prefix inet_ops WITH &&
     ) WHERE (state IN ('reserved','committed','quarantined'))
 );
 

@@ -13,7 +13,7 @@ class PostgreSqlMigrationContractTests(unittest.TestCase):
         rendered = MIGRATION.read_text(encoding="utf-8").lower()
         self.assertIn("create extension if not exists btree_gist", rendered)
         self.assertIn("exclude using gist", rendered)
-        self.assertIn("prefix with &&", rendered)
+        self.assertIn("prefix inet_ops with &&", rendered)
         self.assertIn("allocation_domain with =", rendered)
         self.assertIn("resource_pool_id with =", rendered)
 
