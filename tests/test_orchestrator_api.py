@@ -19,6 +19,7 @@ class OrchestratorApiTests(unittest.TestCase):
             {
                 "TESTING": True,
                 "ORCHESTRATOR_API_TOKEN": "test-token",
+                "ORCHESTRATOR_DATABASE_PATH": ":memory:",
             }
         )
         self.client = app.test_client()
@@ -32,9 +33,44 @@ class OrchestratorApiTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertFalse(response.get_json()["execution_enabled"])
 
+    def test_readiness_proves_auth_guardrails_database_and_audit(self):
+        response = self.client.get("/ready")
+        self.assertEqual(200, response.status_code, response.get_json())
+        body = response.get_json()
+        self.assertEqual("ready", body["status"])
+        self.assertTrue(body["checks"]["authentication"])
+        self.assertTrue(body["checks"]["guardrails"])
+        self.assertTrue(body["checks"]["database"])
+        self.assertTrue(body["checks"]["audit_chain"])
+        self.assertEqual("sqlite", body["checks"]["backend"])
+
+    def test_readiness_fails_closed_without_authentication_configuration(self):
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_API_TOKEN": "",
+                "ORCHESTRATOR_TOKEN_IDENTITIES": {},
+                "ORCHESTRATOR_DATABASE_PATH": ":memory:",
+            }
+        )
+        response = app.test_client().get("/ready")
+        self.assertEqual(503, response.status_code)
+        self.assertFalse(response.get_json()["checks"]["authentication"])
+
     def test_v1_requires_authentication(self):
         response = self.client.post("/v1/intents/validate", json=self.intent)
         self.assertEqual(401, response.status_code)
+        self.assertEqual("no-store", response.headers["Cache-Control"])
+        self.assertEqual("nosniff", response.headers["X-Content-Type-Options"])
+        self.assertTrue(response.headers["X-Request-ID"].startswith("req_"))
+
+    def test_valid_caller_request_id_is_preserved(self):
+        response = self.client.post(
+            "/v1/intents/validate",
+            json=self.intent,
+            headers={**self.headers, "X-Request-ID": "meraki-workflow-0001"},
+        )
+        self.assertEqual("meraki-workflow-0001", response.headers["X-Request-ID"])
 
     def test_valid_intent_returns_success(self):
         response = self.client.post(

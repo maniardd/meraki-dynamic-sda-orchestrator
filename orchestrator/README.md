@@ -18,8 +18,8 @@ Current capabilities:
 - Simulate the complete approved dry-run path without contacting devices.
 - Execute a bounded transactional worker contract with exact pre/post gates,
   checkpoints, and rollback in isolated tests.
-- Keep live execution disabled until the production secret manager, durable
-  queue, and hardware rollback acceptance tests pass.
+- Keep live execution disabled until the selected production secret manager
+  and hardware rollback acceptance tests pass.
 
 Device address semantics:
 
@@ -71,6 +71,12 @@ Health:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8080/health
+```
+
+Readiness (authentication, guardrails, database, and audit chain):
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/ready
 ```
 
 Validation:
@@ -139,8 +145,8 @@ mapping in the runtime environment. Do not commit token values. A legacy single
 ## Next Engineering Milestone
 
 1. Freeze the discovered lab roles, links, IOS XE baselines, and BGP handoffs.
-2. Add PostgreSQL and a durable worker queue for the production runtime.
-3. Connect an enterprise secret resolver to the bounded device adapter.
+2. Validate the PostgreSQL runtime and advisory locks on the target host.
+3. Configure the selected Vault-compatible secret service for the bounded worker.
 4. Build and import the target-backed Meraki workflow from a known-good HTTP
    Request activity export.
 5. Run hardware precheck, checkpoint, failure-injection, and rollback acceptance

@@ -69,6 +69,16 @@ def sha256_json(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def decode_json(value: Any) -> Any:
+    """Decode SQLite JSON text while accepting native PostgreSQL JSONB values."""
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def database_timestamp(value: Any) -> Any:
+    """Canonicalize database timestamps used by the signed audit chain."""
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS intents (
     intent_id TEXT PRIMARY KEY,
@@ -116,6 +126,8 @@ CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     plan_id TEXT NOT NULL,
     plan_hash TEXT NOT NULL,
+    artifact_hash TEXT NOT NULL,
+    intent_version TEXT NOT NULL,
     fabric_id TEXT NOT NULL,
     idempotency_key_hash TEXT NOT NULL UNIQUE,
     mode TEXT NOT NULL CHECK(mode IN ('dry_run', 'apply')),
@@ -221,6 +233,8 @@ CREATE INDEX IF NOT EXISTS scalar_allocations_active_idx
 
 
 class StateStore:
+    backend_name = "sqlite"
+
     def __init__(self, database_path: str):
         self.database_path = database_path
         if database_path != ":memory:":
@@ -269,6 +283,8 @@ class StateStore:
             self._ensure_column(connection, "plans", "reservation_id", "TEXT")
             self._ensure_column(connection, "approvals", "artifact_hash", "TEXT NOT NULL DEFAULT ''")
             self._ensure_column(connection, "approvals", "intent_version", "TEXT NOT NULL DEFAULT '1.0'")
+            self._ensure_column(connection, "runs", "artifact_hash", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(connection, "runs", "intent_version", "TEXT NOT NULL DEFAULT '1.0'")
             connection.commit()
 
     @staticmethod
@@ -287,8 +303,21 @@ class StateStore:
     @staticmethod
     def _json_record(row: sqlite3.Row, field: str = "document_json") -> Dict[str, Any]:
         result = dict(row)
-        result[field[:-5] if field.endswith("_json") else field] = json.loads(result.pop(field))
+        result[field[:-5] if field.endswith("_json") else field] = decode_json(result.pop(field))
         return result
+
+    def _lock_allocation_transaction(
+        self, connection: sqlite3.Connection, allocation_domain: str
+    ) -> None:
+        """Backend hook for a domain-scoped transactional allocation lock."""
+
+    def _lock_fabric_transaction(
+        self, connection: sqlite3.Connection, fabric_id: str
+    ) -> None:
+        """Backend hook for a fabric-scoped transactional execution lock."""
+
+    def _lock_audit_transaction(self, connection: sqlite3.Connection) -> None:
+        """Backend hook that serializes the global tamper-evident audit chain."""
 
     def _append_audit(
         self,
@@ -299,6 +328,7 @@ class StateStore:
         actor: str,
         payload: Mapping[str, Any],
     ) -> Dict[str, Any]:
+        self._lock_audit_transaction(connection)
         previous = connection.execute(
             "SELECT event_hash FROM audit_events ORDER BY sequence DESC LIMIT 1"
         ).fetchone()
@@ -401,6 +431,9 @@ class StateStore:
         requirements_hash = sha256_json(requirements)
         policy_hash = sha256_json(policy)
         with self.transaction() as connection:
+            self._lock_allocation_transaction(
+                connection, str(requirements.get("allocation_domain", ""))
+            )
             existing = connection.execute(
                 "SELECT * FROM design_reservations WHERE idempotency_key_hash = ?",
                 (key_hash,),
@@ -513,7 +546,7 @@ class StateStore:
         self, connection: sqlite3.Connection, row: sqlite3.Row
     ) -> Dict[str, Any]:
         result = dict(row)
-        result["intent"] = json.loads(result.pop("intent_json"))
+        result["intent"] = decode_json(result.pop("intent_json"))
         result.pop("idempotency_key_hash", None)
         result["network_allocations"] = [
             dict(item)
@@ -632,7 +665,7 @@ class StateStore:
                 ).fetchone()
                 if not reservation:
                     raise NotFoundError("Design reservation not found")
-                if sha256_json(json.loads(str(reservation["intent_json"]))) != str(
+                if sha256_json(decode_json(reservation["intent_json"])) != str(
                     intent["intent_hash"]
                 ):
                     raise ConflictError("Reservation is not bound to the stored intent")
@@ -842,14 +875,16 @@ class StateStore:
             status = "dry_run_queued" if mode == "dry_run" else "apply_queued"
             connection.execute(
                 """INSERT INTO runs
-                   (run_id, plan_id, plan_hash, fabric_id, idempotency_key_hash, mode,
-                    status, requested_by, maintenance_start, maintenance_end,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (run_id, plan_id, plan_hash, artifact_hash, intent_version,
+                    fabric_id, idempotency_key_hash, mode, status, requested_by,
+                    maintenance_start, maintenance_end, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     run_id,
                     plan_id,
                     str(plan["plan_hash"]),
+                    str(plan["artifact_hash"]),
+                    str(plan["intent_version"]),
                     str(plan["fabric_id"]),
                     idempotency_key_hash,
                     mode,
@@ -863,6 +898,7 @@ class StateStore:
             )
 
             if mode == "apply":
+                self._lock_fabric_transaction(connection, str(plan["fabric_id"]))
                 lock_expiry = utc_now().timestamp() + lock_ttl_seconds
                 lock_expiry_dt = datetime.fromtimestamp(lock_expiry, tz=timezone.utc)
                 current_lock = connection.execute(
@@ -999,7 +1035,7 @@ class StateStore:
             ).fetchone()
             if existing:
                 item = dict(existing)
-                item["payload"] = json.loads(item.pop("payload_json"))
+                item["payload"] = decode_json(item.pop("payload_json"))
                 return item
             created_at = isoformat()
             connection.execute(
@@ -1054,7 +1090,7 @@ class StateStore:
         result = []
         for row in rows:
             item = dict(row)
-            item["payload"] = json.loads(item.pop("payload_json"))
+            item["payload"] = decode_json(item.pop("payload_json"))
             result.append(item)
         return result
 
@@ -1068,7 +1104,7 @@ class StateStore:
         events = []
         for row in rows:
             item = dict(row)
-            item["payload"] = json.loads(item.pop("payload_json"))
+            item["payload"] = decode_json(item.pop("payload_json"))
             events.append(item)
         return events
 
@@ -1087,11 +1123,28 @@ class StateStore:
                 "aggregate_id": row["aggregate_id"],
                 "event_type": row["event_type"],
                 "actor": row["actor"],
-                "payload": json.loads(row["payload_json"]),
+                "payload": decode_json(row["payload_json"]),
                 "previous_hash": row["previous_hash"],
-                "created_at": row["created_at"],
+                "created_at": database_timestamp(row["created_at"]),
             }
             if sha256_json(body) != row["event_hash"]:
                 return False
             previous_hash = row["event_hash"]
         return True
+
+    def readiness(self) -> Dict[str, Any]:
+        with self.connection() as connection:
+            row = connection.execute("SELECT 1 AS ready").fetchone()
+        return {
+            "backend": self.backend_name,
+            "database": bool(row and int(row["ready"]) == 1),
+            "audit_chain": self.verify_audit_chain(),
+        }
+
+
+def create_state_store(database_location: str) -> StateStore:
+    if str(database_location).startswith(("postgresql://", "postgres://")):
+        from .postgres_store import PostgresStateStore
+
+        return PostgresStateStore(str(database_location))
+    return StateStore(str(database_location))

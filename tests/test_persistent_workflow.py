@@ -190,6 +190,9 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual(201, first.status_code, first.get_json())
         self.assertEqual(200, second.status_code, second.get_json())
         self.assertEqual(first.get_json()["run_id"], second.get_json()["run_id"])
+        self.assertEqual(plan["plan_hash"], first.get_json()["plan_hash"])
+        self.assertEqual(plan["artifact_hash"], first.get_json()["artifact_hash"])
+        self.assertEqual(plan["intent_version"], first.get_json()["intent_version"])
         self.assertNotIn(payload["idempotency_key"], str(first.get_json()))
 
         audit = self.client.get(

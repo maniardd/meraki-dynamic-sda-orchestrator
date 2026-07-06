@@ -1,0 +1,23 @@
+[Unit]
+Description=Meraki Dynamic SDA Orchestrator Apply Worker %i
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/sda-orchestrator/current
+EnvironmentFile=%h/.config/sda-orchestrator/worker.env
+ExecStart=%h/sda-orchestrator/current/.venv/bin/python -m orchestrator.worker_runtime --run-id %i
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=%h/.local/share/sda-orchestrator
+
+[Install]
+WantedBy=default.target

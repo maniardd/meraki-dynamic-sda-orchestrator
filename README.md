@@ -42,6 +42,7 @@ Implemented foundation:
   quarantined states
 - Brownfield exclusion, pool-exhaustion, retry, and concurrent-allocation tests
 - PostgreSQL production migration with CIDR GiST overlap exclusion
+- PostgreSQL runtime store with domain/fabric/audit advisory locks
 - Separate execution and Dashboard inventory address planes
 - Immutable deterministic plans and rendered IOS XE command artifacts
 - Plan-, artifact-, and intent-version-bound approvals with role separation
@@ -49,16 +50,18 @@ Implemented foundation:
 - Bounded Netmiko adapter contract with checkpoints and rollback
 - Exact operational parsers and topology-derived verification gates
 - Fixed-path APIs designed for Meraki HTTP Request activities
+- Authenticated readiness checks and hardened Gunicorn/systemd deployment assets
+- Vault KV and strict host-file secret-provider boundaries used only by the
+  separately enabled apply worker
 - Sanitized lab and redundant production examples
 
-Live apply remains disabled. SQLite is the local test/lab store; the PostgreSQL
-schema is supplied, while the production PostgreSQL runtime adapter, secret
-provider, durable queue, Meraki import package, and hardware acceptance suite
-remain release-candidate work.
+Live apply remains disabled. SQLite remains available for local tests, while
+the production runtime uses PostgreSQL. Meraki import packaging and hardware
+failure/rollback acceptance remain release-candidate work.
 
 ## Quick start
 
-Use Python 3.9 or later.
+Use Python 3.10 or later.
 
 ```powershell
 python -m pip install -r requirements.txt

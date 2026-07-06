@@ -1,0 +1,29 @@
+[Unit]
+Description=Meraki Dynamic SDA Orchestrator API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+WorkingDirectory=%h/sda-orchestrator/current
+EnvironmentFile=%h/.config/sda-orchestrator/api.env
+ExecStart=%h/sda-orchestrator/current/.venv/bin/gunicorn --config deploy/gunicorn.conf.py orchestrator.api:app
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=%h/.local/share/sda-orchestrator
+
+[Install]
+WantedBy=default.target
