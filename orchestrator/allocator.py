@@ -97,6 +97,50 @@ def _active_scalars(
     }
 
 
+def _policy_reserved_networks(pool_id: str, pool: Mapping[str, Any]) -> List[ipaddress.IPv4Network]:
+    """Return policy-reserved space after proving it belongs to the pool."""
+    supernet = _network(str(pool["cidr"]))
+    reserved = []
+    for raw_prefix in pool.get("reserved", []):
+        prefix = _network(str(raw_prefix))
+        if not prefix.subnet_of(supernet):
+            raise AllocationError(
+                "Reserved prefix {} is outside guardrail pool {} ({})".format(
+                    prefix, pool_id, supernet
+                )
+            )
+        reserved.append(prefix)
+    return reserved
+
+
+def _policy_reserved_scalars(
+    resource_type: str, range_policy: Mapping[str, Any]
+) -> set:
+    """Expand explicitly reserved scalar values and inclusive ranges."""
+    minimum = int(range_policy.get("min", range_policy.get("base", 0)))
+    maximum = int(range_policy.get("max", minimum))
+    reserved = {int(value) for value in range_policy.get("reserved", [])}
+    for bounds in range_policy.get("reserved_ranges", []):
+        if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            raise AllocationError(
+                "Reserved range for {} must contain [start, end]".format(resource_type)
+            )
+        start, end = int(bounds[0]), int(bounds[1])
+        if end < start:
+            raise AllocationError(
+                "Reserved range for {} has end before start".format(resource_type)
+            )
+        reserved.update(range(start, end + 1))
+    outside = sorted(value for value in reserved if value < minimum or value > maximum)
+    if outside:
+        raise AllocationError(
+            "Reserved {} value {} is outside {}-{}".format(
+                resource_type, outside[0], minimum, maximum
+            )
+        )
+    return {str(value) for value in reserved}
+
+
 def _first_prefix(
     supernet: ipaddress.IPv4Network,
     prefix_len: int,
@@ -204,11 +248,22 @@ def derive_fabric_intent(
 
     network_taken: Dict[str, List[ipaddress.IPv4Network]] = {
         pool_id: _active_networks(network_ledger, domain, pool_id)
-        for pool_id in pools
+        + _policy_reserved_networks(pool_id, pool)
+        for pool_id, pool in pools.items()
+    }
+    ranges = policy.get("ranges", {})
+    scalar_range_names = {
+        "vlan_id": "vlan_id",
+        "l2_instance_id": "l2_instance_id",
+        "l3_instance_id": "l3_instance_id",
+        "asn": "bgp_asn_local",
     }
     scalar_taken: Dict[str, set] = {
         kind: _active_scalars(scalar_ledger, domain, kind)
-        for kind in ("vlan_id", "l2_instance_id", "l3_instance_id", "asn")
+        | _policy_reserved_scalars(kind, ranges[range_name])
+        if isinstance(ranges.get(range_name), Mapping)
+        else _active_scalars(scalar_ledger, domain, kind)
+        for kind, range_name in scalar_range_names.items()
     }
     net_reservations: List[Dict[str, Any]] = []
     scalar_reservations: List[Dict[str, Any]] = []
@@ -226,8 +281,6 @@ def derive_fabric_intent(
             }
         )
         return candidate
-
-    ranges = policy.get("ranges", {})
 
     def reserve_scalar(kind: str, minimum: int, maximum: int) -> int:
         candidate = _first_scalar(minimum, maximum, scalar_taken[kind], kind)

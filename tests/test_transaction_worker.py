@@ -10,7 +10,7 @@ import yaml
 from orchestrator.intent import load_intent
 from orchestrator.planner import create_plan
 from orchestrator.renderer import render_configuration
-from orchestrator.store import StateStore
+from orchestrator.store import ConflictError, StateStore, isoformat
 from orchestrator.worker import TransactionWorker
 
 
@@ -21,10 +21,17 @@ GUARDRAILS = ROOT / "policy" / "guardrails.yaml"
 
 
 class FakeAdapter:
-    def __init__(self, device, fail_apply=False, fail_rollback=False):
+    def __init__(
+        self,
+        device,
+        fail_apply=False,
+        fail_rollback=False,
+        unverified_rollback=False,
+    ):
         self.device = device
         self.fail_apply = fail_apply
         self.fail_rollback = fail_rollback
+        self.unverified_rollback = unverified_rollback
         self.connected = False
         self.rollback_calls = []
 
@@ -84,7 +91,12 @@ peer-b L2 Twe1/0/2 10.255.0.3 UP 24 0B
         if self.fail_rollback:
             raise RuntimeError("simulated rollback failure")
         self.rollback_calls.append(checkpoint)
-        return {"checkpoint": checkpoint, "output_hash": hashlib.sha256(b"rollback").hexdigest()}
+        return {
+            "checkpoint": checkpoint,
+            "output_hash": hashlib.sha256(b"rollback").hexdigest(),
+            "verification_output_hash": hashlib.sha256(b"diff").hexdigest(),
+            "verified": not self.unverified_rollback,
+        }
 
 
 class TransactionWorkerTests(unittest.TestCase):
@@ -113,7 +125,7 @@ class TransactionWorkerTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def create_apply_run(self, suffix):
+    def create_apply_run(self, suffix, lock_ttl_seconds=1800):
         now = datetime.now(timezone.utc)
         run, _ = self.store.create_run(
             plan_id=self.plan_record["plan_id"],
@@ -123,8 +135,47 @@ class TransactionWorkerTests(unittest.TestCase):
             execution_enabled=True,
             maintenance_start=(now - timedelta(minutes=1)).isoformat(),
             maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            lock_ttl_seconds=lock_ttl_seconds,
         )
         return run
+
+    def test_expired_lock_never_allows_automatic_takeover(self):
+        first = self.create_apply_run("lease-owner", lock_ttl_seconds=1)
+        with self.store.transaction() as connection:
+            connection.execute(
+                "UPDATE fabric_locks SET expires_at = ? WHERE run_id = ?",
+                (
+                    isoformat(datetime.now(timezone.utc) - timedelta(hours=1)),
+                    first["run_id"],
+                ),
+            )
+
+        now = datetime.now(timezone.utc)
+        with self.assertRaisesRegex(ConflictError, "locked"):
+            self.store.create_run(
+                plan_id=self.plan_record["plan_id"],
+                mode="apply",
+                idempotency_key="transaction-worker-second-owner",
+                requested_by="second-operator",
+                execution_enabled=True,
+                maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+                maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+                lock_ttl_seconds=1,
+            )
+
+        self.store.transition_run(first["run_id"], "apply_failed", "worker")
+        replacement, created = self.store.create_run(
+            plan_id=self.plan_record["plan_id"],
+            mode="apply",
+            idempotency_key="transaction-worker-after-terminal-release",
+            requested_by="second-operator",
+            execution_enabled=True,
+            maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+            maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            lock_ttl_seconds=1,
+        )
+        self.assertTrue(created)
+        self.assertEqual("apply_queued", replacement["status"])
 
     def use_dynamic_plan(self, suffix):
         requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
@@ -229,6 +280,25 @@ class TransactionWorkerTests(unittest.TestCase):
             self.store, factory, lambda _ref: "resolved-test-secret"
         ).process_apply(run["run_id"], self.intent, self.plan_record["document"], self.artifact)
         self.assertFalse(result["rolled_back"], result)
+        stored = self.store.get_design_reservation(reservation["reservation_id"])
+        self.assertEqual("quarantined", stored["state"])
+
+    def test_false_rollback_verification_quarantines_allocations(self):
+        reservation = self.use_dynamic_plan("false-verification")
+
+        def factory(device):
+            return FakeAdapter(
+                device,
+                fail_apply=(device["id"] == "border-cp-01"),
+                unverified_rollback=True,
+            )
+
+        run = self.create_apply_run("dynamic-false-verification")
+        result = TransactionWorker(
+            self.store, factory, lambda _ref: "resolved-test-secret"
+        ).process_apply(run["run_id"], self.intent, self.plan_record["document"], self.artifact)
+        self.assertFalse(result["rolled_back"], result)
+        self.assertEqual("rollback_failed", result["run"]["status"])
         stored = self.store.get_design_reservation(reservation["reservation_id"])
         self.assertEqual("quarantined", stored["state"])
 

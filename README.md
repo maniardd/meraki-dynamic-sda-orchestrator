@@ -42,6 +42,7 @@ Implemented foundation:
   quarantined states
 - Brownfield exclusion, pool-exhaustion, retry, and concurrent-allocation tests
 - PostgreSQL production migration with CIDR GiST overlap exclusion
+- PostgreSQL runtime store with domain/fabric/audit advisory locks
 - Separate execution and Dashboard inventory address planes
 - Immutable deterministic plans and rendered IOS XE command artifacts
 - Plan-, artifact-, and intent-version-bound approvals with role separation
@@ -49,16 +50,18 @@ Implemented foundation:
 - Bounded Netmiko adapter contract with checkpoints and rollback
 - Exact operational parsers and topology-derived verification gates
 - Fixed-path APIs designed for Meraki HTTP Request activities
+- Authenticated readiness checks and hardened Gunicorn/systemd deployment assets
+- Vault KV and strict host-file secret-provider boundaries used only by the
+  separately enabled apply worker
 - Sanitized lab and redundant production examples
 
-Live apply remains disabled. SQLite is the local test/lab store; the PostgreSQL
-schema is supplied, while the production PostgreSQL runtime adapter, secret
-provider, durable queue, Meraki import package, and hardware acceptance suite
-remain release-candidate work.
+Live apply remains disabled. SQLite remains available for local tests, while
+the production runtime uses PostgreSQL. Meraki import packaging and hardware
+failure/rollback acceptance remain release-candidate work.
 
 ## Quick start
 
-Use Python 3.9 or later.
+Use Python 3.10 or later.
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -67,15 +70,19 @@ python tools\validate_intent.py examples\fabric-intent.lab.yaml
 python -m unittest discover -s tests -v
 ```
 
-Start the development API only with a local development token:
+Start the development API with a private hashed-token identity file. The helper
+returns the new bearer value once; only its SHA-256 digest is stored:
 
 ```powershell
-$env:ORCHESTRATOR_API_TOKEN = '<local-development-token>'
+$authFile = Join-Path $env:TEMP 'sda-token-identities.json'
+$token = python tools\create_api_identity.py --output $authFile --actor local-planner --roles viewer,planner
+$env:ORCHESTRATOR_TOKEN_IDENTITIES_FILE = $authFile
 python -m orchestrator.api
 ```
 
-The API listens on `127.0.0.1:8080` by default. Device execution is disabled
-unless explicitly enabled in a reviewed worker runtime.
+The API listens on `127.0.0.1:8080` by default. `/ready` and every `/v1/`
+endpoint require `Authorization: Bearer <token>`. Device execution is disabled
+unless explicitly enabled in a separately reviewed worker runtime.
 
 ## Repository safety
 

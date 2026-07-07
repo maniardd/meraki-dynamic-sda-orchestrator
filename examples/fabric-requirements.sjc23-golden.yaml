@@ -1,0 +1,67 @@
+schema_version: "1.0"
+allocation_domain: sjc23-golden
+
+metadata:
+  name: SJC23 hardware golden fabric
+  environment: lab
+  organization: SANITIZED-LAB-ORG
+  region: AMER-WEST
+  change_reference: GOLDEN-SJC23
+
+fabric:
+  id: fab-sjc23-001
+  name: SJC23-FABRIC
+  mtu: 9100
+  control_plane_mode: classic_lisp
+  lisp_auth_key_ref: secret://sda-lab/lisp/site-sjc23
+  lisp_site_name: site_sjc23
+  isis_process: SDA-ISIS
+  isis_area: "49.0001"
+
+devices:
+  - id: border-cp-01
+    hostname: SJC23-BORDER-CP-01
+    site: SJC23
+    platform: C9500-48Y4C
+    software_version: 17.18.3
+    management_ip: 192.0.2.10
+    dashboard_management_ip: 198.51.100.10
+    roles: [border, control_plane]
+    credential_ref: secret://sda-lab/devices/border-cp-01
+  - id: edge-01
+    hostname: SJC23-EDGE-01
+    site: SJC23
+    platform: C9300-24P
+    software_version: 17.18.3
+    management_ip: 192.0.2.20
+    dashboard_management_ip: 198.51.100.20
+    roles: [fabric_edge]
+    credential_ref: secret://sda-lab/devices/edge-01
+
+links:
+  - id: border-cp-01--edge-01
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/2}
+      - {device_id: edge-01, interface: GigabitEthernet1/0/2}
+    pim_sparse_mode: true
+    bfd: {enabled: true, interval_ms: 100, min_rx_ms: 100, multiplier: 3}
+
+virtual_networks:
+  - name: Corporate
+    vrf: CORP_VN
+    sites:
+      - site: SJC23
+        users: 150
+        headroom_percent: 25
+        dhcp_helpers: [203.0.113.10, 203.0.113.11]
+  - name: Guest
+    vrf: GUEST_VN
+    sites:
+      - site: SJC23
+        users: 150
+        headroom_percent: 25
+        dhcp_helpers: [203.0.113.10, 203.0.113.11]
+
+border_handoff:
+  enabled: false
+  mode: isolated

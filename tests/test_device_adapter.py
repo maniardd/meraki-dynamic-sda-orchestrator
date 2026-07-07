@@ -12,11 +12,16 @@ from orchestrator.adapters import (
 class FakeConnection:
     def __init__(self):
         self.config_output = "configuration accepted"
+        self.diff_output = "!Contextual Config Diffs:\n!No changes were found"
+        self.commands = []
         self.disconnected = False
 
     def send_command(self, command, **_kwargs):
+        self.commands.append(command)
         if command.startswith("dir flash:"):
             return "123 -rw- 99 sda-run_123.cfg"
+        if command.startswith("show archive config differences"):
+            return self.diff_output
         return "show output"
 
     def send_command_timing(self, command, **_kwargs):
@@ -70,6 +75,20 @@ class DeviceAdapterTests(unittest.TestCase):
     def test_checkpoint_path_is_constrained(self):
         with self.assertRaises(ConfigurationRejectedError):
             self.adapter.rollback("flash:other.cfg")
+
+    def test_rollback_is_verified_against_checkpoint(self):
+        result = self.adapter.rollback("flash:sda-run_123.cfg")
+        self.assertTrue(result["verified"])
+        self.assertIn("verification_output_hash", result)
+        self.assertIn(
+            "show archive config differences flash:sda-run_123.cfg system:running-config",
+            self.connection.commands,
+        )
+
+    def test_rollback_with_remaining_diff_is_rejected(self):
+        self.connection.diff_output = "!Contextual Config Diffs:\n+router lisp"
+        with self.assertRaisesRegex(AdapterError, "configuration differences"):
+            self.adapter.rollback("flash:sda-run_123.cfg")
 
 
 if __name__ == "__main__":
