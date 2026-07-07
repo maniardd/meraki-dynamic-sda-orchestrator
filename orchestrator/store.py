@@ -76,7 +76,7 @@ def decode_json(value: Any) -> Any:
 
 def database_timestamp(value: Any) -> Any:
     """Canonicalize database timestamps used by the signed audit chain."""
-    return value.isoformat() if isinstance(value, datetime) else value
+    return isoformat(value) if isinstance(value, datetime) else value
 
 
 SCHEMA = """
@@ -904,12 +904,12 @@ class StateStore:
                 current_lock = connection.execute(
                     "SELECT * FROM fabric_locks WHERE fabric_id = ?", (str(plan["fabric_id"]),)
                 ).fetchone()
-                if current_lock and parse_timestamp(str(current_lock["expires_at"])) > utc_now():
-                    raise ConflictError("Fabric is locked by another active run")
+                # A lock's expiry is an operational staleness signal, not permission
+                # for automatic takeover.  The owning run releases the lock only
+                # when it reaches a terminal state; a crashed run therefore fails
+                # closed until an explicit recovery workflow reconciles it.
                 if current_lock:
-                    connection.execute(
-                        "DELETE FROM fabric_locks WHERE fabric_id = ?", (str(plan["fabric_id"]),)
-                    )
+                    raise ConflictError("Fabric is locked by another active run")
                 connection.execute(
                     """INSERT INTO fabric_locks
                        (fabric_id, run_id, acquired_at, expires_at)

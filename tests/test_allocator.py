@@ -119,6 +119,41 @@ class DynamicAllocatorTests(unittest.TestCase):
         self.assertEqual("10.0.0.0/22", pools["Corporate"]["prefix"])
         self.assertEqual("10.0.4.0/23", pools["Guest"]["prefix"])
 
+    def test_policy_reserved_prefixes_and_scalar_ranges_are_never_allocated(self):
+        policy = copy.deepcopy(self.policy)
+        policy["supernets"]["loopbacks"]["reserved"] = ["10.253.0.0/32"]
+        policy["ranges"]["vlan_id"]["reserved_ranges"] = [[100, 109]]
+        intent = self.derive(policy=policy)["intent"]
+        self.assertEqual("10.253.0.1", intent["devices"][0]["loopback0_ip"])
+        self.assertEqual([110, 111], [item["vlan_id"] for item in intent["endpoint_pools"]])
+
+    def test_policy_reserved_prefix_must_be_inside_its_pool(self):
+        policy = copy.deepcopy(self.policy)
+        policy["supernets"]["loopbacks"]["reserved"] = ["192.0.2.1/32"]
+        with self.assertRaisesRegex(AllocationError, "outside guardrail pool"):
+            self.derive(policy=policy)
+
+    def test_sjc23_golden_profile_regenerates_known_fabric_addressing(self):
+        requirements = yaml.safe_load(
+            (ROOT / "examples" / "fabric-requirements.sjc23-golden.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        policy = yaml.safe_load(
+            (ROOT / "policy" / "guardrails.sjc23-golden.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        intent = self.derive(requirements=requirements, policy=policy)["intent"]
+        devices = {item["id"]: item for item in intent["devices"]}
+        pools = {item["virtual_network"]: item for item in intent["endpoint_pools"]}
+        self.assertEqual("10.255.255.1", devices["border-cp-01"]["loopback0_ip"])
+        self.assertEqual("10.255.255.2", devices["edge-01"]["loopback0_ip"])
+        self.assertEqual("10.255.0.0/31", intent["links"][0]["subnet"])
+        self.assertEqual("10.30.100.0/24", pools["Corporate"]["prefix"])
+        self.assertEqual("10.30.200.0/24", pools["Guest"]["prefix"])
+        self.assertEqual([100, 200], [pools["Corporate"]["vlan_id"], pools["Guest"]["vlan_id"]])
+
     def test_pool_exhaustion_fails_without_partial_result(self):
         policy = copy.deepcopy(self.policy)
         policy["supernets"]["underlay_p2p"] = {"cidr": "192.0.2.0/31", "prefix_len": 31}

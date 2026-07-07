@@ -8,6 +8,8 @@ import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
+from urllib.parse import quote
 
 import yaml
 
@@ -40,6 +42,30 @@ class PostgreSqlIntegrationTests(unittest.TestCase):
         candidate["fabric"]["id"] = "fab-{}-{}".format(self.namespace, suffix)
         candidate["fabric"]["name"] = "FAB-{}-{}".format(self.namespace, suffix).upper()
         return candidate
+
+    def test_audit_chain_is_timezone_independent_at_zero_microseconds(self):
+        separator = "&" if "?" in POSTGRES_DSN else "?"
+        offset_dsn = "{}{}options={}".format(
+            POSTGRES_DSN,
+            separator,
+            quote("-c timezone=Asia/Kolkata", safe=""),
+        )
+        offset_store = PostgresStateStore(offset_dsn)
+        fixed_time = datetime(2026, 7, 7, 4, 30, 0, tzinfo=timezone.utc)
+        with mock.patch("orchestrator.store.utc_now", return_value=fixed_time):
+            offset_store.reserve_design(
+                self.requirements_for("timezone"),
+                self.policy,
+                "postgres-timezone-{}".format(self.namespace),
+                "postgres-timezone-planner",
+            )
+        with offset_store.connection() as connection:
+            row = connection.execute(
+                "SELECT created_at FROM audit_events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+        self.assertEqual(timedelta(hours=5, minutes=30), row["created_at"].utcoffset())
+        self.assertEqual(0, row["created_at"].microsecond)
+        self.assertTrue(offset_store.verify_audit_chain())
 
     def test_full_persistent_dry_run_and_audit_chain(self):
         requirements = self.requirements_for("lifecycle")

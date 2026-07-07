@@ -4,6 +4,9 @@ import copy
 import unittest
 from pathlib import Path
 
+import yaml
+
+from orchestrator.allocator import derive_fabric_intent
 from orchestrator.intent import load_intent
 from orchestrator.planner import PlanValidationError, create_plan
 from orchestrator.renderer import RenderError, render_configuration
@@ -12,6 +15,8 @@ from orchestrator.renderer import RenderError, render_configuration
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "fabric-intent.lab.yaml"
 PRODUCTION_EXAMPLE = ROOT / "examples" / "fabric-intent.production.yaml"
+SJC23_REQUIREMENTS = ROOT / "examples" / "fabric-requirements.sjc23-golden.yaml"
+SJC23_GUARDRAILS = ROOT / "policy" / "guardrails.sjc23-golden.yaml"
 
 
 class RendererTests(unittest.TestCase):
@@ -93,6 +98,46 @@ class RendererTests(unittest.TestCase):
         border = str(artifact["devices"]["border-cp-01"])
         self.assertIn("router bgp 65001", border)
         self.assertIn("neighbor 198.51.100.1 remote-as 65100", border)
+
+    def test_sjc23_golden_renderer_preserves_hardware_proven_cli(self):
+        requirements = yaml.safe_load(SJC23_REQUIREMENTS.read_text(encoding="utf-8"))
+        policy = yaml.safe_load(SJC23_GUARDRAILS.read_text(encoding="utf-8"))
+        intent = derive_fabric_intent(requirements, policy)["intent"]
+        artifact = render_configuration(intent, create_plan(intent))
+
+        def commands(device_id):
+            return [
+                command
+                for phase in artifact["devices"][device_id]["phases"]
+                for block in phase["blocks"]
+                for command in block["commands"]
+            ]
+
+        border = commands("border-cp-01")
+        edge = commands("edge-01")
+        for expected in (
+            "interface TwentyFiveGigE1/0/2",
+            " ip address 10.255.0.0 255.255.255.254",
+            " service ipv4",
+            "  map-server",
+            "  map-resolver",
+            "  proxy-etr",
+            "  proxy-itr 10.255.255.1",
+            "  no map-cache away-eids send-map-request",
+        ):
+            self.assertIn(expected, border)
+        for expected in (
+            "interface GigabitEthernet1/0/2",
+            " ip address 10.255.0.1 255.255.255.254",
+            "  itr map-resolver 10.255.255.1",
+            "  use-petr 10.255.255.1",
+            " instance-id 4099",
+            " instance-id 4100",
+        ):
+            self.assertIn(expected, edge)
+        self.assertTrue(
+            any(command.startswith("  etr map-server 10.255.255.1 key <secret:") for command in edge)
+        )
 
 
 if __name__ == "__main__":
