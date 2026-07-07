@@ -52,8 +52,14 @@
           "hierarchy_node_id": {"type": "string", "minLength": 1},
           "endpoint_count": {"type": "integer", "minimum": 1},
           "ap_count": {"type": "integer", "minimum": 0},
-          "site_local_services": {"type": "boolean"},
-          "high_availability": {"type": "boolean"},
+          "site_local_services": {
+            "type": "boolean",
+            "description": "Planning signal reserved for the shared-services and survivability topology phase."
+          },
+          "high_availability": {
+            "type": "boolean",
+            "description": "Planning signal reserved for per-site role and uplink redundancy enforcement."
+          },
           "profile": {
             "enum": ["fabric_in_a_box", "small_site", "medium_site", "large_site"]
           }
@@ -307,6 +313,22 @@
       },
       "then": {
         "required": ["deployment_model", "site_hierarchy", "fabric_sites"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "1.0"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {"required": ["deployment_model"]},
+            {"required": ["site_hierarchy"]},
+            {"required": ["fabric_sites"]},
+            {"required": ["fabric_zones"]}
+          ]
+        }
       }
     }
   ]

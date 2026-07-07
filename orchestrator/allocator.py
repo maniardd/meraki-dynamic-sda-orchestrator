@@ -25,6 +25,7 @@ class AllocationError(ValueError):
 
 
 REQUIREMENTS_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "fabric-requirements.schema.json"
+MAX_HIERARCHY_DEPTH = 16
 
 
 def validate_requirements_shape(requirements: Mapping[str, Any]) -> None:
@@ -248,7 +249,7 @@ def _derive_site_context(
     if len(global_nodes) != 1:
         raise AllocationError("Site hierarchy requires exactly one global node")
     allowed_children = {
-        "global": {"area"},
+        "global": {"area", "building"},
         "area": {"area", "building"},
         "building": {"floor"},
         "floor": set(),
@@ -272,24 +273,40 @@ def _derive_site_context(
             )
         parents[node_id] = parent_id
 
-    for node_id in node_by_id:
-        visited = set()
-        cursor = node_id
-        while cursor in parents:
-            if cursor in visited:
+    max_depth = int(policy.get("hierarchy", {}).get("max_depth", MAX_HIERARCHY_DEPTH))
+    if max_depth < 1 or max_depth > MAX_HIERARCHY_DEPTH:
+        raise AllocationError(
+            "Guardrail hierarchy.max_depth must be between 1 and {}".format(
+                MAX_HIERARCHY_DEPTH
+            )
+        )
+    depths: Dict[str, int] = {str(global_nodes[0]["id"]): 0}
+    for start in sorted(node_by_id):
+        trail: List[str] = []
+        visiting = set()
+        cursor = start
+        while cursor not in depths:
+            if cursor in visiting:
                 raise AllocationError("Site hierarchy contains a parent cycle")
-            visited.add(cursor)
+            visiting.add(cursor)
+            trail.append(cursor)
+            if cursor not in parents:
+                depths[cursor] = 0
+                break
             cursor = parents[cursor]
-
-    def hierarchy_depth(node_id: str) -> int:
-        depth = 0
-        cursor = node_id
-        while cursor in parents:
+        depth = depths[cursor]
+        for node_id in reversed(trail):
+            if node_id in depths:
+                depth = depths[node_id]
+                continue
             depth += 1
-            cursor = parents[cursor]
-        return depth
+            if depth > max_depth:
+                raise AllocationError(
+                    "Site hierarchy exceeds maximum depth {}".format(max_depth)
+                )
+            depths[node_id] = depth
 
-    nodes.sort(key=lambda item: (hierarchy_depth(str(item["id"])), str(item["id"])))
+    nodes.sort(key=lambda item: (depths[str(item["id"])], str(item["id"])))
 
     raw_profiles = policy.get("site_profiles", [])
     profile_order: List[str] = []
@@ -380,11 +397,13 @@ def _derive_site_context(
 
     def is_descendant(node_id: str, ancestor_id: str) -> bool:
         cursor = node_id
+        visited = set()
         while True:
             if cursor == ancestor_id:
                 return True
-            if cursor not in parents:
+            if cursor in visited or cursor not in parents:
                 return False
+            visited.add(cursor)
             cursor = parents[cursor]
 
     zones: List[Dict[str, Any]] = []

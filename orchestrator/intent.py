@@ -17,6 +17,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 ALLOWED_ENVIRONMENTS = {"lab", "staging", "production"}
 ALLOWED_UNDERLAY_PROTOCOLS = {"isis"}
+MAX_HIERARCHY_DEPTH = 16
 ALLOWED_ROLES = {
     "border",
     "control_plane",
@@ -307,6 +308,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     hierarchy_types: Dict[str, str] = {}
     fabric_site_ids: Dict[str, str] = {}
     fabric_site_nodes: Dict[str, str] = {}
+    fabric_site_node_ids: Dict[str, str] = {}
     if schema_version == "1.1":
         deployment_model = _required_string(root, "deployment_model", "$", issues)
         if deployment_model and deployment_model not in {"single_site", "distributed_campus"}:
@@ -340,7 +342,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         if global_count != 1:
             _add(issues, "hierarchy.global_count", "$.site_hierarchy", "Exactly one global node is required")
         allowed_hierarchy_children = {
-            "global": {"area"},
+            "global": {"area", "building"},
             "area": {"area", "building"},
             "building": {"floor"},
             "floor": set(),
@@ -362,20 +364,54 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     hierarchy_parent_paths.get(node_id, "$.site_hierarchy"),
                     "Invalid hierarchy parent/child type relationship",
                 )
-        for node_id in hierarchy_node_ids:
-            cursor = node_id
-            visited = set()
-            while cursor in hierarchy_parents:
-                if cursor in visited:
+        depths: Dict[str, int] = {
+            node_id: 0
+            for node_id, node_type in hierarchy_types.items()
+            if node_type == "global"
+        }
+        cycle_reported = False
+        for start in sorted(hierarchy_node_ids):
+            trail: List[str] = []
+            visiting = set()
+            cursor = start
+            invalid_path = False
+            while cursor not in depths:
+                if cursor in visiting:
+                    if not cycle_reported:
+                        _add(
+                            issues,
+                            "hierarchy.cycle",
+                            hierarchy_parent_paths.get(cursor, "$.site_hierarchy"),
+                            "Site hierarchy contains a parent cycle",
+                        )
+                        cycle_reported = True
+                    invalid_path = True
+                    break
+                if cursor not in hierarchy_node_ids:
+                    invalid_path = True
+                    break
+                visiting.add(cursor)
+                trail.append(cursor)
+                if cursor not in hierarchy_parents:
+                    depths[cursor] = 0
+                    break
+                cursor = hierarchy_parents[cursor]
+            if invalid_path:
+                continue
+            depth = depths[cursor]
+            for node_id in reversed(trail):
+                if node_id in depths:
+                    depth = depths[node_id]
+                    continue
+                depth += 1
+                depths[node_id] = depth
+                if depth > MAX_HIERARCHY_DEPTH:
                     _add(
                         issues,
-                        "hierarchy.cycle",
-                        hierarchy_parent_paths.get(cursor, "$.site_hierarchy"),
-                        "Site hierarchy contains a parent cycle",
+                        "hierarchy.too_deep",
+                        hierarchy_parent_paths.get(node_id, "$.site_hierarchy"),
+                        f"Site hierarchy exceeds maximum depth {MAX_HIERARCHY_DEPTH}",
                     )
-                    break
-                visited.add(cursor)
-                cursor = hierarchy_parents[cursor]
 
         fabric_sites = _list(root.get("fabric_sites"), "$.fabric_sites", issues)
         for index, raw_site in enumerate(fabric_sites):
@@ -398,6 +434,21 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     f"{path}.hierarchy_node_id",
                     f"Unknown hierarchy node {node_id!r}",
                 )
+            elif node_id:
+                _check_duplicate(
+                    fabric_site_node_ids,
+                    node_id,
+                    f"{path}.hierarchy_node_id",
+                    "fabric-site hierarchy node",
+                    issues,
+                )
+                if hierarchy_types.get(node_id) == "global":
+                    _add(
+                        issues,
+                        "site.global_node",
+                        f"{path}.hierarchy_node_id",
+                        "A fabric site cannot be attached to the global node",
+                    )
         if deployment_model == "single_site" and len(fabric_sites) != 1:
             _add(issues, "site.count", "$.fabric_sites", "single_site requires exactly one fabric site")
         if deployment_model == "distributed_campus" and len(fabric_sites) < 2:

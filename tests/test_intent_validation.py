@@ -56,6 +56,89 @@ class FabricIntentValidationTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertIn("hierarchy.cycle", self.codes(result))
 
+    def test_cvd_schema_1_1_building_directly_under_global_is_valid(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        candidate["site_hierarchy"] = [
+            item for item in candidate["site_hierarchy"] if item["id"] != "AREA-SJC"
+        ]
+        nodes = {item["id"]: item for item in candidate["site_hierarchy"]}
+        nodes["BUILDING-23"]["parent_id"] = "GLOBAL"
+        candidate["fabric_sites"][0]["hierarchy_node_id"] = "BUILDING-23"
+        result = validate_intent(candidate)
+        self.assertTrue(result.is_valid, result.as_dict())
+
+    def test_cvd_schema_1_1_global_count_and_parent_types_are_enforced(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        candidate["site_hierarchy"][0]["type"] = "area"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("hierarchy.global_count", self.codes(result))
+
+        candidate = copy.deepcopy(self.cvd_intent)
+        candidate["site_hierarchy"].append(
+            {"id": "GLOBAL-2", "name": "Second Global", "type": "global"}
+        )
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("hierarchy.global_count", self.codes(result))
+
+        candidate = copy.deepcopy(self.cvd_intent)
+        nodes = {item["id"]: item for item in candidate["site_hierarchy"]}
+        nodes["FLOOR-1"]["parent_id"] = "AREA-SJC"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("hierarchy.parent_type", self.codes(result))
+
+    def test_cvd_schema_1_1_fabric_site_node_rules_match_allocator(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        candidate["fabric_sites"][0]["hierarchy_node_id"] = "GLOBAL"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("site.global_node", self.codes(result))
+
+        candidate = copy.deepcopy(self.cvd_intent)
+        duplicate = copy.deepcopy(candidate["fabric_sites"][0])
+        duplicate["id"] = "SITE-002"
+        candidate["fabric_sites"].append(duplicate)
+        candidate["deployment_model"] = "distributed_campus"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("unique.duplicate", self.codes(result))
+
+    def test_cvd_schema_1_1_zone_must_be_inside_site(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        candidate["site_hierarchy"].append(
+            {"id": "AREA-OTHER", "name": "Other", "type": "area", "parent_id": "GLOBAL"}
+        )
+        candidate["fabric_zones"][0]["hierarchy_node_id"] = "AREA-OTHER"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("zone.outside_site", self.codes(result))
+
+    def test_cvd_schema_1_1_hierarchy_depth_is_bounded(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        hierarchy = [{"id": "GLOBAL", "name": "Global", "type": "global"}]
+        parent = "GLOBAL"
+        for index in range(1, 18):
+            node_id = "AREA-{:02d}".format(index)
+            hierarchy.append(
+                {"id": node_id, "name": node_id, "type": "area", "parent_id": parent}
+            )
+            parent = node_id
+        candidate["site_hierarchy"] = hierarchy
+        candidate["fabric_sites"][0]["hierarchy_node_id"] = parent
+        candidate["fabric_zones"] = []
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("hierarchy.too_deep", self.codes(result))
+
+    def test_schema_1_0_rejects_schema_1_1_context_keys(self):
+        candidate = copy.deepcopy(self.intent)
+        candidate["deployment_model"] = "single_site"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("schema.not", self.codes(result))
+
     def test_duplicate_loopback_is_rejected(self):
         candidate = copy.deepcopy(self.intent)
         candidate["devices"][1]["loopback0_ip"] = candidate["devices"][0]["loopback0_ip"]
