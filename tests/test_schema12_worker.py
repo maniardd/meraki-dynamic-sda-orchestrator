@@ -100,6 +100,67 @@ class Schema12FakeAdapter:
 
 
 class Schema12WorkerTests(unittest.TestCase):
+    def test_shared_service_blocker_refuses_apply_before_device_connection(self):
+        requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
+        policy = yaml.safe_load(GUARDRAILS.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = StateStore(str(Path(temp_dir) / "schema12-blocker.sqlite3"))
+            reservation, _ = store.reserve_design(
+                requirements, policy, "schema12-blocker-design", "planner"
+            )
+            intent = reservation["intent"]
+            intent_record, _ = store.save_intent(intent, "planner")
+            plan = create_plan(intent)
+            artifact = render_configuration(intent, plan)
+            blocker_codes = {
+                item["code"] for item in artifact["blocking_requirements"]
+            }
+            self.assertIn(
+                "shared_services.hardware_acceptance_pending", blocker_codes
+            )
+            plan_record, _ = store.save_plan(
+                intent_record["intent_id"],
+                plan,
+                "planner",
+                artifact_hash=artifact["artifact_hash"],
+                intent_version=str(intent["schema_version"]),
+                reservation_id=reservation["reservation_id"],
+            )
+            store.record_approval(
+                plan_record["plan_id"],
+                "approved",
+                "approver",
+                "CHG-SCHEMA12-BLOCKER",
+                (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            now = datetime.now(timezone.utc)
+            run, _ = store.create_run(
+                plan_id=plan_record["plan_id"],
+                mode="apply",
+                idempotency_key="schema12-shared-service-blocker",
+                requested_by="operator",
+                execution_enabled=True,
+                maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+                maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            )
+            adapter_calls = []
+
+            def factory(device):
+                adapter_calls.append(device["id"])
+                return Schema12FakeAdapter(device, intent)
+
+            result = TransactionWorker(
+                store, factory, lambda _reference: "resolved-test-secret"
+            ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
+
+            self.assertFalse(result["succeeded"])
+            self.assertFalse(result["rolled_back"])
+            self.assertEqual("apply_failed", result["run"]["status"])
+            self.assertEqual([], adapter_calls)
+            self.assertEqual([], store.run_evidence(run["run_id"]))
+            stored = store.get_design_reservation(reservation["reservation_id"])
+            self.assertEqual("reserved", stored["state"])
+
     def test_shared_service_failure_rolls_back_fusion_node(self):
         requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
         policy = yaml.safe_load(GUARDRAILS.read_text(encoding="utf-8"))
