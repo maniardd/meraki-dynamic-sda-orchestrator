@@ -18,6 +18,11 @@ class DynamicAllocatorTests(unittest.TestCase):
         self.requirements = yaml.safe_load(
             (ROOT / "examples" / "fabric-requirements.lab.yaml").read_text(encoding="utf-8")
         )
+        self.cvd_requirements = yaml.safe_load(
+            (ROOT / "examples" / "fabric-requirements.cvd-small.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
         self.policy = yaml.safe_load(
             (ROOT / "policy" / "guardrails.yaml").read_text(encoding="utf-8")
         )
@@ -46,6 +51,50 @@ class DynamicAllocatorTests(unittest.TestCase):
         second = self.derive(shuffled)
         self.assertEqual(first["intent"], second["intent"])
         self.assertNotEqual(first["requirements_hash"], second["requirements_hash"])
+
+    def test_cvd_hierarchy_site_profile_and_zone_are_derived(self):
+        intent = self.derive(requirements=self.cvd_requirements)["intent"]
+        self.assertEqual("1.1", intent["schema_version"])
+        self.assertEqual("single_site", intent["deployment_model"])
+        self.assertEqual("GLOBAL", intent["site_hierarchy"][0]["id"])
+        self.assertEqual("small_site", intent["fabric_sites"][0]["profile"])
+        self.assertEqual(
+            ["Corporate", "Guest"], intent["fabric_zones"][0]["virtual_networks"]
+        )
+        validation = validate_intent(intent)
+        self.assertTrue(validation.is_valid, validation.as_dict())
+
+    def test_cvd_context_is_deterministic_when_input_order_changes(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["site_hierarchy"].reverse()
+        candidate["fabric_zones"][0]["virtual_networks"].reverse()
+        first = self.derive(requirements=self.cvd_requirements)
+        second = self.derive(requirements=candidate)
+        self.assertEqual(first["intent"], second["intent"])
+
+    def test_cvd_hierarchy_rejects_unknown_parent(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["site_hierarchy"][-1]["parent_id"] = "MISSING-BUILDING"
+        with self.assertRaisesRegex(AllocationError, "unknown parent"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_site_rejects_selected_profile_overflow(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["fabric_sites"][0]["endpoint_count"] = 10000
+        with self.assertRaisesRegex(AllocationError, "exceeds selected profile"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_zone_rejects_unknown_virtual_network(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["fabric_zones"][0]["virtual_networks"] = ["MISSING-VN"]
+        with self.assertRaisesRegex(AllocationError, "unknown virtual network"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_device_rejects_unknown_fabric_site(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["devices"][0]["site"] = "MISSING-SITE"
+        with self.assertRaisesRegex(AllocationError, "unknown fabric site"):
+            self.derive(requirements=candidate)
 
     def test_complete_derived_intent_passes_existing_validator(self):
         result = validate_intent(self.derive()["intent"])

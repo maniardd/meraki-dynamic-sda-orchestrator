@@ -4,6 +4,9 @@ import copy
 import unittest
 from pathlib import Path
 
+import yaml
+
+from orchestrator.allocator import derive_fabric_intent
 from orchestrator.intent import load_intent, validate_intent
 
 
@@ -15,6 +18,15 @@ PRODUCTION_EXAMPLE = ROOT / "examples" / "fabric-intent.production.yaml"
 class FabricIntentValidationTests(unittest.TestCase):
     def setUp(self):
         self.intent = load_intent(EXAMPLE)
+        requirements = yaml.safe_load(
+            (ROOT / "examples" / "fabric-requirements.cvd-small.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        policy = yaml.safe_load(
+            (ROOT / "policy" / "guardrails.yaml").read_text(encoding="utf-8")
+        )
+        self.cvd_intent = derive_fabric_intent(requirements, policy)["intent"]
 
     def codes(self, result):
         return {issue.code for issue in result.issues}
@@ -24,6 +36,25 @@ class FabricIntentValidationTests(unittest.TestCase):
         self.assertTrue(result.is_valid, result.as_dict())
         self.assertIn("ha.control_plane.single", self.codes(result))
         self.assertIn("ha.border.single", self.codes(result))
+
+    def test_cvd_schema_1_1_hierarchy_is_valid(self):
+        result = validate_intent(self.cvd_intent)
+        self.assertTrue(result.is_valid, result.as_dict())
+
+    def test_cvd_schema_1_1_unknown_device_site_is_rejected(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        candidate["devices"][0]["site"] = "MISSING-SITE"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("reference.fabric_site", self.codes(result))
+
+    def test_cvd_schema_1_1_hierarchy_cycle_is_rejected(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        nodes = {item["id"]: item for item in candidate["site_hierarchy"]}
+        nodes["AREA-SJC"]["parent_id"] = "BUILDING-23"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("hierarchy.cycle", self.codes(result))
 
     def test_duplicate_loopback_is_rejected(self):
         candidate = copy.deepcopy(self.intent)
