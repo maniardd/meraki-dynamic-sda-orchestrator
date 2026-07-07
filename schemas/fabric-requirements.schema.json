@@ -14,7 +14,7 @@
     "virtual_networks"
   ],
   "properties": {
-    "schema_version": {"enum": ["1.0", "1.1"]},
+    "schema_version": {"enum": ["1.0", "1.1", "1.2"]},
     "allocation_domain": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
     "deployment_model": {"enum": ["single_site", "distributed_campus"]},
     "site_hierarchy": {
@@ -220,6 +220,162 @@
         }
       }
     },
+    "fusion_nodes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "hostname", "platform", "software_version", "management_ip",
+          "credential_ref", "bgp_asn"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "hostname": {"type": "string", "minLength": 1, "maxLength": 63},
+          "platform": {"type": "string", "minLength": 1, "maxLength": 64},
+          "software_version": {"type": "string", "minLength": 1, "maxLength": 64},
+          "management_ip": {"type": "string", "format": "ipv4"},
+          "dashboard_management_ip": {"type": "string", "format": "ipv4"},
+          "credential_ref": {"type": "string", "pattern": "^secret://"},
+          "bgp_asn": {"type": "integer", "minimum": 1, "maximum": 4294967295}
+        }
+      }
+    },
+    "shared_services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vrf", "default_action", "services"],
+      "properties": {
+        "vrf": {"type": "string", "minLength": 1, "maxLength": 64},
+        "default_action": {"const": "deny"},
+        "services": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "type", "addresses", "prefixes", "consumer_virtual_networks"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+              "type": {"enum": ["dhcp", "dns", "ntp", "ise", "catalyst_center", "wlc", "other"]},
+              "addresses": {
+                "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+                "items": {"type": "string", "format": "ipv4"}
+              },
+              "prefixes": {
+                "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+                "items": {"type": "string"}
+              },
+              "consumer_virtual_networks": {
+                "type": "array", "minItems": 1, "maxItems": 512, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1, "maxLength": 64}
+              }
+            }
+          }
+        }
+      }
+    },
+    "multicast": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "transport", "rp_mode", "asm_virtual_networks", "ssm_virtual_networks"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "transport": {"enum": ["native", "head_end_replication"]},
+        "rp_mode": {"enum": ["anycast", "static", "none"]},
+        "rp_device_ids": {
+          "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "asm_virtual_networks": {
+          "type": "array", "maxItems": 512, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "ssm_virtual_networks": {
+          "type": "array", "maxItems": 512, "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "ssm_range": {"type": "string"}
+      }
+    },
+    "policy_plane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "security_groups", "contracts"],
+      "properties": {
+        "mode": {"enum": ["none", "ise", "sxp", "hybrid"]},
+        "ise": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["credential_ref", "nodes"],
+          "properties": {
+            "credential_ref": {"type": "string", "pattern": "^secret://"},
+            "nodes": {
+              "type": "array", "minItems": 1, "maxItems": 32,
+              "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["id", "address", "roles"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+                  "address": {"type": "string", "format": "ipv4"},
+                  "roles": {
+                    "type": "array", "minItems": 1, "uniqueItems": true,
+                    "items": {"enum": ["pan", "psn", "pxgrid"]}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sxp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["connections"],
+          "properties": {
+            "connections": {
+              "type": "array", "minItems": 1, "maxItems": 1024,
+              "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["id", "speaker_id", "listener_ip", "password_ref"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+                  "speaker_id": {"type": "string", "minLength": 1, "maxLength": 64},
+                  "listener_ip": {"type": "string", "format": "ipv4"},
+                  "password_ref": {"type": "string", "pattern": "^secret://"}
+                }
+              }
+            }
+          }
+        },
+        "security_groups": {
+          "type": "array", "minItems": 1, "maxItems": 4096,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1, "maxLength": 64},
+              "tag": {"type": "integer", "minimum": 2, "maximum": 65519}
+            }
+          }
+        },
+        "contracts": {
+          "type": "array", "maxItems": 16384,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["source", "destination", "action", "protocol"],
+            "properties": {
+              "source": {"type": "string", "minLength": 1, "maxLength": 64},
+              "destination": {"type": "string", "minLength": 1, "maxLength": 64},
+              "action": {"enum": ["permit", "deny"]},
+              "protocol": {"enum": ["ip", "tcp", "udp", "icmp"]}
+            }
+          }
+        }
+      }
+    },
     "border_handoff": {
       "type": "object",
       "additionalProperties": false,
@@ -228,6 +384,26 @@
         "enabled": {"type": "boolean"},
         "mode": {"enum": ["bgp", "isolated"]},
         "remote_as": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "adjacencies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["border_device_id", "fusion_node_id", "border_interface", "fusion_interface"],
+            "properties": {
+              "border_device_id": {"type": "string", "minLength": 1, "maxLength": 64},
+              "fusion_node_id": {"type": "string", "minLength": 1, "maxLength": 64},
+              "border_interface": {"type": "string", "minLength": 1, "maxLength": 128},
+              "fusion_interface": {"type": "string", "minLength": 1, "maxLength": 128},
+              "virtual_networks": {
+                "type": "array", "minItems": 1, "maxItems": 512, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1, "maxLength": 64}
+              }
+            }
+          }
+        },
         "peers": {
           "type": "array",
           "minItems": 1,
@@ -248,11 +424,31 @@
   "allOf": [
     {
       "if": {
+        "properties": {"schema_version": {"const": "1.2"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "required": [
+          "deployment_model", "site_hierarchy", "fabric_sites", "fusion_nodes",
+          "shared_services", "multicast", "policy_plane", "border_handoff"
+        ]
+      }
+    },
+    {
+      "if": {
         "properties": {"schema_version": {"const": "1.1"}},
         "required": ["schema_version"]
       },
       "then": {
-        "required": ["deployment_model", "site_hierarchy", "fabric_sites"]
+        "required": ["deployment_model", "site_hierarchy", "fabric_sites"],
+        "not": {
+          "anyOf": [
+            {"required": ["fusion_nodes"]},
+            {"required": ["shared_services"]},
+            {"required": ["multicast"]},
+            {"required": ["policy_plane"]}
+          ]
+        }
       }
     },
     {
@@ -266,7 +462,11 @@
             {"required": ["deployment_model"]},
             {"required": ["site_hierarchy"]},
             {"required": ["fabric_sites"]},
-            {"required": ["fabric_zones"]}
+            {"required": ["fabric_zones"]},
+            {"required": ["fusion_nodes"]},
+            {"required": ["shared_services"]},
+            {"required": ["multicast"]},
+            {"required": ["policy_plane"]}
           ]
         }
       }

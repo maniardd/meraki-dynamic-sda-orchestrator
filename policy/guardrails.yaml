@@ -37,6 +37,9 @@ supernets:
   border_handoff:
     cidr: 172.31.0.0/16
     prefix_len: 31
+  multicast_rp:
+    cidr: 10.254.0.0/24
+    prefix_len: 32
 
 ranges:
   vlan_id: {min: 100, max: 3900}
@@ -45,11 +48,15 @@ ranges:
   bgp_asn_local: {min: 65001, max: 65100}
   rd_asn: 65000
   handoff_vlan_id: {min: 3000, max: 3900}
+  sgt: {min: 2, max: 65519}
+
+fusion:
+  require_full_mesh_production: true
 
 platform_matrix:
   - model: C9500-48Y4C
     min_ios_xe: "17.12"
-    roles: [border, control_plane, underlay]
+    roles: [border, control_plane, fusion, underlay]
   - model: C9300-24P
     min_ios_xe: "17.12"
     roles: [fabric_edge, underlay]
@@ -61,6 +68,7 @@ redundancy:
   min_borders_production: 2
   min_control_planes_production: 2
   min_uplinks_per_edge_production: 2
+  min_fusion_nodes_production: 2
 
 approval:
   require_roles: [approver]

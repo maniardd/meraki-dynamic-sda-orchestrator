@@ -1,4 +1,4 @@
-schema_version: "1.1"
+schema_version: "1.2"
 allocation_domain: acceptance-large-campus
 deployment_model: single_site
 
@@ -51,7 +51,7 @@ fabric:
   id: fab-acceptance-large-001
   name: ACCEPTANCE-LARGE-CAMPUS
   mtu: 9100
-  control_plane_mode: classic_lisp
+  control_plane_mode: lisp_pubsub
   isis_process: SDA-ISIS
   isis_area: "49.0001"
   lisp_site_name: acceptance_large_campus
@@ -112,6 +112,24 @@ devices:
     dashboard_management_ip: 198.51.100.24
     roles: [fabric_edge]
     credential_ref: secret://acceptance/devices/edge-04
+
+fusion_nodes:
+  - id: fusion-01
+    hostname: FUSION-01
+    platform: C9500-48Y4C
+    software_version: 17.12.4
+    management_ip: 192.0.2.31
+    dashboard_management_ip: 198.51.100.31
+    credential_ref: secret://acceptance/devices/fusion-01
+    bgp_asn: 65010
+  - id: fusion-02
+    hostname: FUSION-02
+    platform: C9500-48Y4C
+    software_version: 17.12.4
+    management_ip: 192.0.2.32
+    dashboard_management_ip: 198.51.100.32
+    credential_ref: secret://acceptance/devices/fusion-02
+    bgp_asn: 65010
 
 links:
   - id: border-cp-01--edge-01
@@ -192,4 +210,76 @@ virtual_networks:
 border_handoff:
   enabled: true
   mode: bgp
-  remote_as: 65010
+  adjacencies:
+    - border_device_id: border-cp-01
+      fusion_node_id: fusion-01
+      border_interface: TwentyFiveGigE1/0/45
+      fusion_interface: TwentyFiveGigE1/0/1
+    - border_device_id: border-cp-01
+      fusion_node_id: fusion-02
+      border_interface: TwentyFiveGigE1/0/46
+      fusion_interface: TwentyFiveGigE1/0/1
+    - border_device_id: border-cp-02
+      fusion_node_id: fusion-01
+      border_interface: TwentyFiveGigE1/0/45
+      fusion_interface: TwentyFiveGigE1/0/2
+    - border_device_id: border-cp-02
+      fusion_node_id: fusion-02
+      border_interface: TwentyFiveGigE1/0/46
+      fusion_interface: TwentyFiveGigE1/0/2
+
+shared_services:
+  vrf: SHARED_VN
+  default_action: deny
+  services:
+    - id: campus-dhcp
+      type: dhcp
+      addresses: [203.0.113.10, 203.0.113.11]
+      prefixes: [203.0.113.0/26]
+      consumer_virtual_networks: [Corporate, Guest, IoT, Media, Partner]
+    - id: campus-ise
+      type: ise
+      addresses: [203.0.113.20, 203.0.113.21]
+      prefixes: [203.0.113.0/26]
+      consumer_virtual_networks: [Corporate, Guest, IoT, Media, Partner]
+    - id: campus-operations
+      type: catalyst_center
+      addresses: [203.0.113.30]
+      prefixes: [203.0.113.0/26]
+      consumer_virtual_networks: [Corporate]
+
+multicast:
+  enabled: true
+  transport: native
+  rp_mode: anycast
+  rp_device_ids: [border-cp-01, border-cp-02]
+  asm_virtual_networks: [Media]
+  ssm_virtual_networks: [IoT]
+  ssm_range: 232.0.0.0/8
+
+policy_plane:
+  mode: hybrid
+  ise:
+    credential_ref: secret://acceptance/ise/api
+    nodes:
+      - {id: ise-01, address: 203.0.113.20, roles: [pan, psn, pxgrid]}
+      - {id: ise-02, address: 203.0.113.21, roles: [pan, psn, pxgrid]}
+  sxp:
+    connections:
+      - id: border-01-to-ise-01
+        speaker_id: border-cp-01
+        listener_ip: 203.0.113.20
+        password_ref: secret://acceptance/sxp/border-01-to-ise-01
+      - id: border-02-to-ise-02
+        speaker_id: border-cp-02
+        listener_ip: 203.0.113.21
+        password_ref: secret://acceptance/sxp/border-02-to-ise-02
+  security_groups:
+    - {name: Employees}
+    - {name: Guests}
+    - {name: IoT-Devices}
+    - {name: Shared-Services}
+  contracts:
+    - {source: Employees, destination: Shared-Services, action: permit, protocol: ip}
+    - {source: Guests, destination: Employees, action: deny, protocol: ip}
+    - {source: IoT-Devices, destination: Shared-Services, action: permit, protocol: tcp}

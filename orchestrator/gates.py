@@ -24,8 +24,13 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
     map_server_count = len(intent["lisp"]["map_servers"])
     handoff = intent.get("border_handoff") or {}
     peers_by_device: Dict[str, List[str]] = {}
+    peers_by_fusion: Dict[str, List[str]] = {}
     for peer in handoff.get("peers", []):
         peers_by_device.setdefault(str(peer["device_id"]), []).append(str(peer["neighbor_ip"]))
+        if peer.get("fusion_node_id"):
+            peers_by_fusion.setdefault(str(peer["fusion_node_id"]), []).append(
+                str(peer["local_ip"])
+            )
 
     for device in sorted(intent["devices"], key=lambda item: str(item["id"])):
         device_id = str(device["id"])
@@ -84,6 +89,31 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                     "command": "show bgp ipv4 unicast vrf all summary",
                     "evaluator": "bgp_neighbors",
                     "expected": {"neighbors": sorted(peers_by_device.get(device_id, []))},
+                    "blocking": True,
+                }
+            )
+    for fusion in sorted(intent.get("fusion_nodes", []), key=lambda item: str(item["id"])):
+        fusion_id = str(fusion["id"])
+        gates.append(
+            {
+                "gate_id": "precheck.version.{}".format(fusion_id),
+                "phase_id": "precheck",
+                "device_id": fusion_id,
+                "command": "show version",
+                "evaluator": "ios_xe_version",
+                "expected": {"version": str(fusion["software_version"])},
+                "blocking": True,
+            }
+        )
+        if handoff.get("enabled"):
+            gates.append(
+                {
+                    "gate_id": "fusion.bgp.{}".format(fusion_id),
+                    "phase_id": "border_handoff",
+                    "device_id": fusion_id,
+                    "command": "show bgp ipv4 unicast vrf all summary",
+                    "evaluator": "bgp_neighbors",
+                    "expected": {"neighbors": sorted(peers_by_fusion.get(fusion_id, []))},
                     "blocking": True,
                 }
             )

@@ -56,6 +56,10 @@ Implemented foundation:
 - Sanitized lab and redundant production examples
 - Sanitized COP29-derived large-campus acceptance fixture with dual-border,
   multi-VN, `/30` BGP handoff, deterministic scale, and data-quality tests
+- Schema 1.2 production contracts for explicit fusion pairs, LISP Pub/Sub,
+  shared-service route policy, native/replicated multicast, ISE, SGT, and SXP
+- Fusion-side VRF-lite/eBGP review artifacts and two-sided operational gates;
+  unaccepted service and policy renderers remain explicit apply blockers
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. Meraki import packaging and hardware
@@ -100,3 +104,5 @@ See [SECURITY.md](SECURITY.md) before connecting the orchestrator to a network.
 
 The [COP29-derived fixture](docs/cop29-sanitized-acceptance-fixture.md) records
 its sanitization boundary and the capabilities it does—and does not—prove.
+The [production services and policy model](docs/production-services-policy-model.md)
+records the schema 1.2 contracts, Cisco design basis, and execution blockers.

@@ -45,6 +45,9 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
 
     devices = list(intent["devices"])
     all_devices = sorted(str(device["id"]) for device in devices)
+    fusion_nodes = list(intent.get("fusion_nodes", []))
+    fusion = sorted(str(device["id"]) for device in fusion_nodes)
+    all_targets = sorted(set(all_devices + fusion))
     control_plane = _targets_by_role(devices, "control_plane")
     borders = _targets_by_role(devices, "border")
     edges = _targets_by_role(devices, "fabric_edge")
@@ -54,14 +57,14 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
             "id": "precheck",
             "name": "Read-only discovery and prechecks",
             "depends_on": [],
-            "targets": all_devices,
+            "targets": all_targets,
             "gate": "inventory_topology_addressing_services_and_checkpoint_ready",
         },
         {
             "id": "checkpoint",
             "name": "Create and verify device checkpoints",
             "depends_on": ["precheck"],
-            "targets": all_devices,
+            "targets": all_targets,
             "gate": "checkpoint_exists_and_is_restorable",
         },
         {
@@ -73,7 +76,7 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
         },
         {
             "id": "lisp_control_plane",
-            "name": "Deploy LISP map-server and map-resolver roles",
+            "name": "Deploy LISP control-plane publisher/map-server roles",
             "depends_on": ["underlay"],
             "targets": control_plane,
             "gate": "map_server_and_resolver_operational",
@@ -100,17 +103,76 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
             "id": "border_handoff",
             "name": "Deploy and verify border/BGP handoff",
             "depends_on": ["overlay"],
-            "targets": borders,
+            "targets": sorted(set(borders + fusion)),
             "gate": "expected_bgp_neighbors_and_routes_established",
         },
+    ]
+
+    assurance_dependency = "border_handoff"
+    multicast = intent.get("multicast") or {}
+    if multicast.get("enabled"):
+        phases.insert(
+            -1,
+            {
+                "id": "multicast",
+                "name": "Deploy and verify fabric multicast and rendezvous points",
+                "depends_on": ["overlay"],
+                "targets": all_devices,
+                "gate": "pim_neighbors_rp_reachability_and_multicast_flows_pass",
+                "objects": {
+                    "asm_virtual_networks": len(multicast.get("asm_virtual_networks", [])),
+                    "ssm_virtual_networks": len(multicast.get("ssm_virtual_networks", [])),
+                },
+            },
+        )
+        border_phase = next(item for item in phases if item["id"] == "border_handoff")
+        border_phase["depends_on"] = ["multicast"]
+
+    if intent.get("shared_services"):
+        phases.append(
+            {
+                "id": "shared_services",
+                "name": "Deploy and verify deny-by-default shared-service route leaking",
+                "depends_on": ["border_handoff"],
+                "targets": fusion,
+                "gate": "only_approved_service_and_consumer_prefixes_are_reachable",
+                "objects": {
+                    "services": len(intent["shared_services"].get("services", [])),
+                    "route_leaks": len(intent["shared_services"].get("route_leaks", [])),
+                },
+            }
+        )
+        assurance_dependency = "shared_services"
+
+    policy_plane = intent.get("policy_plane") or {}
+    if policy_plane.get("mode") not in {None, "none"}:
+        phases.append(
+            {
+                "id": "policy_plane",
+                "name": "Publish and verify ISE/SGT/SXP policy-plane intent",
+                "depends_on": [assurance_dependency],
+                "targets": all_targets,
+                "gate": "ise_sgt_contracts_and_sxp_sessions_match_approved_intent",
+                "objects": {
+                    "security_groups": len(policy_plane.get("security_groups", [])),
+                    "contracts": len(policy_plane.get("contracts", [])),
+                    "sxp_connections": len(
+                        (policy_plane.get("sxp") or {}).get("connections", [])
+                    ),
+                },
+            }
+        )
+        assurance_dependency = "policy_plane"
+
+    phases.append(
         {
             "id": "endpoint_assurance",
-            "name": "Run DHCP, reachability, mobility, and policy assurance",
-            "depends_on": ["border_handoff"],
+            "name": "Run DHCP, reachability, mobility, multicast, and policy assurance",
+            "depends_on": [assurance_dependency],
             "targets": all_devices,
             "gate": "synthetic_endpoint_transactions_pass",
-        },
-    ]
+        }
+    )
 
     intent_hash = _sha256(intent)
     plan_body = {
@@ -118,7 +180,7 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
         "intent_hash": intent_hash,
         "fabric_id": intent["fabric"]["id"],
         "environment": intent["metadata"]["environment"],
-        "targets": all_devices,
+        "targets": all_targets,
         "phases": phases,
         "safety": {
             "executable": False,

@@ -168,6 +168,12 @@ class DynamicAllocatorTests(unittest.TestCase):
         with self.assertRaisesRegex(AllocationError, "Requirements schema error"):
             self.derive(requirements=candidate)
 
+    def test_schema_1_1_rejects_schema_1_2_service_keys(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["fusion_nodes"] = []
+        with self.assertRaisesRegex(AllocationError, "Requirements schema error"):
+            self.derive(requirements=candidate)
+
     def test_cvd_site_rejects_selected_profile_overflow(self):
         candidate = copy.deepcopy(self.cvd_requirements)
         candidate["fabric_sites"][0]["endpoint_count"] = 10000
