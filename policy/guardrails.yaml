@@ -40,6 +40,9 @@ supernets:
   multicast_rp:
     cidr: 10.254.0.0/24
     prefix_len: 32
+  shared_service_handoff:
+    cidr: 172.30.0.0/24
+    prefix_len: 30
 
 ranges:
   vlan_id: {min: 100, max: 3900}
@@ -49,6 +52,7 @@ ranges:
   rd_asn: 65000
   handoff_vlan_id: {min: 3000, max: 3900}
   sgt: {min: 2, max: 65519}
+  shared_service_vlan_id: {min: 3901, max: 3999}
 
 fusion:
   require_full_mesh_production: true

@@ -103,6 +103,13 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         shared = intent["shared_services"]
         self.assertEqual("deny", shared["default_action"])
         self.assertEqual(5, len(shared["route_leaks"]))
+        self.assertEqual(2, len(shared["attachments"]))
+        self.assertEqual(
+            [3901, 3902], [item["vlan_id"] for item in shared["attachments"]]
+        )
+        self.assertTrue(
+            all(item["prefix"].endswith("/30") for item in shared["attachments"])
+        )
         self.assertTrue(
             all(item["import_prefixes"] == ["203.0.113.0/26"] for item in shared["route_leaks"])
         )
@@ -160,6 +167,18 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         candidate = copy.deepcopy(self.requirements)
         candidate["shared_services"]["services"][0]["addresses"] = ["203.0.113.200"]
         with self.assertRaisesRegex(AllocationError, "outside its advertised prefixes"):
+            derive_fabric_intent(candidate, self.policy)
+
+    def test_every_production_fusion_requires_shared_service_attachment(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["shared_services"]["attachments"] = [
+            item
+            for item in candidate["shared_services"]["attachments"]
+            if item["fusion_node_id"] != "fusion-02"
+        ]
+        with self.assertRaisesRegex(
+            AllocationError, "missing attachment for fusion node fusion-02"
+        ):
             derive_fabric_intent(candidate, self.policy)
 
     def test_shared_service_prefix_cannot_overlap_fabric_endpoint_space(self):
@@ -286,7 +305,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertEqual(
             {
                 "lisp_pubsub.renderer_pending",
-                "shared_services.renderer_pending",
+                "shared_services.hardware_acceptance_pending",
                 "multicast.overlay_renderer_pending",
                 "policy_plane.renderer_pending",
             },
@@ -295,6 +314,28 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertFalse(artifacts["executable"])
         self.assertEqual("1.0", artifacts["artifact_schema_version"])
         self.assertEqual("1.2", artifacts["intent_schema_version"])
+
+    def test_shared_service_renderer_is_exact_deny_by_default_and_deterministic(self):
+        intent = self.derive()["intent"]
+        plan = create_plan(intent)
+        first = render_configuration(intent, plan)
+        second = render_configuration(intent, plan)
+        self.assertEqual(first, second)
+        phase = next(
+            item
+            for item in first["devices"]["fusion-01"]["phases"]
+            if item["phase_id"] == "shared_services"
+        )
+        commands = "\n".join(
+            command for block in phase["blocks"] for command in block["commands"]
+        )
+        self.assertIn("ip route vrf SHARED_VN 203.0.113.0 255.255.255.192", commands)
+        self.assertIn("export map SDA-RMAP-", commands)
+        self.assertIn("import map SDA-RMAP-", commands)
+        self.assertIn("no ip prefix-list SDA-PFX-", commands)
+        self.assertIn("no route-map SDA-RMAP-", commands)
+        self.assertNotIn("permit 0.0.0.0/0", commands)
+        self.assertNotIn("10.116.", commands)
 
     def test_gate_plan_checks_both_sides_of_every_bgp_handoff(self):
         gates = build_gate_plan(self.derive()["intent"])

@@ -738,6 +738,71 @@ def derive_fabric_intent(
             raise AllocationError("Shared-services VRF {} is unknown".format(service_vrf))
         if str(raw_shared_services.get("default_action")) != "deny":
             raise AllocationError("Shared-services default action must be deny")
+        if "shared_service_handoff" not in pools:
+            raise AllocationError("Guardrail pool shared_service_handoff is missing")
+        shared_vlan_range = ranges.get("shared_service_vlan_id")
+        if not isinstance(shared_vlan_range, Mapping):
+            raise AllocationError("Guardrail range shared_service_vlan_id is missing")
+        attachments = []
+        attachment_ids = set()
+        attached_fusions = set()
+        for raw_attachment in sorted(
+            (copy.deepcopy(item) for item in raw_shared_services.get("attachments", [])),
+            key=lambda item: str(item.get("id", "")),
+        ):
+            attachment_id = str(raw_attachment["id"])
+            fusion_id = str(raw_attachment["fusion_node_id"])
+            if attachment_id in attachment_ids:
+                raise AllocationError(
+                    "Duplicate shared-service attachment {}".format(attachment_id)
+                )
+            attachment_ids.add(attachment_id)
+            if fusion_id not in fusion_ids:
+                raise AllocationError(
+                    "Shared-service attachment {} references unknown fusion node {}".format(
+                        attachment_id, fusion_id
+                    )
+                )
+            if fusion_id in attached_fusions:
+                raise AllocationError(
+                    "Fusion node {} has multiple shared-service attachments".format(fusion_id)
+                )
+            attached_fusions.add(fusion_id)
+            vlan = reserve_scalar(
+                "vlan_id",
+                int(shared_vlan_range["min"]),
+                int(shared_vlan_range["max"]),
+            )
+            prefix = reserve_prefix(
+                "shared_service_handoff",
+                int(pools["shared_service_handoff"]["prefix_len"]),
+            )
+            addresses = list(prefix.hosts())
+            if len(addresses) < 2:
+                raise AllocationError(
+                    "Shared-service handoff {} must provide two usable addresses".format(
+                        prefix
+                    )
+                )
+            attachments.append(
+                {
+                    "id": attachment_id,
+                    "fusion_node_id": fusion_id,
+                    "interface": str(raw_attachment["interface"]),
+                    "vlan_id": vlan,
+                    "prefix": str(prefix),
+                    "local_ip": str(addresses[0]),
+                    "next_hop": str(addresses[1]),
+                }
+            )
+        if environment == "production":
+            missing_fusions = sorted(fusion_ids - attached_fusions)
+            if missing_fusions:
+                raise AllocationError(
+                    "Production shared services are missing attachment for fusion node {}".format(
+                        missing_fusions[0]
+                    )
+                )
         services = []
         import_prefixes_by_consumer: Dict[str, set] = {}
         service_ids = set()
@@ -809,6 +874,7 @@ def derive_fabric_intent(
         shared_services = {
             "vrf": service_vrf,
             "default_action": "deny",
+            "attachments": attachments,
             "services": services,
             "route_leaks": route_leaks,
         }

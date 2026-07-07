@@ -11,6 +11,7 @@ from .parsers import (
     verify_isis_neighbors,
     verify_lisp_sessions,
     verify_nve_peers,
+    verify_route_prefix,
 )
 
 
@@ -117,6 +118,48 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                     "blocking": True,
                 }
             )
+        shared = intent.get("shared_services") or {}
+        if shared:
+            service_vrf = str(shared["vrf"])
+            for leak in sorted(
+                shared.get("route_leaks", []),
+                key=lambda item: str(item["consumer_vrf"]),
+            ):
+                consumer_vrf = str(leak["consumer_vrf"])
+                for prefix in sorted(leak.get("import_prefixes", [])):
+                    suffix = str(prefix).replace(".", "_").replace("/", "_")
+                    gates.append(
+                        {
+                            "gate_id": "shared.consumer.{}.{}.{}".format(
+                                fusion_id, consumer_vrf, suffix
+                            ),
+                            "phase_id": "shared_services",
+                            "device_id": fusion_id,
+                            "command": "show ip route vrf {} {}".format(
+                                consumer_vrf, prefix
+                            ),
+                            "evaluator": "route_prefix",
+                            "expected": {"prefix": str(prefix)},
+                            "blocking": True,
+                        }
+                    )
+                for prefix in sorted(leak.get("export_prefixes", [])):
+                    suffix = str(prefix).replace(".", "_").replace("/", "_")
+                    gates.append(
+                        {
+                            "gate_id": "shared.service.{}.{}.{}.{}".format(
+                                fusion_id, service_vrf, consumer_vrf, suffix
+                            ),
+                            "phase_id": "shared_services",
+                            "device_id": fusion_id,
+                            "command": "show ip route vrf {} {}".format(
+                                service_vrf, prefix
+                            ),
+                            "evaluator": "route_prefix",
+                            "expected": {"prefix": str(prefix)},
+                            "blocking": True,
+                        }
+                    )
     return gates
 
 
@@ -133,4 +176,6 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
         return verify_nve_peers(output, int(expected["minimum_up"]))
     if evaluator == "bgp_neighbors":
         return verify_bgp_neighbors(output, list(expected["neighbors"]))
+    if evaluator == "route_prefix":
+        return verify_route_prefix(output, str(expected["prefix"]))
     return GateResult(False, "Unknown evaluator {}".format(evaluator), {"evaluator": evaluator})
