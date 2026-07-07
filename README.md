@@ -62,6 +62,8 @@ Implemented foundation:
   unaccepted service and policy renderers remain explicit apply blockers
 - Deny-by-default shared-service route-leak rendering, exact route gates, and
   fusion-node failure/rollback coverage; hardware acceptance remains blocked
+- LISP Pub/Sub border-subscriber rendering with per-IID publisher-state gates
+  and failure/rollback coverage; redundant hardware acceptance remains blocked
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. Meraki import packaging and hardware
@@ -108,3 +110,6 @@ The [COP29-derived fixture](docs/cop29-sanitized-acceptance-fixture.md) records
 its sanitization boundary and the capabilities it does—and does not—prove.
 The [production services and policy model](docs/production-services-policy-model.md)
 records the schema 1.2 contracts, Cisco design basis, and execution blockers.
+The [LISP Pub/Sub acceptance boundary](docs/lisp-pubsub-renderer.md) records
+the rendered subscriber contract, operational evidence, and remaining
+redundant-hardware tests.

@@ -304,7 +304,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         blocker_codes = {item["code"] for item in artifacts["blocking_requirements"]}
         self.assertEqual(
             {
-                "lisp_pubsub.renderer_pending",
+                "lisp_pubsub.hardware_acceptance_pending",
                 "shared_services.hardware_acceptance_pending",
                 "multicast.overlay_renderer_pending",
                 "policy_plane.renderer_pending",
@@ -314,6 +314,64 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertFalse(artifacts["executable"])
         self.assertEqual("1.0", artifacts["artifact_schema_version"])
         self.assertEqual("1.2", artifacts["intent_schema_version"])
+
+    def test_pubsub_subscriber_renderer_and_gates_cover_every_publisher_and_vn(self):
+        intent = self.derive()["intent"]
+        artifacts = render_configuration(intent, create_plan(intent))
+        devices = {item["id"]: item for item in intent["devices"]}
+        publisher_addresses = sorted(
+            devices[item]["loopback0_ip"] for item in intent["lisp"]["publishers"]
+        )
+        for subscriber_id in intent["lisp"]["subscribers"]:
+            phase = next(
+                item
+                for item in artifacts["devices"][subscriber_id]["phases"]
+                if item["phase_id"] == "overlay"
+            )
+            block = next(
+                item
+                for item in phase["blocks"]
+                if item["block_id"] == "lisp_pubsub_subscriber"
+            )
+            commands = "\n".join(block["commands"])
+            self.assertIn("map-cache publications", commands)
+            self.assertIn("route-export publications", commands)
+            self.assertIn("distance publications 250", commands)
+            self.assertIn("no map-cache away-eids send-map-request", commands)
+            self.assertIn(
+                "proxy-itr {}".format(devices[subscriber_id]["loopback0_ip"]),
+                commands,
+            )
+            for address in publisher_addresses:
+                self.assertIn(
+                    "import publication publisher {}".format(address), commands
+                )
+                self.assertIn("itr map-resolver {}".format(address), commands)
+                self.assertIn(
+                    "etr map-server {} key <secret:{}>".format(
+                        address, intent["lisp"]["auth_key_ref"]
+                    ),
+                    commands,
+                )
+            self.assertEqual([intent["lisp"]["auth_key_ref"]], block["secret_refs"])
+
+        pubsub_gates = [
+            gate
+            for gate in build_gate_plan(intent)
+            if gate["evaluator"] == "lisp_publishers"
+        ]
+        self.assertEqual(
+            len(intent["lisp"]["subscribers"])
+            * len(intent["virtual_networks"]),
+            len(pubsub_gates),
+        )
+        self.assertTrue(
+            all(
+                gate["expected"]["publishers"] == publisher_addresses
+                for gate in pubsub_gates
+            )
+        )
+        self.assertTrue(all(gate["phase_id"] == "overlay" for gate in pubsub_gates))
 
     def test_shared_service_renderer_is_exact_deny_by_default_and_deterministic(self):
         intent = self.derive()["intent"]

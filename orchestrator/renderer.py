@@ -266,6 +266,59 @@ def _edge_lisp_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
     return [_locator_block(intent), _block("lisp_edge", commands, [auth_ref])]
 
 
+def _pubsub_subscriber_blocks(
+    intent: Mapping[str, Any], device: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    lisp = intent.get("lisp") or {}
+    device_id = str(device["id"])
+    if (
+        lisp.get("control_plane_mode") != "lisp_pubsub"
+        or device_id not in set(lisp.get("subscribers", []))
+    ):
+        return []
+
+    devices = {str(item["id"]): item for item in intent["devices"]}
+    publishers = [
+        devices[str(publisher_id)]
+        for publisher_id in sorted(lisp.get("publishers", []))
+    ]
+    auth_ref = str(lisp["auth_key_ref"])
+    commands = [
+        "router lisp",
+        " service ipv4",
+        "  encapsulation vxlan",
+        "  map-cache publications",
+    ]
+    for publisher in publishers:
+        address = _safe(publisher["loopback0_ip"], "LISP publisher address")
+        commands.extend(
+            [
+                "  import publication publisher {}".format(address),
+                "  itr map-resolver {}".format(address),
+                "  etr map-server {} key <secret:{}>".format(address, auth_ref),
+                "  etr map-server {} proxy-reply".format(address),
+            ]
+        )
+    commands.append("  etr")
+    if (intent.get("policy_plane") or {}).get("mode") not in {None, "none"}:
+        commands.append("  sgt")
+    commands.extend(
+        [
+            "  route-export publications",
+            "  distance publications 250",
+            "  no map-cache away-eids send-map-request",
+            "  proxy-etr",
+            "  proxy-itr {}".format(
+                _safe(device["loopback0_ip"], "subscriber loopback")
+            ),
+        ]
+    )
+    if "control_plane" in set(device.get("roles", [])):
+        commands.extend(["  map-server", "  map-resolver"])
+    commands.extend(["  exit-service-ipv4", " exit-router-lisp"])
+    return [_block("lisp_pubsub_subscriber", commands, [auth_ref])]
+
+
 def _vrf_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
     blocks: List[Dict[str, Any]] = []
     for vn in sorted(intent["virtual_networks"], key=lambda item: int(item["l3_instance_id"])):
@@ -713,8 +766,8 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
     if intent.get("fabric", {}).get("control_plane_mode") == "lisp_pubsub":
         blockers.append(
             {
-                "code": "lisp_pubsub.renderer_pending",
-                "message": "LISP Pub/Sub intent is planned but its release-specific CLI renderer is not hardware accepted",
+                "code": "lisp_pubsub.hardware_acceptance_pending",
+                "message": "LISP Pub/Sub subscriber CLI and operational gates are rendered and rollback-tested but await compatible IOS XE hardware acceptance",
             }
         )
     if intent.get("shared_services"):
@@ -753,9 +806,18 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
             )
         if "fabric_edge" in roles:
             phases.append({"phase_id": "lisp_edges", "blocks": _edge_lisp_blocks(intent)})
-            phases.append({"phase_id": "overlay", "blocks": _edge_overlay_blocks(intent)})
+            overlay_blocks = _edge_overlay_blocks(intent)
+            if "border" in roles:
+                overlay_blocks.extend(_pubsub_subscriber_blocks(intent, device))
+            phases.append({"phase_id": "overlay", "blocks": overlay_blocks})
         elif "border" in roles:
-            phases.append({"phase_id": "overlay", "blocks": _vrf_blocks(intent)})
+            phases.append(
+                {
+                    "phase_id": "overlay",
+                    "blocks": _vrf_blocks(intent)
+                    + _pubsub_subscriber_blocks(intent, device),
+                }
+            )
         if "border" in roles:
             phases.append(
                 {
