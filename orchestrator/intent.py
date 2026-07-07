@@ -1107,6 +1107,97 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 "$.shared_services.vrf",
                 f"Unknown shared-services VRF {service_vrf!r}",
             )
+        attachment_ids: Dict[str, str] = {}
+        attached_fusions: Dict[str, str] = {}
+        for index, raw_attachment in enumerate(
+            _list(
+                shared.get("attachments"),
+                "$.shared_services.attachments",
+                issues,
+            )
+        ):
+            path = f"$.shared_services.attachments[{index}]"
+            attachment = _mapping(raw_attachment, path, issues)
+            attachment_id = _required_string(attachment, "id", path, issues)
+            fusion_id = _required_string(attachment, "fusion_node_id", path, issues)
+            _required_string(attachment, "interface", path, issues)
+            _integer(attachment, "vlan_id", path, issues, 1, 4094)
+            if attachment_id:
+                _check_duplicate(
+                    attachment_ids,
+                    attachment_id,
+                    f"{path}.id",
+                    "shared-service attachment id",
+                    issues,
+                )
+            if fusion_id:
+                if fusion_id not in fusion_ids:
+                    _add(
+                        issues,
+                        "reference.fusion_node",
+                        f"{path}.fusion_node_id",
+                        f"Unknown fusion node {fusion_id!r}",
+                    )
+                _check_duplicate(
+                    attached_fusions,
+                    fusion_id,
+                    f"{path}.fusion_node_id",
+                    "fusion shared-service attachment",
+                    issues,
+                )
+            prefix = _ipv4_network(attachment.get("prefix"), f"{path}.prefix", issues)
+            local_ip = _ipv4_address(
+                attachment.get("local_ip"), f"{path}.local_ip", issues
+            )
+            next_hop = _ipv4_address(
+                attachment.get("next_hop"), f"{path}.next_hop", issues
+            )
+            if prefix:
+                address_networks.append(
+                    (f"{path}.prefix", prefix, "shared-service handoff")
+                )
+                if prefix.prefixlen not in (30, 31):
+                    _add(
+                        issues,
+                        "shared_service.attachment.prefix_length",
+                        f"{path}.prefix",
+                        "Shared-service handoffs must use /30 or /31",
+                    )
+            for field, address in (("local_ip", local_ip), ("next_hop", next_hop)):
+                if prefix and address and address not in prefix:
+                    _add(
+                        issues,
+                        "shared_service.attachment.address_outside_prefix",
+                        f"{path}.{field}",
+                        f"Address {address} is outside {prefix}",
+                    )
+                if (
+                    prefix
+                    and prefix.prefixlen <= 30
+                    and address in {prefix.network_address, prefix.broadcast_address}
+                ):
+                    _add(
+                        issues,
+                        "shared_service.attachment.address_not_usable",
+                        f"{path}.{field}",
+                        f"Address {address} is not a usable host in {prefix}",
+                    )
+            if local_ip and next_hop and local_ip == next_hop:
+                _add(
+                    issues,
+                    "shared_service.attachment.same_address",
+                    path,
+                    "Shared-service local and next-hop addresses must differ",
+                )
+        if environment == "production":
+            for fusion_id in sorted(fusion_ids):
+                if fusion_id not in attached_fusions:
+                    _add(
+                        issues,
+                        "shared_service.attachment.missing",
+                        "$.shared_services.attachments",
+                        f"Fusion node {fusion_id!r} has no shared-service attachment",
+                    )
         service_ids: Dict[str, str] = {}
         services = _list(shared.get("services"), "$.shared_services.services", issues)
         for index, raw_service in enumerate(services):

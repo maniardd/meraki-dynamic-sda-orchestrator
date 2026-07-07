@@ -29,6 +29,14 @@ def _safe(value: Any, label: str, spaces: bool = False) -> str:
     return rendered
 
 
+def _policy_name(kind: str, value: Any) -> str:
+    """Return a bounded deterministic IOS XE policy-object name."""
+
+    safe_kind = _safe(kind, "policy kind")
+    digest = sha256_json(str(value))[:12].upper()
+    return "SDA-{}-{}".format(safe_kind, digest)
+
+
 def _isis_net(loopback_ip: str, area: str = "49.0001") -> str:
     address = ip_address(loopback_ip)
     digits = "".join("{:03d}".format(int(octet)) for octet in str(address).split("."))
@@ -507,6 +515,186 @@ def _fusion_handoff_blocks(
     return blocks
 
 
+def _fusion_shared_service_blocks(
+    intent: Mapping[str, Any], fusion: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Render deny-by-default filtered route leaking on one fusion node."""
+
+    shared = intent.get("shared_services") or {}
+    if not shared:
+        return []
+    fusion_id = str(fusion["id"])
+    attachment = next(
+        (
+            item
+            for item in shared.get("attachments", [])
+            if str(item.get("fusion_node_id", "")) == fusion_id
+        ),
+        None,
+    )
+    if not attachment:
+        raise RenderError(
+            "Fusion node {} has no shared-service attachment".format(fusion_id)
+        )
+
+    virtual_networks = {item["vrf"]: item for item in intent["virtual_networks"]}
+    service_vrf = _safe(shared["vrf"], "shared-services VRF")
+    if service_vrf not in virtual_networks:
+        raise RenderError("Shared-services VRF is not a virtual network")
+    service_rt = _safe(
+        virtual_networks[service_vrf]["route_targets"][0],
+        "shared-services route target",
+    )
+    route_leaks = sorted(
+        shared.get("route_leaks", []), key=lambda item: str(item["consumer_vrf"])
+    )
+    service_prefixes = sorted(
+        {
+            str(prefix)
+            for service in shared.get("services", [])
+            for prefix in service.get("prefixes", [])
+        }
+    )
+    consumer_prefixes = sorted(
+        {
+            str(prefix)
+            for leak in route_leaks
+            for prefix in leak.get("export_prefixes", [])
+        }
+    )
+    if not service_prefixes or not consumer_prefixes:
+        raise RenderError("Shared-services route policy has no approved prefixes")
+
+    def policy_blocks(label: str, prefixes: Sequence[str]) -> List[Dict[str, Any]]:
+        prefix_name = _policy_name("PFX", label)
+        route_map_name = _policy_name("RMAP", label)
+        prefix_commands = ["no ip prefix-list {}".format(prefix_name)] + [
+            "ip prefix-list {} seq {} permit {}".format(
+                prefix_name, index * 10, _safe(prefix, "route-leak prefix")
+            )
+            for index, prefix in enumerate(sorted(set(prefixes)), start=1)
+        ]
+        return [
+            _block("prefix_list_{}".format(label), prefix_commands),
+            _block(
+                "route_map_{}".format(label),
+                [
+                    "no route-map {}".format(route_map_name),
+                    "route-map {} permit 10".format(route_map_name),
+                    " match ip address prefix-list {}".format(prefix_name),
+                ],
+            ),
+        ]
+
+    blocks: List[Dict[str, Any]] = []
+    service_export_label = "service_export"
+    service_import_label = "service_import"
+    blocks.extend(policy_blocks(service_export_label, service_prefixes))
+    blocks.extend(policy_blocks(service_import_label, consumer_prefixes))
+
+    consumer_route_targets = []
+    for leak in route_leaks:
+        consumer_vrf = _safe(leak["consumer_vrf"], "consumer VRF")
+        if consumer_vrf not in virtual_networks:
+            raise RenderError("Shared-services consumer VRF is unknown")
+        consumer_rt = _safe(
+            virtual_networks[consumer_vrf]["route_targets"][0],
+            "consumer route target",
+        )
+        consumer_route_targets.append(consumer_rt)
+        export_label = "{}_export".format(consumer_vrf)
+        import_label = "{}_import".format(consumer_vrf)
+        blocks.extend(policy_blocks(export_label, leak["export_prefixes"]))
+        blocks.extend(policy_blocks(import_label, leak["import_prefixes"]))
+        blocks.append(
+            _block(
+                "shared_leak_vrf_{}".format(consumer_vrf),
+                [
+                    "vrf definition {}".format(consumer_vrf),
+                    " address-family ipv4",
+                    "  route-target export {}".format(consumer_rt),
+                    "  route-target import {}".format(service_rt),
+                    "  export map {}".format(_policy_name("RMAP", export_label)),
+                    "  import map {}".format(_policy_name("RMAP", import_label)),
+                    "  exit-address-family",
+                ],
+            )
+        )
+
+    shared_vrf_commands = [
+        "vrf definition {}".format(service_vrf),
+        " address-family ipv4",
+        "  route-target export {}".format(service_rt),
+    ]
+    shared_vrf_commands.extend(
+        "  route-target import {}".format(item)
+        for item in sorted(set(consumer_route_targets))
+    )
+    shared_vrf_commands.extend(
+        [
+            "  export map {}".format(
+                _policy_name("RMAP", service_export_label)
+            ),
+            "  import map {}".format(
+                _policy_name("RMAP", service_import_label)
+            ),
+            "  exit-address-family",
+        ]
+    )
+    blocks.append(_block("shared_service_vrf_policy", shared_vrf_commands))
+
+    vlan_id = int(attachment["vlan_id"])
+    interface = _safe(attachment["interface"], "shared-service interface")
+    prefix = ip_network(str(attachment["prefix"]))
+    local_ip = _safe(attachment["local_ip"], "shared-service local IP")
+    next_hop = _safe(attachment["next_hop"], "shared-service next hop")
+    blocks.append(
+        _block(
+            "shared_service_attachment",
+            [
+                "vlan {}".format(vlan_id),
+                " name SDA-SHARED-SERVICES",
+                "interface {}".format(interface),
+                " description SDA shared-services handoff",
+                " switchport mode trunk",
+                " switchport trunk allowed vlan {}".format(vlan_id),
+                " no shutdown",
+                "interface Vlan{}".format(vlan_id),
+                " description SDA shared-services routed handoff",
+                " vrf forwarding {}".format(service_vrf),
+                " ip address {} {}".format(local_ip, prefix.netmask),
+                " no shutdown",
+            ],
+        )
+    )
+    blocks.append(
+        _block(
+            "shared_service_static_routes",
+            [
+                "ip route vrf {} {} {} {}".format(
+                    service_vrf,
+                    ip_network(item).network_address,
+                    ip_network(item).netmask,
+                    next_hop,
+                )
+                for item in service_prefixes
+            ],
+        )
+    )
+    blocks.append(
+        _block(
+            "shared_service_bgp_redistribution",
+            [
+                "router bgp {}".format(int(fusion["bgp_asn"])),
+                " address-family ipv4 vrf {}".format(service_vrf),
+                "  redistribute static",
+                "  exit-address-family",
+            ],
+        )
+    )
+    return blocks
+
+
 def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> Dict[str, Any]:
     """Render deterministic per-device phase artifacts for human review."""
     if str(plan["intent_hash"]) != sha256_json(intent):
@@ -532,8 +720,8 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
     if intent.get("shared_services"):
         blockers.append(
             {
-                "code": "shared_services.renderer_pending",
-                "message": "Shared-service route leaking remains disabled until prefix-list and rollback acceptance passes",
+                "code": "shared_services.hardware_acceptance_pending",
+                "message": "Shared-service route leaking is rendered and rollback-tested but awaits compatible IOS XE fusion hardware acceptance",
             }
         )
     if (intent.get("multicast") or {}).get("enabled"):
@@ -593,7 +781,11 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
                 {
                     "phase_id": "border_handoff",
                     "blocks": _fusion_handoff_blocks(intent, fusion),
-                }
+                },
+                {
+                    "phase_id": "shared_services",
+                    "blocks": _fusion_shared_service_blocks(intent, fusion),
+                },
             ],
         }
 

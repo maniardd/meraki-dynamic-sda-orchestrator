@@ -72,7 +72,7 @@ artifacts and creates operational BGP gates for both ends of every handoff.
 Apply remains disabled for four deliberately visible blockers:
 
 - `lisp_pubsub.renderer_pending`
-- `shared_services.renderer_pending`
+- `shared_services.hardware_acceptance_pending`
 - `multicast.overlay_renderer_pending`
 - `policy_plane.renderer_pending`
 
@@ -80,3 +80,9 @@ Each blocker is removed only after its release-specific renderer, rollback,
 failure-injection, and hardware or API acceptance tests pass. This prevents a
 valid planning document from being misrepresented as executable production
 configuration.
+
+The shared-services renderer, exact route gates, fusion-worker support, and
+failure-injection rollback test are complete. Its remaining blocker is now
+limited to compatible IOS XE hardware or trusted virtual-lab acceptance, as
+described in [Shared-services renderer and acceptance
+boundary](shared-services-renderer.md).

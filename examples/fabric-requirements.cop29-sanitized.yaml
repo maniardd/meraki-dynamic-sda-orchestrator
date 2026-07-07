@@ -231,6 +231,13 @@ border_handoff:
 shared_services:
   vrf: SHARED_VN
   default_action: deny
+  attachments:
+    - id: shared-services-fusion-01
+      fusion_node_id: fusion-01
+      interface: TwentyFiveGigE1/0/47
+    - id: shared-services-fusion-02
+      fusion_node_id: fusion-02
+      interface: TwentyFiveGigE1/0/47
   services:
     - id: campus-dhcp
       type: dhcp

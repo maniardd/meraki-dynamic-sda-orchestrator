@@ -7,6 +7,7 @@ from orchestrator.parsers import (
     verify_isis_neighbors,
     verify_lisp_sessions,
     verify_nve_peers,
+    verify_route_prefix,
 )
 
 
@@ -78,6 +79,14 @@ Neighbor        V    AS MsgRcvd MsgSent TblVer InQ OutQ Up/Down State/PfxRcd
     def test_all_expected_bgp_neighbors_pass(self):
         output = "198.51.100.1 4 65100 12 14 3 0 0 00:10:00 8"
         self.assertTrue(verify_bgp_neighbors(output, ["198.51.100.1"]).passed)
+
+    def test_exact_route_prefix_evidence_is_required(self):
+        output = "Routing entry for 203.0.113.0/26\n  Known via static"
+        self.assertTrue(verify_route_prefix(output, "203.0.113.0/26").passed)
+        self.assertFalse(verify_route_prefix(output, "203.0.113.64/26").passed)
+        self.assertFalse(
+            verify_route_prefix("% Network not in table", "203.0.113.0/26").passed
+        )
 
 
 if __name__ == "__main__":

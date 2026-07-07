@@ -161,3 +161,28 @@ def verify_ios_xe_version(output: str, expected_version: str) -> GateResult:
         reason,
         {"expected_version": expected_version, "observed_version": observed},
     )
+
+
+def verify_route_prefix(output: str, expected_prefix: str) -> GateResult:
+    """Require the exact IOS XE `Routing entry for` prefix evidence."""
+
+    expected = str(expected_prefix)
+    observed = [
+        match.group(1)
+        for match in re.finditer(
+            rf"^\s*Routing entry for\s+({IPV4_PATTERN}/\d{{1,2}})\s*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    ]
+    passed = expected in observed and "% Network not in table" not in output
+    reason = (
+        "Route {} is present".format(expected)
+        if passed
+        else "Expected route {} was not present".format(expected)
+    )
+    return GateResult(
+        passed,
+        reason,
+        {"expected_prefix": expected, "observed_prefixes": sorted(set(observed))},
+    )

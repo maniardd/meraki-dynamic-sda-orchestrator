@@ -94,7 +94,11 @@ class TransactionWorker:
             )
             return {"succeeded": False, "run": updated, "rolled_back": False}
 
-        devices = {str(device["id"]): device for device in intent["devices"]}
+        devices = {str(device["id"]): dict(device) for device in intent["devices"]}
+        for fusion in intent.get("fusion_nodes", []):
+            fusion_device = dict(fusion)
+            fusion_device["roles"] = ["fusion"]
+            devices[str(fusion_device["id"])] = fusion_device
         adapters: Dict[str, Any] = {}
         checkpoints: Dict[str, str] = {}
         gate_plan = build_gate_plan(intent)
@@ -137,7 +141,10 @@ class TransactionWorker:
                 "lisp_control_plane",
                 "lisp_edges",
                 "overlay",
+                "multicast",
                 "border_handoff",
+                "shared_services",
+                "policy_plane",
             ]
             for phase_id in ordered_phases:
                 for device_id in sorted(artifact_devices):

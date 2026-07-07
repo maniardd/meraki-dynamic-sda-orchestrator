@@ -60,6 +60,8 @@ Implemented foundation:
   shared-service route policy, native/replicated multicast, ISE, SGT, and SXP
 - Fusion-side VRF-lite/eBGP review artifacts and two-sided operational gates;
   unaccepted service and policy renderers remain explicit apply blockers
+- Deny-by-default shared-service route-leak rendering, exact route gates, and
+  fusion-node failure/rollback coverage; hardware acceptance remains blocked
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. Meraki import packaging and hardware
