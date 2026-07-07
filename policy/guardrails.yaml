@@ -4,6 +4,27 @@ fabric_control_plane:
   default_mode: classic_lisp
   allowed_modes: [classic_lisp, lisp_bgp_transit, lisp_pubsub]
 
+deployment_models: [single_site, distributed_campus]
+
+hierarchy:
+  max_depth: 16
+
+# CVD planning guidelines, not device or Catalyst Center maximum scale claims.
+# Exact release/platform limits remain a separate compatibility gate.
+site_profiles:
+  - id: fabric_in_a_box
+    max_endpoints: 999
+    max_aps: 49
+  - id: small_site
+    max_endpoints: 9999
+    max_aps: 499
+  - id: medium_site
+    max_endpoints: 49999
+    max_aps: 2499
+  - id: large_site
+    max_endpoints: 100000
+    max_aps: 10000
+
 supernets:
   underlay_p2p:
     cidr: 10.252.0.0/16

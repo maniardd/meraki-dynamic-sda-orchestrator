@@ -17,6 +17,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 ALLOWED_ENVIRONMENTS = {"lab", "staging", "production"}
 ALLOWED_UNDERLAY_PROTOCOLS = {"isis"}
+MAX_HIERARCHY_DEPTH = 16
 ALLOWED_ROLES = {
     "border",
     "control_plane",
@@ -280,12 +281,12 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     _walk_sensitive_fields(root, "$", issues)
 
     schema_version = root.get("schema_version")
-    if schema_version != "1.0":
+    if schema_version not in {"1.0", "1.1"}:
         _add(
             issues,
             "schema.unsupported",
             "$.schema_version",
-            "Supported schema_version is exactly '1.0'",
+            "Supported schema_version values are '1.0' and '1.1'",
         )
 
     metadata = _mapping(root.get("metadata"), "$.metadata", issues)
@@ -300,6 +301,158 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
             "$.metadata.environment",
             f"Expected one of {sorted(ALLOWED_ENVIRONMENTS)}",
         )
+
+    hierarchy_node_ids: Dict[str, str] = {}
+    hierarchy_parents: Dict[str, str] = {}
+    hierarchy_parent_paths: Dict[str, str] = {}
+    hierarchy_types: Dict[str, str] = {}
+    fabric_site_ids: Dict[str, str] = {}
+    fabric_site_nodes: Dict[str, str] = {}
+    fabric_site_node_ids: Dict[str, str] = {}
+    if schema_version == "1.1":
+        deployment_model = _required_string(root, "deployment_model", "$", issues)
+        if deployment_model and deployment_model not in {"single_site", "distributed_campus"}:
+            _add(
+                issues,
+                "enum.deployment_model",
+                "$.deployment_model",
+                "deployment_model must be single_site or distributed_campus",
+            )
+        hierarchy = _list(root.get("site_hierarchy"), "$.site_hierarchy", issues)
+        global_count = 0
+        for index, raw_node in enumerate(hierarchy):
+            path = f"$.site_hierarchy[{index}]"
+            node = _mapping(raw_node, path, issues)
+            node_id = _required_string(node, "id", path, issues)
+            _required_string(node, "name", path, issues)
+            node_type = _required_string(node, "type", path, issues)
+            if node_id:
+                _check_duplicate(hierarchy_node_ids, node_id, f"{path}.id", "hierarchy node id", issues)
+                if node_type:
+                    hierarchy_types[node_id] = node_type
+            if node_type == "global":
+                global_count += 1
+                if "parent_id" in node:
+                    _add(issues, "hierarchy.global_parent", f"{path}.parent_id", "Global node cannot have a parent")
+            else:
+                parent_id = _required_string(node, "parent_id", path, issues)
+                if node_id and parent_id:
+                    hierarchy_parents[node_id] = parent_id
+                    hierarchy_parent_paths[node_id] = f"{path}.parent_id"
+        if global_count != 1:
+            _add(issues, "hierarchy.global_count", "$.site_hierarchy", "Exactly one global node is required")
+        allowed_hierarchy_children = {
+            "global": {"area", "building"},
+            "area": {"area", "building"},
+            "building": {"floor"},
+            "floor": set(),
+        }
+        for node_id, parent_id in hierarchy_parents.items():
+            if parent_id not in hierarchy_node_ids:
+                _add(
+                    issues,
+                    "reference.hierarchy_parent",
+                    hierarchy_parent_paths.get(node_id, "$.site_hierarchy"),
+                    f"Unknown hierarchy parent {parent_id!r}",
+                )
+            elif hierarchy_types.get(node_id) not in allowed_hierarchy_children.get(
+                hierarchy_types.get(parent_id, ""), set()
+            ):
+                _add(
+                    issues,
+                    "hierarchy.parent_type",
+                    hierarchy_parent_paths.get(node_id, "$.site_hierarchy"),
+                    "Invalid hierarchy parent/child type relationship",
+                )
+        depths: Dict[str, int] = {
+            node_id: 0
+            for node_id, node_type in hierarchy_types.items()
+            if node_type == "global"
+        }
+        cycle_reported = False
+        for start in sorted(hierarchy_node_ids):
+            trail: List[str] = []
+            visiting = set()
+            cursor = start
+            invalid_path = False
+            while cursor not in depths:
+                if cursor in visiting:
+                    if not cycle_reported:
+                        _add(
+                            issues,
+                            "hierarchy.cycle",
+                            hierarchy_parent_paths.get(cursor, "$.site_hierarchy"),
+                            "Site hierarchy contains a parent cycle",
+                        )
+                        cycle_reported = True
+                    invalid_path = True
+                    break
+                if cursor not in hierarchy_node_ids:
+                    invalid_path = True
+                    break
+                visiting.add(cursor)
+                trail.append(cursor)
+                if cursor not in hierarchy_parents:
+                    depths[cursor] = 0
+                    break
+                cursor = hierarchy_parents[cursor]
+            if invalid_path:
+                continue
+            depth = depths[cursor]
+            for node_id in reversed(trail):
+                if node_id in depths:
+                    depth = depths[node_id]
+                    continue
+                depth += 1
+                depths[node_id] = depth
+                if depth > MAX_HIERARCHY_DEPTH:
+                    _add(
+                        issues,
+                        "hierarchy.too_deep",
+                        hierarchy_parent_paths.get(node_id, "$.site_hierarchy"),
+                        f"Site hierarchy exceeds maximum depth {MAX_HIERARCHY_DEPTH}",
+                    )
+
+        fabric_sites = _list(root.get("fabric_sites"), "$.fabric_sites", issues)
+        for index, raw_site in enumerate(fabric_sites):
+            path = f"$.fabric_sites[{index}]"
+            site = _mapping(raw_site, path, issues)
+            site_id = _required_string(site, "id", path, issues)
+            _required_string(site, "name", path, issues)
+            node_id = _required_string(site, "hierarchy_node_id", path, issues)
+            _integer(site, "endpoint_count", path, issues, 1, 1_000_000)
+            _integer(site, "ap_count", path, issues, 0, 100_000)
+            _required_string(site, "profile", path, issues)
+            if site_id:
+                _check_duplicate(fabric_site_ids, site_id, f"{path}.id", "fabric site id", issues)
+                if node_id:
+                    fabric_site_nodes[site_id] = node_id
+            if node_id and node_id not in hierarchy_node_ids:
+                _add(
+                    issues,
+                    "reference.hierarchy_node",
+                    f"{path}.hierarchy_node_id",
+                    f"Unknown hierarchy node {node_id!r}",
+                )
+            elif node_id:
+                _check_duplicate(
+                    fabric_site_node_ids,
+                    node_id,
+                    f"{path}.hierarchy_node_id",
+                    "fabric-site hierarchy node",
+                    issues,
+                )
+                if hierarchy_types.get(node_id) == "global":
+                    _add(
+                        issues,
+                        "site.global_node",
+                        f"{path}.hierarchy_node_id",
+                        "A fabric site cannot be attached to the global node",
+                    )
+        if deployment_model == "single_site" and len(fabric_sites) != 1:
+            _add(issues, "site.count", "$.fabric_sites", "single_site requires exactly one fabric site")
+        if deployment_model == "distributed_campus" and len(fabric_sites) < 2:
+            _add(issues, "site.count", "$.fabric_sites", "distributed_campus requires at least two fabric sites")
 
     fabric = _mapping(root.get("fabric"), "$.fabric", issues)
     _required_string(fabric, "id", "$.fabric", issues)
@@ -369,7 +522,14 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         device = _mapping(raw_device, path, issues)
         device_id = _required_string(device, "id", path, issues)
         hostname = _required_string(device, "hostname", path, issues)
-        _required_string(device, "site", path, issues)
+        site = _required_string(device, "site", path, issues)
+        if schema_version == "1.1" and site and site not in fabric_site_ids:
+            _add(
+                issues,
+                "reference.fabric_site",
+                f"{path}.site",
+                f"Unknown fabric site {site!r}",
+            )
         _required_string(device, "platform", path, issues)
         _required_string(device, "software_version", path, issues)
         if device_id:
@@ -555,6 +715,65 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 issues,
             )
 
+    if schema_version == "1.1":
+        zone_ids: Dict[str, str] = {}
+        zones = _list(root.get("fabric_zones", []), "$.fabric_zones", issues)
+
+        def hierarchy_descends_from(node_id: str, ancestor_id: str) -> bool:
+            cursor = node_id
+            visited = set()
+            while cursor not in visited:
+                if cursor == ancestor_id:
+                    return True
+                visited.add(cursor)
+                if cursor not in hierarchy_parents:
+                    return False
+                cursor = hierarchy_parents[cursor]
+            return False
+
+        for index, raw_zone in enumerate(zones):
+            path = f"$.fabric_zones[{index}]"
+            zone = _mapping(raw_zone, path, issues)
+            zone_id = _required_string(zone, "id", path, issues)
+            site_id = _required_string(zone, "fabric_site_id", path, issues)
+            node_id = _required_string(zone, "hierarchy_node_id", path, issues)
+            if zone_id:
+                _check_duplicate(zone_ids, zone_id, f"{path}.id", "fabric zone id", issues)
+            if site_id and site_id not in fabric_site_ids:
+                _add(
+                    issues,
+                    "reference.fabric_site",
+                    f"{path}.fabric_site_id",
+                    f"Unknown fabric site {site_id!r}",
+                )
+            if node_id and node_id not in hierarchy_node_ids:
+                _add(
+                    issues,
+                    "reference.hierarchy_node",
+                    f"{path}.hierarchy_node_id",
+                    f"Unknown hierarchy node {node_id!r}",
+                )
+            if (
+                site_id in fabric_site_nodes
+                and node_id in hierarchy_node_ids
+                and not hierarchy_descends_from(node_id, fabric_site_nodes[site_id])
+            ):
+                _add(
+                    issues,
+                    "zone.outside_site",
+                    f"{path}.hierarchy_node_id",
+                    "Fabric zone hierarchy node is outside its fabric site",
+                )
+            zone_vns = _list(zone.get("virtual_networks"), f"{path}.virtual_networks", issues)
+            for vn_index, vn_name in enumerate(zone_vns):
+                if vn_name not in vn_names:
+                    _add(
+                        issues,
+                        "reference.virtual_network",
+                        f"{path}.virtual_networks[{vn_index}]",
+                        f"Unknown virtual network {vn_name!r}",
+                    )
+
     endpoint_pools = _list(root.get("endpoint_pools"), "$.endpoint_pools", issues)
     pool_ids: Dict[str, str] = {}
     l2_instances: Dict[int, str] = {}
@@ -565,6 +784,13 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         pool_id = _required_string(pool, "id", path, issues)
         site = _required_string(pool, "site", path, issues)
         vn_name = _required_string(pool, "virtual_network", path, issues)
+        if schema_version == "1.1" and site and site not in fabric_site_ids:
+            _add(
+                issues,
+                "reference.fabric_site",
+                f"{path}.site",
+                f"Unknown fabric site {site!r}",
+            )
         if pool_id:
             _check_duplicate(pool_ids, pool_id, f"{path}.id", "endpoint-pool id", issues)
         if vn_name and vn_name not in vn_names:

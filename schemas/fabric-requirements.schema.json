@@ -14,8 +14,81 @@
     "virtual_networks"
   ],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"enum": ["1.0", "1.1"]},
     "allocation_domain": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+    "deployment_model": {"enum": ["single_site", "distributed_campus"]},
+    "site_hierarchy": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "type"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 128},
+          "type": {"enum": ["global", "area", "building", "floor"]},
+          "parent_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "address": {"type": "string", "maxLength": 512},
+          "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+          "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+          "timezone": {"type": "string", "minLength": 1, "maxLength": 64}
+        }
+      }
+    },
+    "fabric_sites": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2048,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "name", "hierarchy_node_id", "endpoint_count", "ap_count",
+          "site_local_services", "high_availability"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 128},
+          "hierarchy_node_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "endpoint_count": {"type": "integer", "minimum": 1, "maximum": 1000000},
+          "ap_count": {"type": "integer", "minimum": 0, "maximum": 100000},
+          "site_local_services": {
+            "type": "boolean",
+            "description": "Planning signal reserved for the shared-services and survivability topology phase."
+          },
+          "high_availability": {
+            "type": "boolean",
+            "description": "Planning signal reserved for per-site role and uplink redundancy enforcement."
+          },
+          "profile": {
+            "enum": ["fabric_in_a_box", "small_site", "medium_site", "large_site"]
+          }
+        }
+      }
+    },
+    "fabric_zones": {
+      "type": "array",
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "fabric_site_id", "hierarchy_node_id", "virtual_networks"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "fabric_site_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "hierarchy_node_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "virtual_networks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 512,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1, "maxLength": 64}
+          }
+        }
+      }
+    },
     "metadata": {
       "type": "object",
       "additionalProperties": false,
@@ -171,5 +244,32 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "1.1"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "required": ["deployment_model", "site_hierarchy", "fabric_sites"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "1.0"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {"required": ["deployment_model"]},
+            {"required": ["site_hierarchy"]},
+            {"required": ["fabric_sites"]},
+            {"required": ["fabric_zones"]}
+          ]
+        }
+      }
+    }
+  ]
 }

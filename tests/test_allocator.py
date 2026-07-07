@@ -18,6 +18,11 @@ class DynamicAllocatorTests(unittest.TestCase):
         self.requirements = yaml.safe_load(
             (ROOT / "examples" / "fabric-requirements.lab.yaml").read_text(encoding="utf-8")
         )
+        self.cvd_requirements = yaml.safe_load(
+            (ROOT / "examples" / "fabric-requirements.cvd-small.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
         self.policy = yaml.safe_load(
             (ROOT / "policy" / "guardrails.yaml").read_text(encoding="utf-8")
         )
@@ -46,6 +51,140 @@ class DynamicAllocatorTests(unittest.TestCase):
         second = self.derive(shuffled)
         self.assertEqual(first["intent"], second["intent"])
         self.assertNotEqual(first["requirements_hash"], second["requirements_hash"])
+
+    def test_cvd_hierarchy_site_profile_and_zone_are_derived(self):
+        intent = self.derive(requirements=self.cvd_requirements)["intent"]
+        self.assertEqual("1.1", intent["schema_version"])
+        self.assertEqual("single_site", intent["deployment_model"])
+        self.assertEqual("GLOBAL", intent["site_hierarchy"][0]["id"])
+        self.assertEqual("small_site", intent["fabric_sites"][0]["profile"])
+        self.assertEqual(
+            ["Corporate", "Guest"], intent["fabric_zones"][0]["virtual_networks"]
+        )
+        validation = validate_intent(intent)
+        self.assertTrue(validation.is_valid, validation.as_dict())
+
+    def test_cvd_context_is_deterministic_when_input_order_changes(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["site_hierarchy"].reverse()
+        candidate["fabric_zones"][0]["virtual_networks"].reverse()
+        first = self.derive(requirements=self.cvd_requirements)
+        second = self.derive(requirements=candidate)
+        self.assertEqual(first["intent"], second["intent"])
+
+    def test_cvd_hierarchy_rejects_unknown_parent(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["site_hierarchy"][-1]["parent_id"] = "MISSING-BUILDING"
+        with self.assertRaisesRegex(AllocationError, "unknown parent"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_building_may_be_directly_under_global(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["site_hierarchy"] = [
+            item for item in candidate["site_hierarchy"] if item["id"] != "AREA-SJC"
+        ]
+        building = next(
+            item for item in candidate["site_hierarchy"] if item["id"] == "BUILDING-23"
+        )
+        building["parent_id"] = "GLOBAL"
+        candidate["fabric_sites"][0]["hierarchy_node_id"] = "BUILDING-23"
+        intent = self.derive(requirements=candidate)["intent"]
+        self.assertEqual("GLOBAL", intent["site_hierarchy"][0]["id"])
+        self.assertEqual("BUILDING-23", intent["site_hierarchy"][1]["id"])
+
+    def test_cvd_hierarchy_depth_guard_fails_closed(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        hierarchy = [{"id": "GLOBAL", "name": "Global", "type": "global"}]
+        parent = "GLOBAL"
+        for index in range(1, 18):
+            node_id = "AREA-{:02d}".format(index)
+            hierarchy.append(
+                {"id": node_id, "name": node_id, "type": "area", "parent_id": parent}
+            )
+            parent = node_id
+        candidate["site_hierarchy"] = hierarchy
+        candidate["fabric_sites"][0]["hierarchy_node_id"] = parent
+        candidate["fabric_zones"] = []
+        with self.assertRaisesRegex(AllocationError, "maximum depth 16"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_duplicate_context_ids_are_rejected(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        duplicate_node = copy.deepcopy(candidate["site_hierarchy"][-1])
+        duplicate_node["name"] = "Duplicate floor"
+        candidate["site_hierarchy"].append(duplicate_node)
+        with self.assertRaisesRegex(AllocationError, "Duplicate hierarchy node"):
+            self.derive(requirements=candidate)
+
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["fabric_sites"].append(copy.deepcopy(candidate["fabric_sites"][0]))
+        with self.assertRaisesRegex(AllocationError, "Duplicate fabric site"):
+            self.derive(requirements=candidate)
+
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["fabric_zones"].append(copy.deepcopy(candidate["fabric_zones"][0]))
+        with self.assertRaisesRegex(AllocationError, "Duplicate fabric zone"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_zone_must_be_inside_its_fabric_site(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["site_hierarchy"].append(
+            {"id": "AREA-OTHER", "name": "Other", "type": "area", "parent_id": "GLOBAL"}
+        )
+        candidate["fabric_zones"][0]["hierarchy_node_id"] = "AREA-OTHER"
+        with self.assertRaisesRegex(AllocationError, "outside its fabric site"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_deployment_model_enforces_site_count(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["site_hierarchy"].append(
+            {"id": "AREA-SECOND", "name": "Second", "type": "area", "parent_id": "GLOBAL"}
+        )
+        second_site = copy.deepcopy(candidate["fabric_sites"][0])
+        second_site["id"] = "SITE-002"
+        second_site["name"] = "Second Site"
+        second_site["hierarchy_node_id"] = "AREA-SECOND"
+        candidate["fabric_sites"].append(second_site)
+        with self.assertRaisesRegex(AllocationError, "exactly one fabric site"):
+            self.derive(requirements=candidate)
+
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["deployment_model"] = "distributed_campus"
+        with self.assertRaisesRegex(AllocationError, "at least two fabric sites"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_profile_auto_recommendation_includes_boundaries(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        site = candidate["fabric_sites"][0]
+        site.pop("profile")
+        site["endpoint_count"] = 9999
+        site["ap_count"] = 499
+        intent = self.derive(requirements=candidate)["intent"]
+        self.assertEqual("small_site", intent["fabric_sites"][0]["profile"])
+
+    def test_schema_1_0_rejects_schema_1_1_context_keys(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["deployment_model"] = "single_site"
+        with self.assertRaisesRegex(AllocationError, "Requirements schema error"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_site_rejects_selected_profile_overflow(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["fabric_sites"][0]["endpoint_count"] = 10000
+        with self.assertRaisesRegex(AllocationError, "exceeds selected profile"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_zone_rejects_unknown_virtual_network(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["fabric_zones"][0]["virtual_networks"] = ["MISSING-VN"]
+        with self.assertRaisesRegex(AllocationError, "unknown virtual network"):
+            self.derive(requirements=candidate)
+
+    def test_cvd_device_rejects_unknown_fabric_site(self):
+        candidate = copy.deepcopy(self.cvd_requirements)
+        candidate["devices"][0]["site"] = "MISSING-SITE"
+        with self.assertRaisesRegex(AllocationError, "unknown fabric site"):
+            self.derive(requirements=candidate)
 
     def test_complete_derived_intent_passes_existing_validator(self):
         result = validate_intent(self.derive()["intent"])

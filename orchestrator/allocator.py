@@ -25,6 +25,7 @@ class AllocationError(ValueError):
 
 
 REQUIREMENTS_SCHEMA = Path(__file__).resolve().parents[1] / "schemas" / "fabric-requirements.schema.json"
+MAX_HIERARCHY_DEPTH = 16
 
 
 def validate_requirements_shape(requirements: Mapping[str, Any]) -> None:
@@ -212,6 +213,239 @@ def _require_keys(document: Mapping[str, Any], keys: Sequence[str], path: str) -
         raise AllocationError("{} is missing {}".format(path, ", ".join(missing)))
 
 
+def _derive_site_context(
+    requirements: Mapping[str, Any], policy: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """Validate and canonicalize the CVD-aligned hierarchy and site model."""
+
+    schema_version = str(requirements.get("schema_version", ""))
+    context_keys = ("deployment_model", "site_hierarchy", "fabric_sites", "fabric_zones")
+    has_context = any(key in requirements for key in context_keys)
+    if schema_version == "1.0" and not has_context:
+        return {}
+    if schema_version != "1.1":
+        raise AllocationError("CVD site context requires requirements schema_version 1.1")
+
+    deployment_model = str(requirements.get("deployment_model", ""))
+    allowed_models = set(policy.get("deployment_models", []))
+    if deployment_model not in allowed_models:
+        raise AllocationError(
+            "Deployment model {} is not approved by guardrails".format(deployment_model)
+        )
+
+    nodes: List[Dict[str, Any]] = []
+    node_by_id: Dict[str, Dict[str, Any]] = {}
+    for raw in sorted(
+        (copy.deepcopy(item) for item in requirements.get("site_hierarchy", [])),
+        key=lambda item: str(item.get("id", "")),
+    ):
+        node_id = str(raw.get("id", ""))
+        if node_id in node_by_id:
+            raise AllocationError("Duplicate hierarchy node id {}".format(node_id))
+        node_by_id[node_id] = raw
+        nodes.append(raw)
+
+    global_nodes = [item for item in nodes if str(item.get("type")) == "global"]
+    if len(global_nodes) != 1:
+        raise AllocationError("Site hierarchy requires exactly one global node")
+    allowed_children = {
+        "global": {"area", "building"},
+        "area": {"area", "building"},
+        "building": {"floor"},
+        "floor": set(),
+    }
+    parents: Dict[str, str] = {}
+    for node in nodes:
+        node_id = str(node["id"])
+        node_type = str(node["type"])
+        parent_id = node.get("parent_id")
+        if node_type == "global":
+            if parent_id is not None:
+                raise AllocationError("Global hierarchy node cannot have a parent")
+            continue
+        if not parent_id or str(parent_id) not in node_by_id:
+            raise AllocationError("Hierarchy node {} references an unknown parent".format(node_id))
+        parent_id = str(parent_id)
+        parent_type = str(node_by_id[parent_id]["type"])
+        if node_type not in allowed_children.get(parent_type, set()):
+            raise AllocationError(
+                "Hierarchy type {} cannot be a child of {}".format(node_type, parent_type)
+            )
+        parents[node_id] = parent_id
+
+    max_depth = int(policy.get("hierarchy", {}).get("max_depth", MAX_HIERARCHY_DEPTH))
+    if max_depth < 1 or max_depth > MAX_HIERARCHY_DEPTH:
+        raise AllocationError(
+            "Guardrail hierarchy.max_depth must be between 1 and {}".format(
+                MAX_HIERARCHY_DEPTH
+            )
+        )
+    depths: Dict[str, int] = {str(global_nodes[0]["id"]): 0}
+    for start in sorted(node_by_id):
+        trail: List[str] = []
+        visiting = set()
+        cursor = start
+        while cursor not in depths:
+            if cursor in visiting:
+                raise AllocationError("Site hierarchy contains a parent cycle")
+            visiting.add(cursor)
+            trail.append(cursor)
+            if cursor not in parents:
+                depths[cursor] = 0
+                break
+            cursor = parents[cursor]
+        depth = depths[cursor]
+        for node_id in reversed(trail):
+            if node_id in depths:
+                depth = depths[node_id]
+                continue
+            depth += 1
+            if depth > max_depth:
+                raise AllocationError(
+                    "Site hierarchy exceeds maximum depth {}".format(max_depth)
+                )
+            depths[node_id] = depth
+
+    nodes.sort(key=lambda item: (depths[str(item["id"])], str(item["id"])))
+
+    raw_profiles = policy.get("site_profiles", [])
+    profile_order: List[str] = []
+    profile_limits: Dict[str, Mapping[str, Any]] = {}
+    for entry in raw_profiles:
+        if not isinstance(entry, Mapping) or not entry.get("id"):
+            raise AllocationError("Guardrail site profile is invalid")
+        profile_id = str(entry["id"])
+        if profile_id in profile_limits:
+            raise AllocationError("Duplicate guardrail site profile {}".format(profile_id))
+        profile_order.append(profile_id)
+        profile_limits[profile_id] = entry
+    if not profile_order:
+        raise AllocationError("Guardrail site profiles are missing")
+
+    sites: List[Dict[str, Any]] = []
+    site_by_id: Dict[str, Dict[str, Any]] = {}
+    site_nodes = set()
+    for raw in sorted(
+        (copy.deepcopy(item) for item in requirements.get("fabric_sites", [])),
+        key=lambda item: str(item.get("id", "")),
+    ):
+        site_id = str(raw.get("id", ""))
+        if site_id in site_by_id:
+            raise AllocationError("Duplicate fabric site id {}".format(site_id))
+        hierarchy_node_id = str(raw.get("hierarchy_node_id", ""))
+        if hierarchy_node_id not in node_by_id:
+            raise AllocationError(
+                "Fabric site {} references an unknown hierarchy node".format(site_id)
+            )
+        if str(node_by_id[hierarchy_node_id]["type"]) == "global":
+            raise AllocationError("A fabric site cannot be attached to the global node")
+        if hierarchy_node_id in site_nodes:
+            raise AllocationError(
+                "Hierarchy node {} is already assigned to a fabric site".format(
+                    hierarchy_node_id
+                )
+            )
+        site_nodes.add(hierarchy_node_id)
+        endpoints = int(raw["endpoint_count"])
+        aps = int(raw["ap_count"])
+        recommended = next(
+            (
+                profile_id
+                for profile_id in profile_order
+                if endpoints <= int(profile_limits[profile_id]["max_endpoints"])
+                and aps <= int(profile_limits[profile_id]["max_aps"])
+            ),
+            None,
+        )
+        if recommended is None:
+            raise AllocationError(
+                "Fabric site {} exceeds the largest approved site profile".format(site_id)
+            )
+        selected = str(raw.get("profile") or recommended)
+        if selected not in profile_limits:
+            raise AllocationError("Unknown site profile {}".format(selected))
+        if endpoints > int(profile_limits[selected]["max_endpoints"]) or aps > int(
+            profile_limits[selected]["max_aps"]
+        ):
+            raise AllocationError(
+                "Fabric site {} exceeds selected profile {}".format(site_id, selected)
+            )
+        raw["profile"] = selected
+        site_by_id[site_id] = raw
+        sites.append(raw)
+
+    if deployment_model == "single_site" and len(sites) != 1:
+        raise AllocationError("single_site deployment requires exactly one fabric site")
+    if deployment_model == "distributed_campus" and len(sites) < 2:
+        raise AllocationError("distributed_campus requires at least two fabric sites")
+
+    site_ids = set(site_by_id)
+    for device in requirements.get("devices", []):
+        if str(device.get("site", "")) not in site_ids:
+            raise AllocationError(
+                "Device {} references an unknown fabric site".format(device.get("id", ""))
+            )
+    vn_names = {str(item.get("name", "")) for item in requirements.get("virtual_networks", [])}
+    for virtual_network in requirements.get("virtual_networks", []):
+        for site in virtual_network.get("sites", []):
+            if str(site.get("site", "")) not in site_ids:
+                raise AllocationError(
+                    "Virtual network {} references an unknown fabric site".format(
+                        virtual_network.get("name", "")
+                    )
+                )
+
+    def is_descendant(node_id: str, ancestor_id: str) -> bool:
+        cursor = node_id
+        visited = set()
+        while True:
+            if cursor == ancestor_id:
+                return True
+            if cursor in visited or cursor not in parents:
+                return False
+            visited.add(cursor)
+            cursor = parents[cursor]
+
+    zones: List[Dict[str, Any]] = []
+    zone_ids = set()
+    for raw in sorted(
+        (copy.deepcopy(item) for item in requirements.get("fabric_zones", [])),
+        key=lambda item: str(item.get("id", "")),
+    ):
+        zone_id = str(raw.get("id", ""))
+        if zone_id in zone_ids:
+            raise AllocationError("Duplicate fabric zone id {}".format(zone_id))
+        zone_ids.add(zone_id)
+        site_id = str(raw.get("fabric_site_id", ""))
+        node_id = str(raw.get("hierarchy_node_id", ""))
+        if site_id not in site_by_id:
+            raise AllocationError("Fabric zone {} references an unknown site".format(zone_id))
+        if node_id not in node_by_id:
+            raise AllocationError(
+                "Fabric zone {} references an unknown hierarchy node".format(zone_id)
+            )
+        if not is_descendant(node_id, str(site_by_id[site_id]["hierarchy_node_id"])):
+            raise AllocationError(
+                "Fabric zone {} is outside its fabric site hierarchy".format(zone_id)
+            )
+        unknown_vns = sorted(set(str(item) for item in raw["virtual_networks"]) - vn_names)
+        if unknown_vns:
+            raise AllocationError(
+                "Fabric zone {} references unknown virtual network {}".format(
+                    zone_id, unknown_vns[0]
+                )
+            )
+        raw["virtual_networks"] = sorted(str(item) for item in raw["virtual_networks"])
+        zones.append(raw)
+
+    return {
+        "deployment_model": deployment_model,
+        "site_hierarchy": nodes,
+        "fabric_sites": sites,
+        "fabric_zones": zones,
+    }
+
+
 def derive_fabric_intent(
     requirements: Mapping[str, Any],
     policy: Mapping[str, Any],
@@ -240,6 +474,7 @@ def derive_fabric_intent(
     allowed_modes = set(policy.get("fabric_control_plane", {}).get("allowed_modes", []))
     if mode not in allowed_modes:
         raise AllocationError("Control-plane mode {} is not approved".format(mode))
+    site_context = _derive_site_context(requirements, policy)
 
     pools = policy.get("supernets", {})
     for pool_id in ("underlay_p2p", "loopbacks", "overlay_hosts"):
@@ -443,7 +678,7 @@ def derive_fabric_intent(
             raise AllocationError("Production guardrails require redundant control planes")
 
     intent = {
-        "schema_version": "1.0",
+        "schema_version": str(requirements["schema_version"]),
         "metadata": copy.deepcopy(requirements["metadata"]),
         "fabric": {
             "id": str(fabric["id"]),
@@ -464,6 +699,7 @@ def derive_fabric_intent(
         "virtual_networks": virtual_networks,
         "endpoint_pools": endpoint_pools,
     }
+    intent.update(site_context)
     if bgp_enabled:
         if "border_handoff" not in pools:
             raise AllocationError("Guardrail pool border_handoff is missing")
