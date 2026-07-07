@@ -132,6 +132,24 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         with self.assertRaisesRegex(AllocationError, "full mesh is missing adjacency"):
             derive_fabric_intent(candidate, self.policy)
 
+    def test_narrowed_vn_list_cannot_single_home_a_production_vrf(self):
+        candidate = copy.deepcopy(self.requirements)
+        adjacency = next(
+            item
+            for item in candidate["border_handoff"]["adjacencies"]
+            if item["border_device_id"] == "border-cp-01"
+            and item["fusion_node_id"] == "fusion-02"
+        )
+        adjacency["virtual_networks"] = [
+            item["name"]
+            for item in candidate["virtual_networks"]
+            if item["name"] != "Media"
+        ]
+        with self.assertRaisesRegex(
+            AllocationError, "requires 2 nodes for border border-cp-01 virtual network Media"
+        ):
+            derive_fabric_intent(candidate, self.policy)
+
     def test_native_multicast_requires_pim_on_every_fabric_link(self):
         candidate = copy.deepcopy(self.requirements)
         candidate["links"][0]["pim_sparse_mode"] = False
@@ -142,6 +160,40 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         candidate = copy.deepcopy(self.requirements)
         candidate["shared_services"]["services"][0]["addresses"] = ["203.0.113.200"]
         with self.assertRaisesRegex(AllocationError, "outside its advertised prefixes"):
+            derive_fabric_intent(candidate, self.policy)
+
+    def test_shared_service_prefix_cannot_overlap_fabric_endpoint_space(self):
+        derived = self.derive()["intent"]
+        endpoint_pool = derived["endpoint_pools"][0]
+        candidate = copy.deepcopy(self.requirements)
+        service = candidate["shared_services"]["services"][0]
+        service["prefixes"] = [endpoint_pool["prefix"]]
+        service["addresses"] = [endpoint_pool["gateway"]]
+        with self.assertRaisesRegex(AllocationError, "overlaps fabric endpoint pool"):
+            derive_fabric_intent(candidate, self.policy)
+
+    def test_ssm_range_and_hybrid_sxp_listener_fail_closed(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["multicast"]["ssm_range"] = "239.0.0.0/8"
+        with self.assertRaisesRegex(AllocationError, "inside 232.0.0.0/8"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["sxp"]["connections"][0]["listener_ip"] = "203.0.113.22"
+        with self.assertRaisesRegex(AllocationError, "not an approved ISE node"):
+            derive_fabric_intent(candidate, self.policy)
+
+    def test_sgt_exhaustion_and_duplicate_contract_fail_closed(self):
+        policy = copy.deepcopy(self.policy)
+        policy["ranges"]["sgt"] = {"min": 1000, "max": 1002}
+        with self.assertRaisesRegex(AllocationError, "Scalar pool sgt is exhausted"):
+            derive_fabric_intent(self.requirements, policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["contracts"].append(
+            copy.deepcopy(candidate["policy_plane"]["contracts"][0])
+        )
+        with self.assertRaisesRegex(AllocationError, "Duplicate policy contract"):
             derive_fabric_intent(candidate, self.policy)
 
     def test_intent_validation_rejects_fusion_policy_and_multicast_drift(self):
@@ -157,6 +209,54 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertIn("bgp.remote_as.mismatch", codes)
         self.assertIn("multicast.mode_conflict", codes)
         self.assertIn("unique.duplicate", codes)
+
+    def test_intent_validation_rejects_ha_service_ssm_and_sxp_drift(self):
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["border_handoff"]["peers"] = [
+            item
+            for item in candidate["border_handoff"]["peers"]
+            if not (
+                item["device_id"] == "border-cp-01"
+                and item["fusion_node_id"] == "fusion-02"
+                and item["vrf"] == "MEDIA_VN"
+            )
+        ]
+        service = candidate["shared_services"]["services"][0]
+        service["prefixes"] = [candidate["endpoint_pools"][0]["prefix"]]
+        service["addresses"] = [candidate["endpoint_pools"][0]["gateway"]]
+        candidate["multicast"]["ssm_range"] = "239.0.0.0/8"
+        candidate["policy_plane"]["sxp"]["connections"][0]["listener_ip"] = "203.0.113.22"
+        result = validate_intent(candidate)
+        codes = {item.code for item in result.issues}
+        self.assertFalse(result.is_valid)
+        self.assertIn("bgp.border_vrf.insufficient_fusion_redundancy", codes)
+        self.assertIn("shared_service.prefix.overlap", codes)
+        self.assertIn("multicast.ssm_range", codes)
+        self.assertIn("reference.sxp_listener", codes)
+
+    def test_intent_validation_rejects_missing_fusion_and_border_vrf_peers(self):
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["border_handoff"]["peers"] = [
+            item
+            for item in candidate["border_handoff"]["peers"]
+            if item["fusion_node_id"] != "fusion-02"
+            and not (item["device_id"] == "border-cp-01" and item["vrf"] == "MEDIA_VN")
+        ]
+        result = validate_intent(candidate)
+        codes = {item.code for item in result.issues}
+        self.assertFalse(result.is_valid)
+        self.assertIn("bgp.fusion_without_peer", codes)
+        self.assertIn("bgp.border_vrf_without_peer", codes)
+
+    def test_intent_validation_rejects_asm_without_rp(self):
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["multicast"]["rp_mode"] = "none"
+        candidate["multicast"].pop("rp_address")
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn(
+            "multicast.asm.rp_required", {item.code for item in result.issues}
+        )
 
     def test_plan_targets_fusion_services_multicast_and_policy_phases(self):
         intent = self.derive()["intent"]
@@ -193,6 +293,8 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             blocker_codes,
         )
         self.assertFalse(artifacts["executable"])
+        self.assertEqual("1.0", artifacts["artifact_schema_version"])
+        self.assertEqual("1.2", artifacts["intent_schema_version"])
 
     def test_gate_plan_checks_both_sides_of_every_bgp_handoff(self):
         gates = build_gate_plan(self.derive()["intent"])

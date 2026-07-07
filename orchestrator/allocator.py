@@ -751,6 +751,15 @@ def derive_fabric_intent(
             service_ids.add(service_id)
             prefixes = sorted(str(_network(item)) for item in raw_service["prefixes"])
             parsed_prefixes = [_network(item) for item in prefixes]
+            for service_prefix in parsed_prefixes:
+                for endpoint_pool in endpoint_pools:
+                    endpoint_prefix = _network(str(endpoint_pool["prefix"]))
+                    if service_prefix.overlaps(endpoint_prefix):
+                        raise AllocationError(
+                            "Shared service {} prefix {} overlaps fabric endpoint pool {}".format(
+                                service_id, service_prefix, endpoint_prefix
+                            )
+                        )
             addresses = sorted(str(ipaddress.ip_address(item)) for item in raw_service["addresses"])
             for address in addresses:
                 if not any(ipaddress.ip_address(address) in prefix for prefix in parsed_prefixes):
@@ -849,6 +858,9 @@ def derive_fabric_intent(
                 "multicast_rp", int(pools["multicast_rp"].get("prefix_len", 32))
             )
             rp_address = str(rp_prefix.network_address)
+        ssm_range = _network(str(raw_multicast.get("ssm_range", "232.0.0.0/8")))
+        if not ssm_range.subnet_of(_network("232.0.0.0/8")):
+            raise AllocationError("Multicast ssm_range must be inside 232.0.0.0/8")
         multicast = {
             "enabled": enabled,
             "transport": transport,
@@ -856,7 +868,7 @@ def derive_fabric_intent(
             "rp_device_ids": rp_device_ids,
             "asm_virtual_networks": asm_vns,
             "ssm_virtual_networks": ssm_vns,
-            "ssm_range": str(raw_multicast.get("ssm_range", "232.0.0.0/8")),
+            "ssm_range": str(ssm_range),
         }
         if rp_address:
             multicast["rp_address"] = rp_address
@@ -928,8 +940,10 @@ def derive_fabric_intent(
             "security_groups": security_groups,
             "contracts": contracts,
         }
+        ise_addresses = set()
         if raw_policy_plane.get("ise"):
             raw_ise = raw_policy_plane["ise"]
+            ise_addresses = {str(item["address"]) for item in raw_ise["nodes"]}
             policy_plane["ise"] = {
                 "credential_ref": str(raw_ise["credential_ref"]),
                 "nodes": sorted(
@@ -958,6 +972,12 @@ def derive_fabric_intent(
                     raise AllocationError(
                         "SXP connection {} references unknown speaker {}".format(
                             connection_id, item["speaker_id"]
+                        )
+                    )
+                if policy_mode in {"ise", "hybrid"} and str(item["listener_ip"]) not in ise_addresses:
+                    raise AllocationError(
+                        "SXP connection {} listener {} is not an approved ISE node".format(
+                            connection_id, item["listener_ip"]
                         )
                     )
                 connections.append(
@@ -1051,6 +1071,7 @@ def derive_fabric_intent(
                 raise AllocationError("Schema 1.2 BGP handoff requires fusion adjacencies")
             fusion_by_id = {item["id"]: item for item in fusion_nodes}
             adjacency_pairs = set()
+            fusion_vns_by_border: Dict[Tuple[str, str], set] = {}
             expanded_peers = []
             for adjacency in sorted(
                 raw_adjacencies,
@@ -1087,6 +1108,9 @@ def derive_fabric_intent(
                         )
                     )
                 for vn_name in selected_vns:
+                    fusion_vns_by_border.setdefault((border_id, vn_name), set()).add(
+                        fusion_id
+                    )
                     expanded_peers.append(
                         {
                             "device_id": border_id,
@@ -1113,6 +1137,26 @@ def derive_fabric_intent(
                             *missing_pairs[0]
                         )
                     )
+                minimum_fusions = int(
+                    fusion_policy.get("min_fusion_nodes_per_border_vrf_production", 2)
+                )
+                if minimum_fusions < 1 or minimum_fusions > len(fusion_ids):
+                    raise AllocationError(
+                        "Fusion per-VRF redundancy guardrail must be between 1 and {}".format(
+                            len(fusion_ids)
+                        )
+                    )
+                for border_id in sorted(border_ids):
+                    for vn_name in sorted(vn_to_vrf):
+                        fusion_count = len(
+                            fusion_vns_by_border.get((border_id, vn_name), set())
+                        )
+                        if fusion_count < minimum_fusions:
+                            raise AllocationError(
+                                "Production fusion redundancy requires {} nodes for border {} virtual network {}; found {}".format(
+                                    minimum_fusions, border_id, vn_name, fusion_count
+                                )
+                            )
             raw_peers = expanded_peers
         else:
             remote_as = int(raw_handoff.get("remote_as", 0))

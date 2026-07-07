@@ -35,6 +35,7 @@ ranges:
 
 fusion:
   require_full_mesh_production: true
+  min_fusion_nodes_per_border_vrf_production: 2
 
 platform_matrix:
   - model: C9500-48Y4C

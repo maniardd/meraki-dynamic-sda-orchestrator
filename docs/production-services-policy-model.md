@@ -48,16 +48,22 @@ The allocator derives and reserves:
   architectures.
 - Fusion nodes remain outside the fabric node inventory. They terminate
   VRF-lite/eBGP handoffs and provide controlled shared-service route leaking.
+- Production policy requires every border/VRF pair to reach at least two
+  distinct fusion nodes, including when an adjacency narrows its VN list.
 - Native multicast requires PIM sparse mode on every fabric link. ASM and SSM
   cannot both be assigned to the same VN, and a production Anycast-RP requires
   at least two approved border nodes.
 - Shared-service addresses must fall inside their advertised prefixes. Every
   consumer must reference an existing VN with a derived endpoint prefix.
+- Shared-service prefixes cannot overlap any fabric endpoint pool, preventing
+  ambiguous routing and accidental recursive leaks.
 - Policy contracts can only reference defined security groups. SGTs, SXP
   connection IDs, device IDs, management addresses, RDs, and handoff resources
   are uniqueness checked.
 - ISE and SXP credentials are always `secret://` references. Inline secrets
   remain schema-invalid.
+- SSM ranges must be valid IPv4 CIDRs inside `232.0.0.0/8`. In ISE or hybrid
+  mode, SXP listeners must match approved ISE nodes.
 
 ## Execution boundary
 

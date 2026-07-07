@@ -852,6 +852,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     pool_ids: Dict[str, str] = {}
     l2_instances: Dict[int, str] = {}
     site_vlans: Dict[Tuple[str, int], str] = {}
+    endpoint_pool_networks: List[IPv4Network] = []
     for index, raw_pool in enumerate(endpoint_pools):
         path = f"$.endpoint_pools[{index}]"
         pool = _mapping(raw_pool, path, issues)
@@ -898,6 +899,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         gateway = _ipv4_address(pool.get("gateway"), f"{path}.gateway", issues)
         if prefix:
             address_networks.append((f"{path}.prefix", prefix, "endpoint pool"))
+            endpoint_pool_networks.append(prefix)
         if prefix and gateway and gateway not in prefix:
             _add(
                 issues,
@@ -969,6 +971,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         border_devices_with_peers = set()
         fusion_nodes_with_peers = set()
         border_vrf_pairs = set()
+        fusion_by_border_vrf: Dict[Tuple[str, str], set] = {}
         for index, raw_peer in enumerate(peers):
             path = f"$.border_handoff.peers[{index}]"
             peer = _mapping(raw_peer, path, issues)
@@ -1002,6 +1005,10 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     )
                 else:
                     fusion_nodes_with_peers.add(fusion_node_id)
+                    if device_id and vrf:
+                        fusion_by_border_vrf.setdefault((device_id, vrf), set()).add(
+                            fusion_node_id
+                        )
                     remote_as = peer.get("remote_as")
                     if (
                         isinstance(remote_as, int)
@@ -1080,6 +1087,15 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                             "$.border_handoff.peers",
                             f"Border {border_id!r} has no BGP handoff for VRF {vrf!r}",
                         )
+                    elif environment == "production" and len(
+                        fusion_by_border_vrf.get((border_id, vrf), set())
+                    ) < 2:
+                        _add(
+                            issues,
+                            "bgp.border_vrf.insufficient_fusion_redundancy",
+                            "$.border_handoff.peers",
+                            f"Border {border_id!r} VRF {vrf!r} requires peers to at least two fusion nodes",
+                        )
 
     if schema_version == "1.2":
         shared = _mapping(root.get("shared_services"), "$.shared_services", issues)
@@ -1108,6 +1124,13 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 )
                 if prefix:
                     prefixes.append(prefix)
+                    if any(prefix.overlaps(item) for item in endpoint_pool_networks):
+                        _add(
+                            issues,
+                            "shared_service.prefix.overlap",
+                            f"{path}.prefixes[{prefix_index}]",
+                            f"Shared-service prefix {prefix} overlaps fabric endpoint space",
+                        )
             for address_index, raw_address in enumerate(
                 _list(service.get("addresses"), f"{path}.addresses", issues)
             ):
@@ -1192,6 +1215,16 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 issues,
             )
         )
+        ssm_range = _ipv4_network(
+            multicast_context.get("ssm_range"), "$.multicast.ssm_range", issues
+        )
+        if ssm_range and not ssm_range.subnet_of(ip_network("232.0.0.0/8")):
+            _add(
+                issues,
+                "multicast.ssm_range",
+                "$.multicast.ssm_range",
+                "SSM range must be inside 232.0.0.0/8",
+            )
         if multicast_enabled and asm_vns and rp_mode == "none":
             _add(
                 issues,
@@ -1269,6 +1302,12 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     "policy contract",
                     issues,
                 )
+        ise_addresses = set()
+        ise = policy_plane.get("ise")
+        if isinstance(ise, Mapping):
+            for node in ise.get("nodes", []):
+                if isinstance(node, Mapping) and node.get("address"):
+                    ise_addresses.add(str(node["address"]))
         sxp = policy_plane.get("sxp")
         if isinstance(sxp, Mapping):
             for index, raw_connection in enumerate(
@@ -1283,6 +1322,14 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                         "reference.sxp_speaker",
                         f"{path}.speaker_id",
                         f"Unknown SXP speaker {speaker_id!r}",
+                    )
+                listener_ip = connection.get("listener_ip")
+                if policy_mode in {"ise", "hybrid"} and str(listener_ip) not in ise_addresses:
+                    _add(
+                        issues,
+                        "reference.sxp_listener",
+                        f"{path}.listener_ip",
+                        f"SXP listener {listener_ip!r} is not an approved ISE node",
                     )
 
     _check_network_overlaps(address_networks, issues)

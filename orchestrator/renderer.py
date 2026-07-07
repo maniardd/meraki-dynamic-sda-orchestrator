@@ -598,7 +598,8 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
         }
 
     body = {
-        "schema_version": "1.0",
+        "artifact_schema_version": "1.0",
+        "intent_schema_version": str(intent["schema_version"]),
         "plan_id": str(plan["plan_id"]),
         "plan_hash": str(plan["plan_hash"]),
         "intent_hash": str(plan["intent_hash"]),
