@@ -1,0 +1,195 @@
+schema_version: "1.1"
+allocation_domain: acceptance-large-campus
+deployment_model: single_site
+
+metadata:
+  name: Sanitized large-campus acceptance fabric
+  environment: production
+  organization: EXAMPLE-ORGANIZATION
+  region: EXAMPLE-REGION
+  change_reference: ACCEPTANCE-LARGE-CAMPUS-001
+
+site_hierarchy:
+  - {id: GLOBAL, name: Global, type: global}
+  - {id: AREA-CAMPUS, name: Large Campus, type: area, parent_id: GLOBAL}
+  - {id: BUILDING-A, name: Building A, type: building, parent_id: AREA-CAMPUS}
+  - {id: BUILDING-B, name: Building B, type: building, parent_id: AREA-CAMPUS}
+  - {id: FLOOR-A1, name: Building A Floor 1, type: floor, parent_id: BUILDING-A}
+  - {id: FLOOR-A2, name: Building A Floor 2, type: floor, parent_id: BUILDING-A}
+  - {id: FLOOR-B1, name: Building B Floor 1, type: floor, parent_id: BUILDING-B}
+  - {id: FLOOR-B2, name: Building B Floor 2, type: floor, parent_id: BUILDING-B}
+
+fabric_sites:
+  - id: SITE-LARGE-CAMPUS
+    name: Large Campus Fabric Site
+    hierarchy_node_id: AREA-CAMPUS
+    endpoint_count: 60000
+    ap_count: 1500
+    site_local_services: true
+    high_availability: true
+    profile: large_site
+
+fabric_zones:
+  - id: ZONE-A1
+    fabric_site_id: SITE-LARGE-CAMPUS
+    hierarchy_node_id: FLOOR-A1
+    virtual_networks: [Corporate, Guest, IoT, Shared-Services]
+  - id: ZONE-A2
+    fabric_site_id: SITE-LARGE-CAMPUS
+    hierarchy_node_id: FLOOR-A2
+    virtual_networks: [Corporate, Media, Partner, Shared-Services]
+  - id: ZONE-B1
+    fabric_site_id: SITE-LARGE-CAMPUS
+    hierarchy_node_id: FLOOR-B1
+    virtual_networks: [Corporate, Guest, Media, Shared-Services]
+  - id: ZONE-B2
+    fabric_site_id: SITE-LARGE-CAMPUS
+    hierarchy_node_id: FLOOR-B2
+    virtual_networks: [Corporate, IoT, Partner, Shared-Services]
+
+fabric:
+  id: fab-acceptance-large-001
+  name: ACCEPTANCE-LARGE-CAMPUS
+  mtu: 9100
+  control_plane_mode: classic_lisp
+  isis_process: SDA-ISIS
+  isis_area: "49.0001"
+  lisp_site_name: acceptance_large_campus
+  lisp_auth_key_ref: secret://acceptance/lisp/fab-acceptance-large-001
+
+devices:
+  - id: border-cp-01
+    hostname: BORDER-CP-01
+    site: SITE-LARGE-CAMPUS
+    platform: C9500-48Y4C
+    software_version: 17.12.4
+    management_ip: 192.0.2.10
+    dashboard_management_ip: 198.51.100.10
+    roles: [border, control_plane]
+    credential_ref: secret://acceptance/devices/border-cp-01
+  - id: border-cp-02
+    hostname: BORDER-CP-02
+    site: SITE-LARGE-CAMPUS
+    platform: C9500-48Y4C
+    software_version: 17.12.4
+    management_ip: 192.0.2.11
+    dashboard_management_ip: 198.51.100.11
+    roles: [border, control_plane]
+    credential_ref: secret://acceptance/devices/border-cp-02
+  - id: edge-01
+    hostname: EDGE-01
+    site: SITE-LARGE-CAMPUS
+    platform: C9300X-48HX
+    software_version: 17.12.4
+    management_ip: 192.0.2.21
+    dashboard_management_ip: 198.51.100.21
+    roles: [fabric_edge]
+    credential_ref: secret://acceptance/devices/edge-01
+  - id: edge-02
+    hostname: EDGE-02
+    site: SITE-LARGE-CAMPUS
+    platform: C9300X-48HX
+    software_version: 17.12.4
+    management_ip: 192.0.2.22
+    dashboard_management_ip: 198.51.100.22
+    roles: [fabric_edge]
+    credential_ref: secret://acceptance/devices/edge-02
+  - id: edge-03
+    hostname: EDGE-03
+    site: SITE-LARGE-CAMPUS
+    platform: C9300X-48HX
+    software_version: 17.12.4
+    management_ip: 192.0.2.23
+    dashboard_management_ip: 198.51.100.23
+    roles: [fabric_edge]
+    credential_ref: secret://acceptance/devices/edge-03
+  - id: edge-04
+    hostname: EDGE-04
+    site: SITE-LARGE-CAMPUS
+    platform: C9300X-48HX
+    software_version: 17.12.4
+    management_ip: 192.0.2.24
+    dashboard_management_ip: 198.51.100.24
+    roles: [fabric_edge]
+    credential_ref: secret://acceptance/devices/edge-04
+
+links:
+  - id: border-cp-01--edge-01
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/1}
+      - {device_id: edge-01, interface: TwentyFiveGigE1/1/1}
+    pim_sparse_mode: true
+    bfd: &fabric_bfd {enabled: true, interval_ms: 300, min_rx_ms: 300, multiplier: 3}
+  - id: border-cp-02--edge-01
+    endpoints:
+      - {device_id: border-cp-02, interface: TwentyFiveGigE1/0/1}
+      - {device_id: edge-01, interface: TwentyFiveGigE1/1/2}
+    pim_sparse_mode: true
+    bfd: *fabric_bfd
+  - id: border-cp-01--edge-02
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/2}
+      - {device_id: edge-02, interface: TwentyFiveGigE1/1/1}
+    pim_sparse_mode: true
+    bfd: *fabric_bfd
+  - id: border-cp-02--edge-02
+    endpoints:
+      - {device_id: border-cp-02, interface: TwentyFiveGigE1/0/2}
+      - {device_id: edge-02, interface: TwentyFiveGigE1/1/2}
+    pim_sparse_mode: true
+    bfd: *fabric_bfd
+  - id: border-cp-01--edge-03
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/3}
+      - {device_id: edge-03, interface: TwentyFiveGigE1/1/1}
+    pim_sparse_mode: true
+    bfd: *fabric_bfd
+  - id: border-cp-02--edge-03
+    endpoints:
+      - {device_id: border-cp-02, interface: TwentyFiveGigE1/0/3}
+      - {device_id: edge-03, interface: TwentyFiveGigE1/1/2}
+    pim_sparse_mode: true
+    bfd: *fabric_bfd
+  - id: border-cp-01--edge-04
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/4}
+      - {device_id: edge-04, interface: TwentyFiveGigE1/1/1}
+    pim_sparse_mode: true
+    bfd: *fabric_bfd
+  - id: border-cp-02--edge-04
+    endpoints:
+      - {device_id: border-cp-02, interface: TwentyFiveGigE1/0/4}
+      - {device_id: edge-04, interface: TwentyFiveGigE1/1/2}
+    pim_sparse_mode: true
+    bfd: *fabric_bfd
+
+virtual_networks:
+  - name: Corporate
+    vrf: CORP_VN
+    sites:
+      - {site: SITE-LARGE-CAMPUS, users: 18000, headroom_percent: 25, dhcp_helpers: [203.0.113.10, 203.0.113.11]}
+  - name: Guest
+    vrf: GUEST_VN
+    sites:
+      - {site: SITE-LARGE-CAMPUS, users: 10000, headroom_percent: 50, dhcp_helpers: [203.0.113.10, 203.0.113.11]}
+  - name: Media
+    vrf: MEDIA_VN
+    sites:
+      - {site: SITE-LARGE-CAMPUS, users: 8000, headroom_percent: 25, dhcp_helpers: [203.0.113.10, 203.0.113.11]}
+  - name: IoT
+    vrf: IOT_VN
+    sites:
+      - {site: SITE-LARGE-CAMPUS, users: 6000, headroom_percent: 50, dhcp_helpers: [203.0.113.10, 203.0.113.11]}
+  - name: Partner
+    vrf: PARTNER_VN
+    sites:
+      - {site: SITE-LARGE-CAMPUS, users: 4000, headroom_percent: 25, dhcp_helpers: [203.0.113.10, 203.0.113.11]}
+  - name: Shared-Services
+    vrf: SHARED_VN
+    sites:
+      - {site: SITE-LARGE-CAMPUS, users: 2000, headroom_percent: 25, dhcp_helpers: [203.0.113.10, 203.0.113.11]}
+
+border_handoff:
+  enabled: true
+  mode: bgp
+  remote_as: 65010

@@ -733,7 +733,10 @@ def derive_fabric_intent(
             prefix = reserve_prefix(
                 "border_handoff", int(pools["border_handoff"]["prefix_len"])
             )
-            addresses = list(prefix)
+            # hosts() returns both addresses for /31 and excludes the network
+            # and broadcast addresses for /30, so either supported handoff
+            # size produces IOS XE-usable peer addresses.
+            addresses = list(prefix.hosts())
             peers.append(
                 {
                     "device_id": device_id,
