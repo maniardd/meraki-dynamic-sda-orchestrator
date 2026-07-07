@@ -281,12 +281,12 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     _walk_sensitive_fields(root, "$", issues)
 
     schema_version = root.get("schema_version")
-    if schema_version not in {"1.0", "1.1"}:
+    if schema_version not in {"1.0", "1.1", "1.2"}:
         _add(
             issues,
             "schema.unsupported",
             "$.schema_version",
-            "Supported schema_version values are '1.0' and '1.1'",
+            "Supported schema_version values are '1.0', '1.1', and '1.2'",
         )
 
     metadata = _mapping(root.get("metadata"), "$.metadata", issues)
@@ -309,7 +309,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     fabric_site_ids: Dict[str, str] = {}
     fabric_site_nodes: Dict[str, str] = {}
     fabric_site_node_ids: Dict[str, str] = {}
-    if schema_version == "1.1":
+    if schema_version in {"1.1", "1.2"}:
         deployment_model = _required_string(root, "deployment_model", "$", issues)
         if deployment_model and deployment_model not in {"single_site", "distributed_campus"}:
             _add(
@@ -515,6 +515,8 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     loopbacks: Dict[IPv4Address, str] = {}
     role_counts = {role: 0 for role in ALLOWED_ROLES}
     device_roles: Dict[str, set] = {}
+    fusion_ids: Dict[str, str] = {}
+    fusion_asns: Dict[str, int] = {}
     address_networks: List[Tuple[str, IPv4Network, str]] = []
 
     for index, raw_device in enumerate(devices):
@@ -523,7 +525,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         device_id = _required_string(device, "id", path, issues)
         hostname = _required_string(device, "hostname", path, issues)
         site = _required_string(device, "site", path, issues)
-        if schema_version == "1.1" and site and site not in fabric_site_ids:
+        if schema_version in {"1.1", "1.2"} and site and site not in fabric_site_ids:
             _add(
                 issues,
                 "reference.fabric_site",
@@ -581,6 +583,69 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 "security.credential_ref",
                 f"{path}.credential_ref",
                 "credential_ref must use the secret:// reference scheme",
+            )
+
+    if schema_version == "1.2":
+        fusion_nodes = _list(root.get("fusion_nodes"), "$.fusion_nodes", issues)
+        for index, raw_fusion in enumerate(fusion_nodes):
+            path = f"$.fusion_nodes[{index}]"
+            fusion = _mapping(raw_fusion, path, issues)
+            fusion_id = _required_string(fusion, "id", path, issues)
+            hostname = _required_string(fusion, "hostname", path, issues)
+            _required_string(fusion, "platform", path, issues)
+            _required_string(fusion, "software_version", path, issues)
+            if fusion_id:
+                _check_duplicate(fusion_ids, fusion_id, f"{path}.id", "fusion node id", issues)
+                if fusion_id in device_ids:
+                    _add(
+                        issues,
+                        "unique.duplicate",
+                        f"{path}.id",
+                        "Fusion node id duplicates a fabric device id",
+                    )
+            if hostname:
+                _check_duplicate(hostnames, hostname.lower(), f"{path}.hostname", "hostname", issues)
+            management_ip = _ipv4_address(
+                fusion.get("management_ip"), f"{path}.management_ip", issues
+            )
+            dashboard_management_ip = None
+            if "dashboard_management_ip" in fusion:
+                dashboard_management_ip = _ipv4_address(
+                    fusion.get("dashboard_management_ip"),
+                    f"{path}.dashboard_management_ip",
+                    issues,
+                )
+            _check_duplicate(
+                management_ips,
+                management_ip,
+                f"{path}.management_ip",
+                "management IP",
+                issues,
+            )
+            _check_duplicate(
+                dashboard_management_ips,
+                dashboard_management_ip,
+                f"{path}.dashboard_management_ip",
+                "Dashboard management IP",
+                issues,
+            )
+            bgp_asn = _integer(fusion, "bgp_asn", path, issues, 1, 4_294_967_295)
+            if fusion_id and bgp_asn is not None:
+                fusion_asns[fusion_id] = bgp_asn
+            credential_ref = fusion.get("credential_ref")
+            if not isinstance(credential_ref, str) or not credential_ref.startswith("secret://"):
+                _add(
+                    issues,
+                    "security.credential_ref",
+                    f"{path}.credential_ref",
+                    "credential_ref must use the secret:// reference scheme",
+                )
+        if environment == "production" and len(fusion_nodes) < 2:
+            _add(
+                issues,
+                "ha.fusion",
+                "$.fusion_nodes",
+                "Production schema 1.2 requires at least two fusion nodes",
             )
 
     if role_counts["fabric_edge"] == 0:
@@ -724,7 +789,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 issues,
             )
 
-    if schema_version == "1.1":
+    if schema_version in {"1.1", "1.2"}:
         zone_ids: Dict[str, str] = {}
         zones = _list(root.get("fabric_zones", []), "$.fabric_zones", issues)
 
@@ -787,13 +852,14 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     pool_ids: Dict[str, str] = {}
     l2_instances: Dict[int, str] = {}
     site_vlans: Dict[Tuple[str, int], str] = {}
+    endpoint_pool_networks: List[IPv4Network] = []
     for index, raw_pool in enumerate(endpoint_pools):
         path = f"$.endpoint_pools[{index}]"
         pool = _mapping(raw_pool, path, issues)
         pool_id = _required_string(pool, "id", path, issues)
         site = _required_string(pool, "site", path, issues)
         vn_name = _required_string(pool, "virtual_network", path, issues)
-        if schema_version == "1.1" and site and site not in fabric_site_ids:
+        if schema_version in {"1.1", "1.2"} and site and site not in fabric_site_ids:
             _add(
                 issues,
                 "reference.fabric_site",
@@ -833,6 +899,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         gateway = _ipv4_address(pool.get("gateway"), f"{path}.gateway", issues)
         if prefix:
             address_networks.append((f"{path}.prefix", prefix, "endpoint pool"))
+            endpoint_pool_networks.append(prefix)
         if prefix and gateway and gateway not in prefix:
             _add(
                 issues,
@@ -902,10 +969,16 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         peer_keys: Dict[Tuple[str, str, str], str] = {}
         device_vlans: Dict[Tuple[str, int], str] = {}
         border_devices_with_peers = set()
+        fusion_nodes_with_peers = set()
+        border_vrf_pairs = set()
+        fusion_by_border_vrf: Dict[Tuple[str, str], set] = {}
         for index, raw_peer in enumerate(peers):
             path = f"$.border_handoff.peers[{index}]"
             peer = _mapping(raw_peer, path, issues)
             device_id = _required_string(peer, "device_id", path, issues)
+            fusion_node_id = None
+            if schema_version == "1.2":
+                fusion_node_id = _required_string(peer, "fusion_node_id", path, issues)
             vrf = _required_string(peer, "vrf", path, issues)
             _required_string(peer, "interface", path, issues)
             vlan = _integer(peer, "vlan_id", path, issues, 1, 4094)
@@ -922,6 +995,34 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     border_devices_with_peers.add(device_id)
             if vrf and vrf not in vrf_names:
                 _add(issues, "reference.vrf", f"{path}.vrf", f"Unknown VRF {vrf!r}")
+            if fusion_node_id:
+                if fusion_node_id not in fusion_ids:
+                    _add(
+                        issues,
+                        "reference.fusion_node",
+                        f"{path}.fusion_node_id",
+                        f"Unknown fusion node {fusion_node_id!r}",
+                    )
+                else:
+                    fusion_nodes_with_peers.add(fusion_node_id)
+                    if device_id and vrf:
+                        fusion_by_border_vrf.setdefault((device_id, vrf), set()).add(
+                            fusion_node_id
+                        )
+                    remote_as = peer.get("remote_as")
+                    if (
+                        isinstance(remote_as, int)
+                        and fusion_node_id in fusion_asns
+                        and remote_as != fusion_asns[fusion_node_id]
+                    ):
+                        _add(
+                            issues,
+                            "bgp.remote_as.mismatch",
+                            f"{path}.remote_as",
+                            "BGP remote AS does not match the referenced fusion node",
+                        )
+            if device_id and vrf:
+                border_vrf_pairs.add((device_id, vrf))
             if prefix:
                 address_networks.append((f"{path}.prefix", prefix, "BGP handoff"))
                 if prefix.prefixlen not in (30, 31):
@@ -966,6 +1067,270 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     "$.border_handoff.peers",
                     f"Border device {border_id!r} has no BGP handoff peer",
                 )
+        if schema_version == "1.2":
+            for fusion_id in sorted(fusion_ids):
+                if fusion_id not in fusion_nodes_with_peers:
+                    _add(
+                        issues,
+                        "bgp.fusion_without_peer",
+                        "$.border_handoff.peers",
+                        f"Fusion node {fusion_id!r} has no BGP handoff peer",
+                    )
+            for border_id, roles in sorted(device_roles.items()):
+                if "border" not in roles:
+                    continue
+                for vrf in sorted(vrf_names):
+                    if (border_id, vrf) not in border_vrf_pairs:
+                        _add(
+                            issues,
+                            "bgp.border_vrf_without_peer",
+                            "$.border_handoff.peers",
+                            f"Border {border_id!r} has no BGP handoff for VRF {vrf!r}",
+                        )
+                    elif environment == "production" and len(
+                        fusion_by_border_vrf.get((border_id, vrf), set())
+                    ) < 2:
+                        _add(
+                            issues,
+                            "bgp.border_vrf.insufficient_fusion_redundancy",
+                            "$.border_handoff.peers",
+                            f"Border {border_id!r} VRF {vrf!r} requires peers to at least two fusion nodes",
+                        )
+
+    if schema_version == "1.2":
+        shared = _mapping(root.get("shared_services"), "$.shared_services", issues)
+        service_vrf = _required_string(shared, "vrf", "$.shared_services", issues)
+        if service_vrf and service_vrf not in vrf_names:
+            _add(
+                issues,
+                "reference.shared_services_vrf",
+                "$.shared_services.vrf",
+                f"Unknown shared-services VRF {service_vrf!r}",
+            )
+        service_ids: Dict[str, str] = {}
+        services = _list(shared.get("services"), "$.shared_services.services", issues)
+        for index, raw_service in enumerate(services):
+            path = f"$.shared_services.services[{index}]"
+            service = _mapping(raw_service, path, issues)
+            service_id = _required_string(service, "id", path, issues)
+            if service_id:
+                _check_duplicate(service_ids, service_id, f"{path}.id", "shared service id", issues)
+            prefixes = []
+            for prefix_index, raw_prefix in enumerate(
+                _list(service.get("prefixes"), f"{path}.prefixes", issues)
+            ):
+                prefix = _ipv4_network(
+                    raw_prefix, f"{path}.prefixes[{prefix_index}]", issues
+                )
+                if prefix:
+                    prefixes.append(prefix)
+                    if any(prefix.overlaps(item) for item in endpoint_pool_networks):
+                        _add(
+                            issues,
+                            "shared_service.prefix.overlap",
+                            f"{path}.prefixes[{prefix_index}]",
+                            f"Shared-service prefix {prefix} overlaps fabric endpoint space",
+                        )
+            for address_index, raw_address in enumerate(
+                _list(service.get("addresses"), f"{path}.addresses", issues)
+            ):
+                address = _ipv4_address(
+                    raw_address, f"{path}.addresses[{address_index}]", issues
+                )
+                if address and prefixes and not any(address in prefix for prefix in prefixes):
+                    _add(
+                        issues,
+                        "shared_service.address.outside_prefix",
+                        f"{path}.addresses[{address_index}]",
+                        f"Address {address} is outside the service prefixes",
+                    )
+            for consumer_index, consumer in enumerate(
+                _list(
+                    service.get("consumer_virtual_networks"),
+                    f"{path}.consumer_virtual_networks",
+                    issues,
+                )
+            ):
+                if consumer not in vn_names:
+                    _add(
+                        issues,
+                        "reference.virtual_network",
+                        f"{path}.consumer_virtual_networks[{consumer_index}]",
+                        f"Unknown virtual network {consumer!r}",
+                    )
+
+        multicast_context = _mapping(root.get("multicast"), "$.multicast", issues)
+        multicast_enabled = multicast_context.get("enabled") is True
+        transport = multicast_context.get("transport")
+        rp_mode = multicast_context.get("rp_mode")
+        rp_device_ids = _list(
+            multicast_context.get("rp_device_ids", []),
+            "$.multicast.rp_device_ids",
+            issues,
+        )
+        for index, rp_device_id in enumerate(rp_device_ids):
+            if rp_device_id not in device_ids:
+                _add(
+                    issues,
+                    "reference.device",
+                    f"$.multicast.rp_device_ids[{index}]",
+                    f"Unknown RP device {rp_device_id!r}",
+                )
+            elif "border" not in device_roles.get(rp_device_id, set()):
+                _add(
+                    issues,
+                    "multicast.rp.not_border",
+                    f"$.multicast.rp_device_ids[{index}]",
+                    "Multicast RP devices must be border nodes",
+                )
+        if multicast_enabled and rp_mode in {"anycast", "static"}:
+            _ipv4_address(multicast_context.get("rp_address"), "$.multicast.rp_address", issues)
+        if multicast_enabled and rp_mode == "anycast" and environment == "production" and len(rp_device_ids) < 2:
+            _add(
+                issues,
+                "ha.multicast_rp",
+                "$.multicast.rp_device_ids",
+                "Production Anycast-RP requires at least two border nodes",
+            )
+        if multicast_enabled and transport == "native":
+            for index, link in enumerate(links):
+                if not bool(link.get("pim_sparse_mode")):
+                    _add(
+                        issues,
+                        "multicast.native.pim_required",
+                        f"$.links[{index}].pim_sparse_mode",
+                        "Native multicast requires PIM sparse mode on every fabric link",
+                    )
+        asm_vns = set(
+            _list(
+                multicast_context.get("asm_virtual_networks", []),
+                "$.multicast.asm_virtual_networks",
+                issues,
+            )
+        )
+        ssm_vns = set(
+            _list(
+                multicast_context.get("ssm_virtual_networks", []),
+                "$.multicast.ssm_virtual_networks",
+                issues,
+            )
+        )
+        ssm_range = _ipv4_network(
+            multicast_context.get("ssm_range"), "$.multicast.ssm_range", issues
+        )
+        if ssm_range and not ssm_range.subnet_of(ip_network("232.0.0.0/8")):
+            _add(
+                issues,
+                "multicast.ssm_range",
+                "$.multicast.ssm_range",
+                "SSM range must be inside 232.0.0.0/8",
+            )
+        if multicast_enabled and asm_vns and rp_mode == "none":
+            _add(
+                issues,
+                "multicast.asm.rp_required",
+                "$.multicast.rp_mode",
+                "ASM virtual networks require a static or Anycast rendezvous point",
+            )
+        for vn_name in sorted(asm_vns | ssm_vns):
+            if vn_name not in vn_names:
+                _add(
+                    issues,
+                    "reference.virtual_network",
+                    "$.multicast",
+                    f"Unknown multicast virtual network {vn_name!r}",
+                )
+        for vn_name in sorted(asm_vns & ssm_vns):
+            _add(
+                issues,
+                "multicast.mode_conflict",
+                "$.multicast",
+                f"Virtual network {vn_name!r} cannot use both ASM and SSM",
+            )
+
+        policy_plane = _mapping(root.get("policy_plane"), "$.policy_plane", issues)
+        policy_mode = policy_plane.get("mode")
+        if policy_mode in {"ise", "hybrid"} and not isinstance(policy_plane.get("ise"), Mapping):
+            _add(
+                issues,
+                "policy.ise.required",
+                "$.policy_plane.ise",
+                f"Policy mode {policy_mode!r} requires ISE settings",
+            )
+        if policy_mode in {"sxp", "hybrid"} and not isinstance(policy_plane.get("sxp"), Mapping):
+            _add(
+                issues,
+                "policy.sxp.required",
+                "$.policy_plane.sxp",
+                f"Policy mode {policy_mode!r} requires SXP settings",
+            )
+        group_names: Dict[str, str] = {}
+        group_tags: Dict[int, str] = {}
+        for index, raw_group in enumerate(
+            _list(policy_plane.get("security_groups"), "$.policy_plane.security_groups", issues)
+        ):
+            path = f"$.policy_plane.security_groups[{index}]"
+            group = _mapping(raw_group, path, issues)
+            name = _required_string(group, "name", path, issues)
+            tag = _integer(group, "tag", path, issues, 2, 65519)
+            if name:
+                _check_duplicate(group_names, name, f"{path}.name", "security group name", issues)
+            if tag is not None:
+                _check_duplicate(group_tags, tag, f"{path}.tag", "security group tag", issues)
+        contract_keys: Dict[Tuple[str, str, str], str] = {}
+        for index, raw_contract in enumerate(
+            _list(policy_plane.get("contracts"), "$.policy_plane.contracts", issues)
+        ):
+            path = f"$.policy_plane.contracts[{index}]"
+            contract = _mapping(raw_contract, path, issues)
+            source = _required_string(contract, "source", path, issues)
+            destination = _required_string(contract, "destination", path, issues)
+            protocol = _required_string(contract, "protocol", path, issues)
+            for field, value in (("source", source), ("destination", destination)):
+                if value and value not in group_names:
+                    _add(
+                        issues,
+                        "reference.security_group",
+                        f"{path}.{field}",
+                        f"Unknown security group {value!r}",
+                    )
+            if source and destination and protocol:
+                _check_duplicate(
+                    contract_keys,
+                    (source, destination, protocol),
+                    path,
+                    "policy contract",
+                    issues,
+                )
+        ise_addresses = set()
+        ise = policy_plane.get("ise")
+        if isinstance(ise, Mapping):
+            for node in ise.get("nodes", []):
+                if isinstance(node, Mapping) and node.get("address"):
+                    ise_addresses.add(str(node["address"]))
+        sxp = policy_plane.get("sxp")
+        if isinstance(sxp, Mapping):
+            for index, raw_connection in enumerate(
+                _list(sxp.get("connections"), "$.policy_plane.sxp.connections", issues)
+            ):
+                path = f"$.policy_plane.sxp.connections[{index}]"
+                connection = _mapping(raw_connection, path, issues)
+                speaker_id = connection.get("speaker_id")
+                if speaker_id not in device_ids and speaker_id not in fusion_ids:
+                    _add(
+                        issues,
+                        "reference.sxp_speaker",
+                        f"{path}.speaker_id",
+                        f"Unknown SXP speaker {speaker_id!r}",
+                    )
+                listener_ip = connection.get("listener_ip")
+                if policy_mode in {"ise", "hybrid"} and str(listener_ip) not in ise_addresses:
+                    _add(
+                        issues,
+                        "reference.sxp_listener",
+                        f"{path}.listener_ip",
+                        f"SXP listener {listener_ip!r} is not an approved ISE node",
+                    )
 
     _check_network_overlaps(address_networks, issues)
 
@@ -991,6 +1356,42 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 path,
                 f"Unknown map-server device_id {map_server!r}",
             )
+
+    if schema_version == "1.2":
+        control_plane_mode = fabric.get("control_plane_mode")
+        if lisp.get("control_plane_mode") != control_plane_mode:
+            _add(
+                issues,
+                "lisp.control_plane_mode.mismatch",
+                "$.lisp.control_plane_mode",
+                "LISP and fabric control-plane modes must match",
+            )
+        if control_plane_mode == "lisp_pubsub":
+            publishers = _list(lisp.get("publishers"), "$.lisp.publishers", issues)
+            subscribers = _list(lisp.get("subscribers"), "$.lisp.subscribers", issues)
+            if set(publishers) != set(map_servers):
+                _add(
+                    issues,
+                    "lisp.pubsub.publishers",
+                    "$.lisp.publishers",
+                    "Pub/Sub publishers must match the control-plane map-server set",
+                )
+            for index, publisher in enumerate(publishers):
+                if "control_plane" not in device_roles.get(publisher, set()):
+                    _add(
+                        issues,
+                        "lisp.publisher.not_control_plane",
+                        f"$.lisp.publishers[{index}]",
+                        "LISP publishers must be control-plane nodes",
+                    )
+            for index, subscriber in enumerate(subscribers):
+                if "border" not in device_roles.get(subscriber, set()):
+                    _add(
+                        issues,
+                        "lisp.subscriber.not_border",
+                        f"$.lisp.subscribers[{index}]",
+                        "LISP subscribers must be border nodes",
+                    )
 
     if not endpoint_pools:
         _add(

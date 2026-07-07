@@ -350,6 +350,7 @@ def _border_handoff_blocks(
         return []
     local_as = int(handoff["local_as"])
     blocks: List[Dict[str, Any]] = []
+    trunk_vlans: Dict[str, List[int]] = {}
     for peer in handoff.get("peers", []):
         if peer.get("device_id") != device["id"]:
             continue
@@ -360,6 +361,11 @@ def _border_handoff_blocks(
         prefix = ip_network(str(peer["prefix"]))
         local_ip = _safe(peer["local_ip"], "handoff local IP")
         vlan_id = int(peer["vlan_id"])
+        if peer.get("border_interface"):
+            physical_interface = _safe(
+                peer["border_interface"], "border physical interface"
+            )
+            trunk_vlans.setdefault(physical_interface, []).append(vlan_id)
         blocks.append(
             _block(
                 "handoff_{}_{}".format(vrf, vlan_id),
@@ -388,6 +394,116 @@ def _border_handoff_blocks(
                 ],
             )
         )
+    for interface, vlans in sorted(trunk_vlans.items()):
+        blocks.insert(
+            0,
+            _block(
+                "border_trunk_{}".format(interface.replace("/", "_")),
+                [
+                    "interface {}".format(interface),
+                    " description SDA fusion handoff trunk",
+                    " switchport mode trunk",
+                    " switchport trunk allowed vlan {}".format(
+                        ",".join(str(item) for item in sorted(vlans))
+                    ),
+                    " no shutdown",
+                ],
+            ),
+        )
+    return blocks
+
+
+def _fusion_handoff_blocks(
+    intent: Mapping[str, Any], fusion: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Render the deterministic VRF-lite/BGP side owned by a fusion node.
+
+    Shared-service route leaking remains a separately blocked phase until its
+    prefix-list and route-map failure/rollback acceptance tests are complete.
+    """
+
+    handoff = intent.get("border_handoff") or {}
+    if not handoff.get("enabled"):
+        return []
+    fusion_id = str(fusion["id"])
+    local_as = int(fusion["bgp_asn"])
+    border_as = int(handoff["local_as"])
+    virtual_networks = {item["vrf"]: item for item in intent["virtual_networks"]}
+    peers = sorted(
+        (
+            item
+            for item in handoff.get("peers", [])
+            if str(item.get("fusion_node_id", "")) == fusion_id
+        ),
+        key=lambda item: (str(item["vrf"]), int(item["vlan_id"])),
+    )
+    blocks: List[Dict[str, Any]] = []
+    rendered_vrfs = set()
+    trunk_vlans: Dict[str, List[int]] = {}
+    for peer in peers:
+        vrf = _safe(peer["vrf"], "fusion VRF")
+        vn = virtual_networks[peer["vrf"]]
+        if vrf not in rendered_vrfs:
+            rendered_vrfs.add(vrf)
+            blocks.append(
+                _block(
+                    "fusion_vrf_{}".format(vrf),
+                    [
+                        "vrf definition {}".format(vrf),
+                        " rd {}".format(_safe(vn["rd"], "route distinguisher")),
+                        " address-family ipv4",
+                        "  exit-address-family",
+                    ],
+                )
+            )
+        vlan_id = int(peer["vlan_id"])
+        fusion_interface = _safe(peer["fusion_interface"], "fusion physical interface")
+        trunk_vlans.setdefault(fusion_interface, []).append(vlan_id)
+        prefix = ip_network(str(peer["prefix"]))
+        local_ip = _safe(peer["neighbor_ip"], "fusion local IP")
+        neighbor_ip = _safe(peer["local_ip"], "border neighbor IP")
+        blocks.append(
+            _block(
+                "fusion_handoff_{}_{}".format(vrf, vlan_id),
+                [
+                    "vlan {}".format(vlan_id),
+                    " name SDA-HANDOFF-{}".format(vrf),
+                    "interface Vlan{}".format(vlan_id),
+                    " description SDA border handoff {}".format(vrf),
+                    " vrf forwarding {}".format(vrf),
+                    " ip address {} {}".format(local_ip, prefix.netmask),
+                    " no shutdown",
+                ],
+            )
+        )
+        blocks.append(
+            _block(
+                "fusion_bgp_{}_{}".format(vrf, neighbor_ip.replace(".", "_")),
+                [
+                    "router bgp {}".format(local_as),
+                    " address-family ipv4 vrf {}".format(vrf),
+                    "  neighbor {} remote-as {}".format(neighbor_ip, border_as),
+                    "  neighbor {} activate".format(neighbor_ip),
+                    "  exit-address-family",
+                ],
+            )
+        )
+    for interface, vlans in sorted(trunk_vlans.items()):
+        blocks.insert(
+            0,
+            _block(
+                "fusion_trunk_{}".format(interface.replace("/", "_")),
+                [
+                    "interface {}".format(interface),
+                    " description SDA border handoff trunk",
+                    " switchport mode trunk",
+                    " switchport trunk allowed vlan {}".format(
+                        ",".join(str(item) for item in sorted(vlans))
+                    ),
+                    " no shutdown",
+                ],
+            ),
+        )
     return blocks
 
 
@@ -404,6 +520,34 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
             {
                 "code": "border_handoff.missing",
                 "message": "BGP/fusion handoff is not defined; apply remains disabled",
+            }
+        )
+    if intent.get("fabric", {}).get("control_plane_mode") == "lisp_pubsub":
+        blockers.append(
+            {
+                "code": "lisp_pubsub.renderer_pending",
+                "message": "LISP Pub/Sub intent is planned but its release-specific CLI renderer is not hardware accepted",
+            }
+        )
+    if intent.get("shared_services"):
+        blockers.append(
+            {
+                "code": "shared_services.renderer_pending",
+                "message": "Shared-service route leaking remains disabled until prefix-list and rollback acceptance passes",
+            }
+        )
+    if (intent.get("multicast") or {}).get("enabled"):
+        blockers.append(
+            {
+                "code": "multicast.overlay_renderer_pending",
+                "message": "Overlay multicast policy remains disabled until ASM/SSM hardware acceptance passes",
+            }
+        )
+    if (intent.get("policy_plane") or {}).get("mode") not in {None, "none"}:
+        blockers.append(
+            {
+                "code": "policy_plane.renderer_pending",
+                "message": "ISE/SGT/SXP publishing remains disabled until API and rollback acceptance passes",
             }
         )
 
@@ -439,8 +583,23 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
             "phases": phases,
         }
 
+    for fusion in sorted(intent.get("fusion_nodes", []), key=lambda item: str(item["id"])):
+        artifacts[str(fusion["id"])] = {
+            "hostname": str(fusion["hostname"]),
+            "platform": str(fusion["platform"]),
+            "software_version": str(fusion["software_version"]),
+            "roles": ["fusion"],
+            "phases": [
+                {
+                    "phase_id": "border_handoff",
+                    "blocks": _fusion_handoff_blocks(intent, fusion),
+                }
+            ],
+        }
+
     body = {
-        "schema_version": "1.0",
+        "artifact_schema_version": "1.0",
+        "intent_schema_version": str(intent["schema_version"]),
         "plan_id": str(plan["plan_id"]),
         "plan_hash": str(plan["plan_hash"]),
         "intent_hash": str(plan["intent_hash"]),

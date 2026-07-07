@@ -223,8 +223,8 @@ def _derive_site_context(
     has_context = any(key in requirements for key in context_keys)
     if schema_version == "1.0" and not has_context:
         return {}
-    if schema_version != "1.1":
-        raise AllocationError("CVD site context requires requirements schema_version 1.1")
+    if schema_version not in {"1.1", "1.2"}:
+        raise AllocationError("CVD site context requires requirements schema_version 1.1 or 1.2")
 
     deployment_model = str(requirements.get("deployment_model", ""))
     allowed_models = set(policy.get("deployment_models", []))
@@ -492,6 +492,7 @@ def derive_fabric_intent(
         "l2_instance_id": "l2_instance_id",
         "l3_instance_id": "l3_instance_id",
         "asn": "bgp_asn_local",
+        "sgt": "sgt",
     }
     scalar_taken: Dict[str, set] = {
         kind: _active_scalars(scalar_ledger, domain, kind)
@@ -519,6 +520,27 @@ def derive_fabric_intent(
 
     def reserve_scalar(kind: str, minimum: int, maximum: int) -> int:
         candidate = _first_scalar(minimum, maximum, scalar_taken[kind], kind)
+        scalar_taken[kind].add(str(candidate))
+        scalar_reservations.append(
+            {
+                "allocation_domain": domain,
+                "resource_type": kind,
+                "value": str(candidate),
+                "state": "reserved",
+            }
+        )
+        return candidate
+
+    def reserve_requested_scalar(kind: str, value: int, minimum: int, maximum: int) -> int:
+        candidate = int(value)
+        if candidate < int(minimum) or candidate > int(maximum):
+            raise AllocationError(
+                "Requested {} value {} is outside {}-{}".format(
+                    kind, candidate, minimum, maximum
+                )
+            )
+        if str(candidate) in scalar_taken[kind]:
+            raise AllocationError("Requested {} value {} is unavailable".format(kind, candidate))
         scalar_taken[kind].add(str(candidate))
         scalar_reservations.append(
             {
@@ -564,6 +586,45 @@ def derive_fabric_intent(
         if raw.get("dashboard_management_ip"):
             device["dashboard_management_ip"] = str(raw["dashboard_management_ip"])
         devices.append(device)
+
+    fusion_nodes: List[Dict[str, Any]] = []
+    fusion_ids = set()
+    for raw in sorted(
+        (copy.deepcopy(item) for item in requirements.get("fusion_nodes", [])),
+        key=lambda item: str(item.get("id", "")),
+    ):
+        _require_keys(
+            raw,
+            [
+                "id",
+                "hostname",
+                "platform",
+                "software_version",
+                "management_ip",
+                "credential_ref",
+                "bgp_asn",
+            ],
+            "$.fusion_nodes[]",
+        )
+        fusion_id = str(raw["id"])
+        if fusion_id in fusion_ids or fusion_id in device_ids:
+            raise AllocationError("Duplicate fusion or device id {}".format(fusion_id))
+        fusion_ids.add(fusion_id)
+        platform_candidate = dict(raw)
+        platform_candidate["roles"] = ["fusion"]
+        _platform_guardrail(platform_candidate, policy)
+        fusion_node = {
+            "id": fusion_id,
+            "hostname": str(raw["hostname"]).upper(),
+            "platform": str(raw["platform"]),
+            "software_version": str(raw["software_version"]),
+            "management_ip": str(raw["management_ip"]),
+            "credential_ref": str(raw["credential_ref"]),
+            "bgp_asn": int(raw["bgp_asn"]),
+        }
+        if raw.get("dashboard_management_ip"):
+            fusion_node["dashboard_management_ip"] = str(raw["dashboard_management_ip"])
+        fusion_nodes.append(fusion_node)
 
     links = []
     p2p_prefix = int(pools["underlay_p2p"]["prefix_len"])
@@ -665,10 +726,273 @@ def derive_fabric_intent(
                 }
             )
 
+    environment = str(requirements["metadata"]["environment"])
+    vn_by_name = {item["name"]: item for item in virtual_networks}
+    vrf_names = {item["vrf"] for item in virtual_networks}
+
+    shared_services = None
+    raw_shared_services = requirements.get("shared_services")
+    if raw_shared_services is not None:
+        service_vrf = str(raw_shared_services["vrf"])
+        if service_vrf not in vrf_names:
+            raise AllocationError("Shared-services VRF {} is unknown".format(service_vrf))
+        if str(raw_shared_services.get("default_action")) != "deny":
+            raise AllocationError("Shared-services default action must be deny")
+        services = []
+        import_prefixes_by_consumer: Dict[str, set] = {}
+        service_ids = set()
+        for raw_service in sorted(
+            (copy.deepcopy(item) for item in raw_shared_services.get("services", [])),
+            key=lambda item: str(item.get("id", "")),
+        ):
+            service_id = str(raw_service["id"])
+            if service_id in service_ids:
+                raise AllocationError("Duplicate shared service id {}".format(service_id))
+            service_ids.add(service_id)
+            prefixes = sorted(str(_network(item)) for item in raw_service["prefixes"])
+            parsed_prefixes = [_network(item) for item in prefixes]
+            for service_prefix in parsed_prefixes:
+                for endpoint_pool in endpoint_pools:
+                    endpoint_prefix = _network(str(endpoint_pool["prefix"]))
+                    if service_prefix.overlaps(endpoint_prefix):
+                        raise AllocationError(
+                            "Shared service {} prefix {} overlaps fabric endpoint pool {}".format(
+                                service_id, service_prefix, endpoint_prefix
+                            )
+                        )
+            addresses = sorted(str(ipaddress.ip_address(item)) for item in raw_service["addresses"])
+            for address in addresses:
+                if not any(ipaddress.ip_address(address) in prefix for prefix in parsed_prefixes):
+                    raise AllocationError(
+                        "Shared service {} address {} is outside its advertised prefixes".format(
+                            service_id, address
+                        )
+                    )
+            consumers = sorted(str(item) for item in raw_service["consumer_virtual_networks"])
+            unknown_consumers = sorted(set(consumers) - set(vn_by_name))
+            if unknown_consumers:
+                raise AllocationError(
+                    "Shared service {} references unknown virtual network {}".format(
+                        service_id, unknown_consumers[0]
+                    )
+                )
+            for consumer in consumers:
+                import_prefixes_by_consumer.setdefault(consumer, set()).update(prefixes)
+            services.append(
+                {
+                    "id": service_id,
+                    "type": str(raw_service["type"]),
+                    "addresses": addresses,
+                    "prefixes": prefixes,
+                    "consumer_virtual_networks": consumers,
+                }
+            )
+        route_leaks = []
+        for consumer in sorted(import_prefixes_by_consumer):
+            export_prefixes = sorted(
+                item["prefix"]
+                for item in endpoint_pools
+                if item["virtual_network"] == consumer
+            )
+            if not export_prefixes:
+                raise AllocationError(
+                    "Shared-services consumer {} has no endpoint pool".format(consumer)
+                )
+            route_leaks.append(
+                {
+                    "consumer_vrf": str(vn_by_name[consumer]["vrf"]),
+                    "service_vrf": service_vrf,
+                    "import_prefixes": sorted(import_prefixes_by_consumer[consumer]),
+                    "export_prefixes": export_prefixes,
+                }
+            )
+        shared_services = {
+            "vrf": service_vrf,
+            "default_action": "deny",
+            "services": services,
+            "route_leaks": route_leaks,
+        }
+
+    multicast = None
+    raw_multicast = requirements.get("multicast")
+    if raw_multicast is not None:
+        enabled = bool(raw_multicast["enabled"])
+        transport = str(raw_multicast["transport"])
+        rp_mode = str(raw_multicast["rp_mode"])
+        border_ids = {
+            item["id"] for item in devices if "border" in set(item.get("roles", []))
+        }
+        rp_device_ids = sorted(str(item) for item in raw_multicast.get("rp_device_ids", []))
+        unknown_rps = sorted(set(rp_device_ids) - border_ids)
+        if unknown_rps:
+            raise AllocationError(
+                "Multicast RP device {} is not a border".format(unknown_rps[0])
+            )
+        asm_vns = sorted(str(item) for item in raw_multicast["asm_virtual_networks"])
+        ssm_vns = sorted(str(item) for item in raw_multicast["ssm_virtual_networks"])
+        unknown_multicast_vns = sorted((set(asm_vns) | set(ssm_vns)) - set(vn_by_name))
+        if unknown_multicast_vns:
+            raise AllocationError(
+                "Multicast references unknown virtual network {}".format(
+                    unknown_multicast_vns[0]
+                )
+            )
+        overlap_vns = sorted(set(asm_vns) & set(ssm_vns))
+        if overlap_vns:
+            raise AllocationError(
+                "Virtual network {} cannot use both ASM and SSM".format(overlap_vns[0])
+            )
+        if enabled and transport == "native" and any(
+            not bool(item.get("pim_sparse_mode")) for item in links
+        ):
+            raise AllocationError("Native multicast requires PIM sparse mode on every fabric link")
+        rp_address = None
+        if enabled and rp_mode in {"anycast", "static"}:
+            if "multicast_rp" not in pools:
+                raise AllocationError("Guardrail pool multicast_rp is missing")
+            if not rp_device_ids:
+                raise AllocationError("Enabled ASM multicast requires RP devices")
+            if rp_mode == "anycast" and environment == "production" and len(rp_device_ids) < 2:
+                raise AllocationError("Production Anycast-RP requires at least two RP devices")
+            rp_prefix = reserve_prefix(
+                "multicast_rp", int(pools["multicast_rp"].get("prefix_len", 32))
+            )
+            rp_address = str(rp_prefix.network_address)
+        ssm_range = _network(str(raw_multicast.get("ssm_range", "232.0.0.0/8")))
+        if not ssm_range.subnet_of(_network("232.0.0.0/8")):
+            raise AllocationError("Multicast ssm_range must be inside 232.0.0.0/8")
+        multicast = {
+            "enabled": enabled,
+            "transport": transport,
+            "rp_mode": rp_mode,
+            "rp_device_ids": rp_device_ids,
+            "asm_virtual_networks": asm_vns,
+            "ssm_virtual_networks": ssm_vns,
+            "ssm_range": str(ssm_range),
+        }
+        if rp_address:
+            multicast["rp_address"] = rp_address
+
+    policy_plane = None
+    raw_policy_plane = requirements.get("policy_plane")
+    if raw_policy_plane is not None:
+        policy_mode = str(raw_policy_plane["mode"])
+        if policy_mode in {"ise", "hybrid"} and not raw_policy_plane.get("ise"):
+            raise AllocationError("Policy-plane mode {} requires ISE settings".format(policy_mode))
+        if policy_mode in {"sxp", "hybrid"} and not raw_policy_plane.get("sxp"):
+            raise AllocationError("Policy-plane mode {} requires SXP settings".format(policy_mode))
+        sgt_range = ranges.get("sgt")
+        if not isinstance(sgt_range, Mapping):
+            raise AllocationError("Guardrail range sgt is missing")
+        security_groups = []
+        security_group_names = set()
+        for raw_group in sorted(
+            (copy.deepcopy(item) for item in raw_policy_plane.get("security_groups", [])),
+            key=lambda item: str(item.get("name", "")),
+        ):
+            name = str(raw_group["name"])
+            if name in security_group_names:
+                raise AllocationError("Duplicate security group {}".format(name))
+            security_group_names.add(name)
+            if raw_group.get("tag") is None:
+                tag = reserve_scalar("sgt", int(sgt_range["min"]), int(sgt_range["max"]))
+            else:
+                tag = reserve_requested_scalar(
+                    "sgt", int(raw_group["tag"]), int(sgt_range["min"]), int(sgt_range["max"])
+                )
+            security_groups.append({"name": name, "tag": tag})
+        contracts = []
+        contract_keys = set()
+        for raw_contract in sorted(
+            (copy.deepcopy(item) for item in raw_policy_plane.get("contracts", [])),
+            key=lambda item: (
+                str(item.get("source", "")),
+                str(item.get("destination", "")),
+                str(item.get("protocol", "")),
+                str(item.get("action", "")),
+            ),
+        ):
+            source = str(raw_contract["source"])
+            destination = str(raw_contract["destination"])
+            unknown_groups = sorted({source, destination} - security_group_names)
+            if unknown_groups:
+                raise AllocationError(
+                    "Policy contract references unknown security group {}".format(
+                        unknown_groups[0]
+                    )
+                )
+            key = (source, destination, str(raw_contract["protocol"]))
+            if key in contract_keys:
+                raise AllocationError(
+                    "Duplicate policy contract {} to {} for {}".format(*key)
+                )
+            contract_keys.add(key)
+            contracts.append(
+                {
+                    "source": source,
+                    "destination": destination,
+                    "action": str(raw_contract["action"]),
+                    "protocol": str(raw_contract["protocol"]),
+                }
+            )
+        policy_plane = {
+            "mode": policy_mode,
+            "security_groups": security_groups,
+            "contracts": contracts,
+        }
+        ise_addresses = set()
+        if raw_policy_plane.get("ise"):
+            raw_ise = raw_policy_plane["ise"]
+            ise_addresses = {str(item["address"]) for item in raw_ise["nodes"]}
+            policy_plane["ise"] = {
+                "credential_ref": str(raw_ise["credential_ref"]),
+                "nodes": sorted(
+                    (
+                        {
+                            "id": str(item["id"]),
+                            "address": str(item["address"]),
+                            "roles": sorted(str(role) for role in item["roles"]),
+                        }
+                        for item in raw_ise["nodes"]
+                    ),
+                    key=lambda item: item["id"],
+                ),
+            }
+        if raw_policy_plane.get("sxp"):
+            raw_sxp = raw_policy_plane["sxp"]
+            known_speakers = device_ids | fusion_ids
+            connections = []
+            connection_ids = set()
+            for item in sorted(raw_sxp["connections"], key=lambda entry: str(entry["id"])):
+                connection_id = str(item["id"])
+                if connection_id in connection_ids:
+                    raise AllocationError("Duplicate SXP connection {}".format(connection_id))
+                connection_ids.add(connection_id)
+                if str(item["speaker_id"]) not in known_speakers:
+                    raise AllocationError(
+                        "SXP connection {} references unknown speaker {}".format(
+                            connection_id, item["speaker_id"]
+                        )
+                    )
+                if policy_mode in {"ise", "hybrid"} and str(item["listener_ip"]) not in ise_addresses:
+                    raise AllocationError(
+                        "SXP connection {} listener {} is not an approved ISE node".format(
+                            connection_id, item["listener_ip"]
+                        )
+                    )
+                connections.append(
+                    {
+                        "id": connection_id,
+                        "speaker_id": str(item["speaker_id"]),
+                        "listener_ip": str(item["listener_ip"]),
+                        "password_ref": str(item["password_ref"]),
+                    }
+                )
+            policy_plane["sxp"] = {"connections": connections}
+
     control_planes = [item["id"] for item in devices if "control_plane" in item["roles"]]
     if not control_planes:
         raise AllocationError("At least one control-plane device is required")
-    environment = str(requirements["metadata"]["environment"])
     redundancy = policy.get("redundancy", {})
     if environment == "production":
         border_count = sum("border" in item["roles"] for item in devices)
@@ -676,6 +1000,10 @@ def derive_fabric_intent(
             raise AllocationError("Production guardrails require redundant borders")
         if len(control_planes) < int(redundancy.get("min_control_planes_production", 2)):
             raise AllocationError("Production guardrails require redundant control planes")
+        if str(requirements["schema_version"]) == "1.2" and len(fusion_nodes) < int(
+            redundancy.get("min_fusion_nodes_production", 2)
+        ):
+            raise AllocationError("Production guardrails require redundant fusion nodes")
 
     intent = {
         "schema_version": str(requirements["schema_version"]),
@@ -700,26 +1028,152 @@ def derive_fabric_intent(
         "endpoint_pools": endpoint_pools,
     }
     intent.update(site_context)
+    if str(requirements["schema_version"]) == "1.2":
+        intent["fabric"]["control_plane_mode"] = mode
+        intent["lisp"]["control_plane_mode"] = mode
+        if mode == "lisp_pubsub":
+            intent["lisp"]["publishers"] = sorted(control_planes)
+            intent["lisp"]["subscribers"] = sorted(
+                item["id"] for item in devices if "border" in item["roles"]
+            )
+        intent["fusion_nodes"] = fusion_nodes
+        intent["shared_services"] = shared_services
+        intent["multicast"] = multicast
+        intent["policy_plane"] = policy_plane
+        if multicast is not None:
+            intent["fabric"]["multicast"] = {
+                "enabled": bool(multicast["enabled"]),
+                "transport": str(multicast["transport"]),
+                "ssm_default": bool(multicast["ssm_virtual_networks"]),
+            }
+            if multicast["rp_device_ids"]:
+                intent["fabric"]["multicast"]["rp_device_ids"] = list(
+                    multicast["rp_device_ids"]
+                )
+            if multicast.get("rp_address"):
+                intent["fabric"]["multicast"]["rp_address"] = str(
+                    multicast["rp_address"]
+                )
+                intent["fabric"]["multicast"]["rp_loopback_id"] = 60000
     if bgp_enabled:
         if "border_handoff" not in pools:
             raise AllocationError("Guardrail pool border_handoff is missing")
         handoff_vlan = ranges.get("handoff_vlan_id")
         if not isinstance(handoff_vlan, Mapping):
             raise AllocationError("Guardrail range handoff_vlan_id is missing")
-        remote_as = int(raw_handoff.get("remote_as", 0))
-        if remote_as < 1 or remote_as > 4294967295:
-            raise AllocationError("A valid border_handoff.remote_as is required")
         vrfs = {item["vrf"] for item in virtual_networks}
+        vn_to_vrf = {item["name"]: item["vrf"] for item in virtual_networks}
         border_ids = {item["id"] for item in devices if "border" in item["roles"]}
         peers = []
-        raw_peers = raw_handoff.get("peers") or [
-            {"device_id": device_id, "vrf": vrf}
-            for device_id in sorted(border_ids)
-            for vrf in sorted(vrfs)
-        ]
+        raw_adjacencies = raw_handoff.get("adjacencies") or []
+        if str(requirements["schema_version"]) == "1.2":
+            if not raw_adjacencies:
+                raise AllocationError("Schema 1.2 BGP handoff requires fusion adjacencies")
+            fusion_by_id = {item["id"]: item for item in fusion_nodes}
+            adjacency_pairs = set()
+            fusion_vns_by_border: Dict[Tuple[str, str], set] = {}
+            expanded_peers = []
+            for adjacency in sorted(
+                raw_adjacencies,
+                key=lambda item: (
+                    str(item.get("border_device_id", "")),
+                    str(item.get("fusion_node_id", "")),
+                ),
+            ):
+                border_id = str(adjacency.get("border_device_id", ""))
+                fusion_id = str(adjacency.get("fusion_node_id", ""))
+                if border_id not in border_ids:
+                    raise AllocationError(
+                        "Fusion adjacency must target an approved border"
+                    )
+                if fusion_id not in fusion_by_id:
+                    raise AllocationError(
+                        "Fusion adjacency references unknown fusion node {}".format(fusion_id)
+                    )
+                pair = (border_id, fusion_id)
+                if pair in adjacency_pairs:
+                    raise AllocationError(
+                        "Duplicate border/fusion adjacency {} to {}".format(*pair)
+                    )
+                adjacency_pairs.add(pair)
+                selected_vns = sorted(
+                    str(item)
+                    for item in adjacency.get("virtual_networks", sorted(vn_to_vrf))
+                )
+                unknown_vns = sorted(set(selected_vns) - set(vn_to_vrf))
+                if unknown_vns:
+                    raise AllocationError(
+                        "Fusion adjacency references unknown virtual network {}".format(
+                            unknown_vns[0]
+                        )
+                    )
+                for vn_name in selected_vns:
+                    fusion_vns_by_border.setdefault((border_id, vn_name), set()).add(
+                        fusion_id
+                    )
+                    expanded_peers.append(
+                        {
+                            "device_id": border_id,
+                            "fusion_node_id": fusion_id,
+                            "vrf": str(vn_to_vrf[vn_name]),
+                            "border_interface": str(adjacency["border_interface"]),
+                            "fusion_interface": str(adjacency["fusion_interface"]),
+                            "remote_as": int(fusion_by_id[fusion_id]["bgp_asn"]),
+                        }
+                    )
+            fusion_policy = policy.get("fusion", {})
+            if environment == "production" and bool(
+                fusion_policy.get("require_full_mesh_production", True)
+            ):
+                expected_pairs = {
+                    (border_id, fusion_id)
+                    for border_id in border_ids
+                    for fusion_id in fusion_ids
+                }
+                missing_pairs = sorted(expected_pairs - adjacency_pairs)
+                if missing_pairs:
+                    raise AllocationError(
+                        "Production fusion full mesh is missing adjacency {} to {}".format(
+                            *missing_pairs[0]
+                        )
+                    )
+                minimum_fusions = int(
+                    fusion_policy.get("min_fusion_nodes_per_border_vrf_production", 2)
+                )
+                if minimum_fusions < 1 or minimum_fusions > len(fusion_ids):
+                    raise AllocationError(
+                        "Fusion per-VRF redundancy guardrail must be between 1 and {}".format(
+                            len(fusion_ids)
+                        )
+                    )
+                for border_id in sorted(border_ids):
+                    for vn_name in sorted(vn_to_vrf):
+                        fusion_count = len(
+                            fusion_vns_by_border.get((border_id, vn_name), set())
+                        )
+                        if fusion_count < minimum_fusions:
+                            raise AllocationError(
+                                "Production fusion redundancy requires {} nodes for border {} virtual network {}; found {}".format(
+                                    minimum_fusions, border_id, vn_name, fusion_count
+                                )
+                            )
+            raw_peers = expanded_peers
+        else:
+            remote_as = int(raw_handoff.get("remote_as", 0))
+            if remote_as < 1 or remote_as > 4294967295:
+                raise AllocationError("A valid border_handoff.remote_as is required")
+            raw_peers = raw_handoff.get("peers") or [
+                {"device_id": device_id, "vrf": vrf, "remote_as": remote_as}
+                for device_id in sorted(border_ids)
+                for vrf in sorted(vrfs)
+            ]
         for peer in sorted(
             raw_peers,
-            key=lambda item: (str(item.get("device_id", "")), str(item.get("vrf", ""))),
+            key=lambda item: (
+                str(item.get("device_id", "")),
+                str(item.get("fusion_node_id", "")),
+                str(item.get("vrf", "")),
+            ),
         ):
             device_id = str(peer.get("device_id", ""))
             vrf = str(peer.get("vrf", ""))
@@ -733,22 +1187,26 @@ def derive_fabric_intent(
             prefix = reserve_prefix(
                 "border_handoff", int(pools["border_handoff"]["prefix_len"])
             )
-            # hosts() returns both addresses for /31 and excludes the network
-            # and broadcast addresses for /30, so either supported handoff
-            # size produces IOS XE-usable peer addresses.
             addresses = list(prefix.hosts())
-            peers.append(
-                {
-                    "device_id": device_id,
-                    "vrf": vrf,
-                    "vlan_id": vlan,
-                    "interface": str(peer.get("interface") or "Vlan{}".format(vlan)),
-                    "prefix": str(prefix),
-                    "local_ip": str(addresses[0]),
-                    "neighbor_ip": str(addresses[1]),
-                    "remote_as": remote_as,
-                }
-            )
+            rendered_peer = {
+                "device_id": device_id,
+                "vrf": vrf,
+                "vlan_id": vlan,
+                "interface": str(peer.get("interface") or "Vlan{}".format(vlan)),
+                "prefix": str(prefix),
+                "local_ip": str(addresses[0]),
+                "neighbor_ip": str(addresses[1]),
+                "remote_as": int(peer.get("remote_as")),
+            }
+            if peer.get("fusion_node_id"):
+                rendered_peer.update(
+                    {
+                        "fusion_node_id": str(peer["fusion_node_id"]),
+                        "border_interface": str(peer["border_interface"]),
+                        "fusion_interface": str(peer["fusion_interface"]),
+                    }
+                )
+            peers.append(rendered_peer)
         intent["border_handoff"] = {
             "enabled": True,
             "mode": "bgp",
