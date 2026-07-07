@@ -201,6 +201,24 @@ class FabricIntentValidationTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertIn("bgp.neighbor_ip.outside_prefix", self.codes(result))
 
+    def test_30_handoff_rejects_network_and_broadcast_addresses(self):
+        candidate = load_intent(PRODUCTION_EXAMPLE)
+        peer = candidate["border_handoff"]["peers"][0]
+        peer["prefix"] = "172.31.10.0/30"
+        peer["local_ip"] = "172.31.10.0"
+        peer["neighbor_ip"] = "172.31.10.3"
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("bgp.local_ip.not_usable", self.codes(result))
+        self.assertIn("bgp.neighbor_ip.not_usable", self.codes(result))
+
+    def test_duplicate_route_distinguisher_is_rejected(self):
+        candidate = copy.deepcopy(self.cvd_intent)
+        candidate["virtual_networks"][1]["rd"] = candidate["virtual_networks"][0]["rd"]
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn("unique.duplicate", self.codes(result))
+
     def test_explicit_isolated_mode_is_valid_for_lab(self):
         candidate = copy.deepcopy(self.intent)
         candidate["border_handoff"] = {"mode": "isolated", "enabled": False}

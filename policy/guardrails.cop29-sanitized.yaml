@@ -1,0 +1,54 @@
+policy_version: "1.0-cop29-sanitized"
+
+fabric_control_plane:
+  default_mode: classic_lisp
+  allowed_modes: [classic_lisp, lisp_bgp_transit, lisp_pubsub]
+
+deployment_models: [single_site, distributed_campus]
+
+hierarchy:
+  max_depth: 16
+
+site_profiles:
+  - {id: fabric_in_a_box, max_endpoints: 999, max_aps: 49}
+  - {id: small_site, max_endpoints: 9999, max_aps: 499}
+  - {id: medium_site, max_endpoints: 49999, max_aps: 2499}
+  - {id: large_site, max_endpoints: 100000, max_aps: 10000}
+
+# Synthetic pools selected for acceptance testing. They are not copied from the
+# private COP29 source material and are not a recommended customer allocation.
+supernets:
+  underlay_p2p: {cidr: 10.240.0.0/16, prefix_len: 31}
+  loopbacks: {cidr: 10.241.0.0/16, prefix_len: 32}
+  overlay_hosts: {cidr: 10.128.0.0/9}
+  border_handoff: {cidr: 172.20.0.0/16, prefix_len: 30}
+
+ranges:
+  vlan_id: {min: 100, max: 2999}
+  l2_instance_id: {base: 8000, max: 16777215}
+  l3_instance_id: {min: 5000, max: 5999}
+  bgp_asn_local: {min: 65050, max: 65050}
+  rd_asn: 65050
+  handoff_vlan_id: {min: 3000, max: 3900}
+
+platform_matrix:
+  - model: C9500-48Y4C
+    min_ios_xe: "17.12"
+    roles: [border, control_plane, underlay]
+  - model: C9300X-48HX
+    min_ios_xe: "17.12"
+    roles: [fabric_edge, underlay]
+
+redundancy:
+  min_borders_production: 2
+  min_control_planes_production: 2
+  min_uplinks_per_edge_production: 2
+
+approval:
+  require_roles: [approver]
+  apply_requires:
+    - dry_run_passed
+    - capacity_ok
+    - no_overlap
+    - plan_hash_approved
+    - artifact_hash_approved

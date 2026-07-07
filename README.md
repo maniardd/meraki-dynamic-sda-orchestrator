@@ -54,6 +54,8 @@ Implemented foundation:
 - Vault KV and strict host-file secret-provider boundaries used only by the
   separately enabled apply worker
 - Sanitized lab and redundant production examples
+- Sanitized COP29-derived large-campus acceptance fixture with dual-border,
+  multi-VN, `/30` BGP handoff, deterministic scale, and data-quality tests
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. Meraki import packaging and hardware
@@ -95,3 +97,6 @@ unless explicitly enabled in a separately reviewed worker runtime.
   deploy repository code.
 
 See [SECURITY.md](SECURITY.md) before connecting the orchestrator to a network.
+
+The [COP29-derived fixture](docs/cop29-sanitized-acceptance-fixture.md) records
+its sanitization boundary and the capabilities it does—and does not—prove.

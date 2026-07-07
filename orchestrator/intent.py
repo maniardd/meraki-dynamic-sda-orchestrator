@@ -692,13 +692,14 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     vn_names: Dict[str, str] = {}
     vrf_names: Dict[str, str] = {}
     l3_instances: Dict[int, str] = {}
+    route_distinguishers: Dict[str, str] = {}
     for index, raw_vn in enumerate(virtual_networks):
         path = f"$.virtual_networks[{index}]"
         vn = _mapping(raw_vn, path, issues)
         name = _required_string(vn, "name", path, issues)
         vrf = _required_string(vn, "vrf", path, issues)
         l3_instance = _integer(vn, "l3_instance_id", path, issues, 1, 16_777_215)
-        _required_string(vn, "rd", path, issues)
+        route_distinguisher = _required_string(vn, "rd", path, issues)
         route_targets = _list(vn.get("route_targets"), f"{path}.route_targets", issues)
         if not route_targets:
             _add(issues, "vn.route_targets.empty", f"{path}.route_targets", "At least one route target is required")
@@ -712,6 +713,14 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 l3_instance,
                 f"{path}.l3_instance_id",
                 "L3 instance id",
+                issues,
+            )
+        if route_distinguisher:
+            _check_duplicate(
+                route_distinguishers,
+                route_distinguisher,
+                f"{path}.rd",
+                "route distinguisher",
                 issues,
             )
 
@@ -921,6 +930,28 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 _add(issues, "bgp.local_ip.outside_prefix", f"{path}.local_ip", f"Address {local_ip} is not in {prefix}")
             if prefix and neighbor_ip and neighbor_ip not in prefix:
                 _add(issues, "bgp.neighbor_ip.outside_prefix", f"{path}.neighbor_ip", f"Address {neighbor_ip} is not in {prefix}")
+            if (
+                prefix
+                and prefix.prefixlen <= 30
+                and local_ip in {prefix.network_address, prefix.broadcast_address}
+            ):
+                _add(
+                    issues,
+                    "bgp.local_ip.not_usable",
+                    f"{path}.local_ip",
+                    f"Address {local_ip} is not a usable host in {prefix}",
+                )
+            if (
+                prefix
+                and prefix.prefixlen <= 30
+                and neighbor_ip in {prefix.network_address, prefix.broadcast_address}
+            ):
+                _add(
+                    issues,
+                    "bgp.neighbor_ip.not_usable",
+                    f"{path}.neighbor_ip",
+                    f"Address {neighbor_ip} is not a usable host in {prefix}",
+                )
             if local_ip and neighbor_ip and local_ip == neighbor_ip:
                 _add(issues, "bgp.peer.same_address", path, "Local and neighbor addresses must differ")
             if device_id and vrf and neighbor_ip:
