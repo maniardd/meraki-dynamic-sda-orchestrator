@@ -178,6 +178,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         )
         border["roles"] = ["control_plane"]
         candidate["multicast"]["rp_device_ids"] = ["border-cp-01"]
+        candidate["policy_plane"]["sxp"]["connections"][1]["speaker_id"] = "edge-01"
         with self.assertRaisesRegex(
             AllocationError, "requires at least two borders"
         ):
@@ -270,10 +271,33 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
 
         policy = intent["policy_plane"]
         self.assertEqual("hybrid", policy["mode"])
+        self.assertEqual("deny", policy["default_action"])
+        self.assertEqual(
+            ["edge-01", "edge-02", "edge-03", "edge-04"],
+            policy["enforcement_device_ids"],
+        )
+        self.assertEqual([100, 101, 102, 103, 104, 105], policy["enforcement_vlan_ids"])
         tags = [item["tag"] for item in policy["security_groups"]]
         self.assertEqual([1000, 1001, 1002, 1003], tags)
         self.assertEqual(len(tags), len(set(tags)))
         self.assertEqual(2, len(policy["sxp"]["connections"]))
+        self.assertEqual("ise-01", policy["ise"]["write_node_id"])
+        self.assertTrue(
+            all(item["local_mode"] == "speaker" for item in policy["sxp"]["connections"])
+        )
+        self.assertTrue(
+            all(item["transport_vrf"] == "SHARED_VN" for item in policy["sxp"]["connections"])
+        )
+        self.assertEqual(
+            ["172.20.0.21", "172.20.0.69"],
+            [item["source_ip"] for item in policy["sxp"]["connections"]],
+        )
+        self.assertTrue(
+            all(item["sgacl_name"].startswith("SDA-SGACL-") for item in policy["contracts"])
+        )
+        self.assertTrue(
+            all(item["default_action"] == "deny" for item in policy["contracts"])
+        )
         sgt_reservations = [
             item
             for item in result["reservations"]["scalar"]
@@ -470,6 +494,75 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         with self.assertRaisesRegex(AllocationError, "not an approved ISE node"):
             derive_fabric_intent(candidate, self.policy)
 
+    def test_sxp_transport_vrf_and_route_ownership_fail_closed(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["sxp"]["connections"][0][
+            "listener_prefix"
+        ] = "203.0.113.0/27"
+        with self.assertRaisesRegex(
+            AllocationError, "not an approved ISE service prefix"
+        ):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["sxp"]["connections"][0][
+            "transport_vrf"
+        ] = "CORP_VN"
+        with self.assertRaisesRegex(
+            AllocationError, "must use the shared-services VRF"
+        ):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["sxp"]["connections"][1][
+            "speaker_id"
+        ] = "edge-01"
+        with self.assertRaisesRegex(AllocationError, "has no routed source"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        first, second = candidate["policy_plane"]["sxp"]["connections"]
+        second["speaker_id"] = first["speaker_id"]
+        second["password_ref"] = first["password_ref"]
+        second["transport_vrf"] = "CORP_VN"
+        with self.assertRaisesRegex(AllocationError, "multiple transport VRFs"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        first, second = candidate["policy_plane"]["sxp"]["connections"]
+        second["speaker_id"] = first["speaker_id"]
+        second["listener_ip"] = first["listener_ip"]
+        second["password_ref"] = first["password_ref"]
+        with self.assertRaisesRegex(
+            AllocationError, "Duplicate SXP speaker/listener/VRF connection"
+        ):
+            derive_fabric_intent(candidate, self.policy)
+
+    def test_policy_plane_modes_are_exclusive_and_sxp_is_redundant(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["mode"] = "ise"
+        with self.assertRaises(AllocationError):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["mode"] = "sxp"
+        with self.assertRaises(AllocationError):
+            derive_fabric_intent(candidate, self.policy)
+
+        intent = copy.deepcopy(self.derive()["intent"])
+        intent["policy_plane"]["mode"] = "ise"
+        result = validate_intent(intent)
+        self.assertFalse(result.is_valid)
+        self.assertIn("policy.sxp.unexpected", {item.code for item in result.issues})
+
+        intent = copy.deepcopy(self.derive()["intent"])
+        intent["policy_plane"]["sxp"]["connections"].pop()
+        result = validate_intent(intent)
+        codes = {item.code for item in result.issues}
+        self.assertFalse(result.is_valid)
+        self.assertIn("ha.sxp_speakers", codes)
+        self.assertIn("ha.sxp_listeners", codes)
+
     def test_sgt_exhaustion_and_duplicate_contract_fail_closed(self):
         policy = copy.deepcopy(self.policy)
         policy["ranges"]["sgt"] = {"min": 1000, "max": 1002}
@@ -481,6 +574,21 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             copy.deepcopy(candidate["policy_plane"]["contracts"][0])
         )
         with self.assertRaisesRegex(AllocationError, "Duplicate policy contract"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["contracts"][2]["action"] = "deny"
+        with self.assertRaisesRegex(AllocationError, "must use protocol ip"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["ise"]["write_node_id"] = "ise-unknown"
+        with self.assertRaisesRegex(AllocationError, "unknown node"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["sxp"]["connections"][1]["speaker_id"] = "border-cp-01"
+        with self.assertRaisesRegex(AllocationError, "multiple default password"):
             derive_fabric_intent(candidate, self.policy)
 
     def test_intent_validation_rejects_fusion_policy_and_multicast_drift(self):
@@ -520,6 +628,36 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertIn("shared_service.prefix.overlap", codes)
         self.assertIn("multicast.ssm_range", codes)
         self.assertIn("reference.sxp_listener", codes)
+
+    def test_intent_validation_rejects_policy_plane_ownership_drift(self):
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["policy_plane"]["default_action"] = "permit"
+        candidate["policy_plane"]["enforcement_device_ids"].pop()
+        candidate["policy_plane"]["enforcement_vlan_ids"].pop()
+        candidate["policy_plane"]["contracts"][0]["source_tag"] = 65500
+        candidate["policy_plane"]["contracts"][0]["aces"] = ["permit udp"]
+        candidate["policy_plane"]["ise"]["write_node_id"] = "ise-unknown"
+        candidate["policy_plane"]["sxp"]["connections"][0]["source_ip"] = (
+            "192.0.2.250"
+        )
+        candidate["policy_plane"]["sxp"]["connections"][0][
+            "transport_vrf"
+        ] = "CORP_VN"
+        candidate["policy_plane"]["sxp"]["connections"][0][
+            "listener_prefix"
+        ] = "203.0.113.0/27"
+        result = validate_intent(candidate)
+        codes = {item.code for item in result.issues}
+        self.assertFalse(result.is_valid)
+        self.assertIn("policy.default_action", codes)
+        self.assertIn("policy.enforcement.devices", codes)
+        self.assertIn("policy.enforcement.vlans", codes)
+        self.assertIn("policy.contract.source_tag", codes)
+        self.assertIn("policy.contract.aces", codes)
+        self.assertIn("policy.ise.write_node", codes)
+        self.assertIn("policy.sxp.source_ip", codes)
+        self.assertIn("policy.sxp.transport_vrf", codes)
+        self.assertIn("policy.sxp.listener_service_prefix", codes)
 
     def test_intent_validation_rejects_missing_fusion_and_border_vrf_peers(self):
         candidate = copy.deepcopy(self.derive()["intent"])
@@ -640,6 +778,17 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             ["border_handoff"], phases["shared_services"]["depends_on"]
         )
         self.assertEqual(["shared_services"], phases["multicast"]["depends_on"])
+        self.assertEqual(
+            [
+                "border-cp-01",
+                "border-cp-02",
+                "edge-01",
+                "edge-02",
+                "edge-03",
+                "edge-04",
+            ],
+            phases["policy_plane"]["targets"],
+        )
         phase_order = [item["id"] for item in plan["phases"]]
         self.assertLess(
             phase_order.index("border_handoff"), phase_order.index("multicast")
@@ -668,13 +817,130 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
                 "shared_services.hardware_acceptance_pending",
                 "multicast.hardware_acceptance_pending",
                 "multicast.reconciliation_pending",
-                "policy_plane.renderer_pending",
+                "policy_plane.hardware_api_acceptance_pending",
             },
             blocker_codes,
         )
         self.assertFalse(artifacts["executable"])
         self.assertEqual("1.0", artifacts["artifact_schema_version"])
         self.assertEqual("1.2", artifacts["intent_schema_version"])
+        self.assertIn("ise", artifacts["external_systems"])
+        self.assertEqual(
+            "ise-01", artifacts["external_systems"]["ise"]["write_node_id"]
+        )
+        self.assertTrue(artifacts["external_systems"]["ise"]["tls_verify"])
+        self.assertEqual(
+            10, len(artifacts["external_systems"]["ise"]["operations"])
+        )
+        self.assertEqual(
+            "fail",
+            artifacts["external_systems"]["ise"]["ownership"][
+                "unmanaged_collision"
+            ],
+        )
+        self.assertTrue(
+            all(
+                item["collision_policy"] == "fail_if_unmanaged"
+                for item in artifacts["external_systems"]["ise"]["operations"]
+            )
+        )
+
+    def test_policy_plane_renders_sxp_enforcement_ise_manifest_and_gates(self):
+        intent = self.derive()["intent"]
+        artifacts = render_configuration(intent, create_plan(intent))
+
+        border_phase = next(
+            item
+            for item in artifacts["devices"]["border-cp-01"]["phases"]
+            if item["phase_id"] == "policy_plane"
+        )
+        sxp_block = next(
+            item for item in border_phase["blocks"] if item["block_id"] == "sxp_speaker"
+        )
+        sxp_commands = "\n".join(sxp_block["commands"])
+        self.assertIn("cts sxp enable", sxp_commands)
+        self.assertIn("cts sxp default source-ip 172.20.0.21", sxp_commands)
+        self.assertIn("<secret:secret://acceptance/sxp/", sxp_commands)
+        self.assertIn("mode local speaker vrf SHARED_VN", sxp_commands)
+        self.assertEqual(1, len(sxp_block["secret_refs"]))
+
+        edge_phase = next(
+            item
+            for item in artifacts["devices"]["edge-01"]["phases"]
+            if item["phase_id"] == "policy_plane"
+        )
+        edge_commands = "\n".join(
+            command for block in edge_phase["blocks"] for command in block["commands"]
+        )
+        self.assertIn("ip access-list role-based SDA-SGACL-DEFAULT-DENY", edge_commands)
+        self.assertIn("cts role-based permissions default SDA-SGACL-DEFAULT-DENY", edge_commands)
+        self.assertIn("cts role-based enforcement vlan-list 100-105", edge_commands)
+
+        manifest = artifacts["external_systems"]["ise"]
+        resources = [item["resource"] for item in manifest["operations"]]
+        self.assertEqual(4, resources.count("sgt"))
+        self.assertEqual(3, resources.count("sgacl"))
+        self.assertEqual(3, resources.count("egressmatrixcell"))
+        self.assertIn("default_egress_matrix_is_deny", manifest["preconditions"])
+
+        gates = [
+            item for item in build_gate_plan(intent) if item["phase_id"] == "policy_plane"
+        ]
+        self.assertEqual(20, len(gates))
+        self.assertEqual(
+            {
+                "exact_config_lines",
+                "role_permission",
+                "route_prefix",
+                "sxp_connections",
+            },
+            {item["evaluator"] for item in gates},
+        )
+        sxp_gates = [
+            item for item in gates if item["gate_id"].startswith("policy.sxp")
+        ]
+        self.assertEqual(4, len(sxp_gates))
+        self.assertTrue(
+            all("SHARED_VN" in item["command"] for item in sxp_gates)
+        )
+        self.assertEqual(
+            {
+                "show ip route vrf SHARED_VN 203.0.113.0/26",
+                "show cts sxp connections vrf SHARED_VN",
+            },
+            {item["command"] for item in sxp_gates},
+        )
+        self.assertTrue(all(item["blocking"] for item in gates))
+
+    def test_pure_sxp_mode_renders_owned_static_sgacls_without_ise_manifest(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["policy_plane"]["mode"] = "sxp"
+        candidate["policy_plane"].pop("ise")
+        intent = derive_fabric_intent(candidate, self.policy)["intent"]
+        artifacts = render_configuration(intent, create_plan(intent))
+
+        self.assertNotIn("ise", artifacts["external_systems"])
+        edge_phase = next(
+            item
+            for item in artifacts["devices"]["edge-01"]["phases"]
+            if item["phase_id"] == "policy_plane"
+        )
+        commands = "\n".join(
+            command for block in edge_phase["blocks"] for command in block["commands"]
+        )
+        for contract in intent["policy_plane"]["contracts"]:
+            self.assertIn(
+                "ip access-list role-based {}".format(contract["sgacl_name"]),
+                commands,
+            )
+            self.assertIn(
+                "cts role-based permissions from {} to {} {}".format(
+                    contract["source_tag"],
+                    contract["destination_tag"],
+                    contract["sgacl_name"],
+                ),
+                commands,
+            )
 
     def test_native_multicast_renderer_and_gates_cover_every_overlay_policy(self):
         intent = self.derive()["intent"]

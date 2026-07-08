@@ -1745,6 +1745,56 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
 
         policy_plane = _mapping(root.get("policy_plane"), "$.policy_plane", issues)
         policy_mode = policy_plane.get("mode")
+        if policy_plane.get("default_action") != "deny":
+            _add(
+                issues,
+                "policy.default_action",
+                "$.policy_plane.default_action",
+                "Policy plane must be deny by default",
+            )
+        policy_devices_by_id = {
+            str(item.get("id")): item
+            for item in devices
+            if isinstance(item, Mapping) and item.get("id")
+        }
+        expected_enforcement_devices = {
+            device_id
+            for device_id, roles in device_roles.items()
+            if "fabric_edge" in roles
+        }
+        enforcement_device_ids = set(
+            _list(
+                policy_plane.get("enforcement_device_ids", []),
+                "$.policy_plane.enforcement_device_ids",
+                issues,
+            )
+        )
+        if policy_mode != "none" and enforcement_device_ids != expected_enforcement_devices:
+            _add(
+                issues,
+                "policy.enforcement.devices",
+                "$.policy_plane.enforcement_device_ids",
+                "Policy enforcement devices must match the complete fabric-edge set",
+            )
+        expected_enforcement_vlans = {
+            int(item["vlan_id"])
+            for item in endpoint_pools
+            if isinstance(item, Mapping) and isinstance(item.get("vlan_id"), int)
+        }
+        enforcement_vlan_ids = set(
+            _list(
+                policy_plane.get("enforcement_vlan_ids", []),
+                "$.policy_plane.enforcement_vlan_ids",
+                issues,
+            )
+        )
+        if policy_mode != "none" and enforcement_vlan_ids != expected_enforcement_vlans:
+            _add(
+                issues,
+                "policy.enforcement.vlans",
+                "$.policy_plane.enforcement_vlan_ids",
+                "Policy enforcement VLANs must match the complete endpoint-pool VLAN set",
+            )
         if policy_mode in {"ise", "hybrid"} and not isinstance(policy_plane.get("ise"), Mapping):
             _add(
                 issues,
@@ -1759,8 +1809,27 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 "$.policy_plane.sxp",
                 f"Policy mode {policy_mode!r} requires SXP settings",
             )
+        if policy_mode not in {"ise", "hybrid"} and isinstance(
+            policy_plane.get("ise"), Mapping
+        ):
+            _add(
+                issues,
+                "policy.ise.unexpected",
+                "$.policy_plane.ise",
+                f"Policy mode {policy_mode!r} cannot contain ISE settings",
+            )
+        if policy_mode not in {"sxp", "hybrid"} and isinstance(
+            policy_plane.get("sxp"), Mapping
+        ):
+            _add(
+                issues,
+                "policy.sxp.unexpected",
+                "$.policy_plane.sxp",
+                f"Policy mode {policy_mode!r} cannot contain SXP settings",
+            )
         group_names: Dict[str, str] = {}
         group_tags: Dict[int, str] = {}
+        group_tag_values: Dict[str, int] = {}
         for index, raw_group in enumerate(
             _list(policy_plane.get("security_groups"), "$.policy_plane.security_groups", issues)
         ):
@@ -1772,6 +1841,8 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 _check_duplicate(group_names, name, f"{path}.name", "security group name", issues)
             if tag is not None:
                 _check_duplicate(group_tags, tag, f"{path}.tag", "security group tag", issues)
+            if name and tag is not None:
+                group_tag_values[name] = tag
         contract_keys: Dict[Tuple[str, str, str], str] = {}
         for index, raw_contract in enumerate(
             _list(policy_plane.get("contracts"), "$.policy_plane.contracts", issues)
@@ -1781,6 +1852,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
             source = _required_string(contract, "source", path, issues)
             destination = _required_string(contract, "destination", path, issues)
             protocol = _required_string(contract, "protocol", path, issues)
+            action = _required_string(contract, "action", path, issues)
             for field, value in (("source", source), ("destination", destination)):
                 if value and value not in group_names:
                     _add(
@@ -1797,34 +1869,261 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     "policy contract",
                     issues,
                 )
+            if source and contract.get("source_tag") != group_tag_values.get(source):
+                _add(
+                    issues,
+                    "policy.contract.source_tag",
+                    f"{path}.source_tag",
+                    "Contract source tag must match its security group",
+                )
+            if destination and contract.get("destination_tag") != group_tag_values.get(destination):
+                _add(
+                    issues,
+                    "policy.contract.destination_tag",
+                    f"{path}.destination_tag",
+                    "Contract destination tag must match its security group",
+                )
+            if contract.get("default_action") != "deny":
+                _add(
+                    issues,
+                    "policy.contract.default_action",
+                    f"{path}.default_action",
+                    "Every policy contract must be deny by default",
+                )
+            expected_aces = ["{} {}".format(action, protocol)] if action and protocol else []
+            if contract.get("aces") != expected_aces:
+                _add(
+                    issues,
+                    "policy.contract.aces",
+                    f"{path}.aces",
+                    "Contract ACEs must exactly represent the approved action and protocol",
+                )
+            if action == "deny" and protocol != "ip":
+                _add(
+                    issues,
+                    "policy.contract.deny_scope",
+                    path,
+                    "Default-deny contracts may declare explicit deny only for protocol ip",
+                )
+            if not re.fullmatch(
+                r"SDA-SGACL-[A-F0-9]{12}", str(contract.get("sgacl_name", ""))
+            ):
+                _add(
+                    issues,
+                    "policy.contract.sgacl_name",
+                    f"{path}.sgacl_name",
+                    "Contract SGACL must use an owned deterministic name",
+                )
         ise_addresses = set()
         ise = policy_plane.get("ise")
         if isinstance(ise, Mapping):
-            for node in ise.get("nodes", []):
-                if isinstance(node, Mapping) and node.get("address"):
-                    ise_addresses.add(str(node["address"]))
+            ise_node_ids = set()
+            pan_node_ids = set()
+            for index, node in enumerate(ise.get("nodes", [])):
+                if not isinstance(node, Mapping):
+                    continue
+                node_id = str(node.get("id", ""))
+                address = str(node.get("address", ""))
+                if node_id in ise_node_ids:
+                    _add(
+                        issues,
+                        "unique.duplicate",
+                        f"$.policy_plane.ise.nodes[{index}].id",
+                        "Duplicate ISE node ID",
+                    )
+                if address in ise_addresses:
+                    _add(
+                        issues,
+                        "unique.duplicate",
+                        f"$.policy_plane.ise.nodes[{index}].address",
+                        "Duplicate ISE node address",
+                    )
+                ise_node_ids.add(node_id)
+                ise_addresses.add(address)
+                if "pan" in set(node.get("roles", [])):
+                    pan_node_ids.add(node_id)
+                api_base_url = str(node.get("api_base_url", ""))
+                if not re.fullmatch(
+                    r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", api_base_url
+                ):
+                    _add(
+                        issues,
+                        "policy.ise.https",
+                        f"$.policy_plane.ise.nodes[{index}].api_base_url",
+                        "ISE API origin must use HTTPS without a path",
+                    )
+            write_node_id = str(ise.get("write_node_id", ""))
+            if write_node_id not in pan_node_ids:
+                _add(
+                    issues,
+                    "policy.ise.write_node",
+                    "$.policy_plane.ise.write_node_id",
+                    "ISE write node must reference a PAN node",
+                )
+            if environment == "production" and len(pan_node_ids) < 2:
+                _add(
+                    issues,
+                    "ha.ise_pan",
+                    "$.policy_plane.ise.nodes",
+                    "Production policy plane requires redundant ISE PAN nodes",
+                )
         sxp = policy_plane.get("sxp")
         if isinstance(sxp, Mapping):
+            ise_service_prefixes = {
+                str(prefix)
+                for service in shared.get("services", [])
+                if isinstance(service, Mapping) and service.get("type") == "ise"
+                for prefix in service.get("prefixes", [])
+            }
+            speaker_password_refs: Dict[str, str] = {}
+            speaker_transport_vrfs: Dict[str, str] = {}
+            connection_keys: Dict[Tuple[str, str, str], str] = {}
             for index, raw_connection in enumerate(
                 _list(sxp.get("connections"), "$.policy_plane.sxp.connections", issues)
             ):
                 path = f"$.policy_plane.sxp.connections[{index}]"
                 connection = _mapping(raw_connection, path, issues)
                 speaker_id = connection.get("speaker_id")
-                if speaker_id not in device_ids and speaker_id not in fusion_ids:
+                if speaker_id not in device_ids:
                     _add(
                         issues,
                         "reference.sxp_speaker",
                         f"{path}.speaker_id",
                         f"Unknown SXP speaker {speaker_id!r}",
                     )
-                listener_ip = connection.get("listener_ip")
-                if policy_mode in {"ise", "hybrid"} and str(listener_ip) not in ise_addresses:
+                elif not device_roles.get(str(speaker_id), set()) & {
+                    "border",
+                    "fabric_edge",
+                }:
+                    _add(
+                        issues,
+                        "policy.sxp.speaker_role",
+                        f"{path}.speaker_id",
+                        "SXP speakers must be border or fabric-edge devices",
+                    )
+                transport_vrf = str(connection.get("transport_vrf", ""))
+                if transport_vrf != "global" and transport_vrf not in vrf_names:
+                    _add(
+                        issues,
+                        "reference.sxp_transport_vrf",
+                        f"{path}.transport_vrf",
+                        f"Unknown SXP transport VRF {transport_vrf!r}",
+                    )
+                expected_sources = (
+                    {
+                        str(
+                            policy_devices_by_id.get(
+                                str(speaker_id), {}
+                            ).get("loopback0_ip", "")
+                        )
+                    }
+                    if transport_vrf == "global"
+                    else {
+                        str(peer.get("local_ip"))
+                        for peer in handoff.get("peers", [])
+                        if str(peer.get("device_id")) == str(speaker_id)
+                        and str(peer.get("vrf")) == transport_vrf
+                    }
+                )
+                if str(connection.get("source_ip", "")) not in expected_sources:
+                    _add(
+                        issues,
+                        "policy.sxp.source_ip",
+                        f"{path}.source_ip",
+                        "SXP source IP must be routed on the speaker in its transport VRF",
+                    )
+                listener_ip = _ipv4_address(
+                    connection.get("listener_ip"), f"{path}.listener_ip", issues
+                )
+                listener_prefix = _ipv4_network(
+                    connection.get("listener_prefix"),
+                    f"{path}.listener_prefix",
+                    issues,
+                )
+                if listener_ip and listener_prefix and listener_ip not in listener_prefix:
+                    _add(
+                        issues,
+                        "policy.sxp.listener_prefix",
+                        f"{path}.listener_ip",
+                        "SXP listener must be inside listener_prefix",
+                    )
+                if policy_mode in {"ise", "hybrid"}:
+                    if str(listener_prefix) not in ise_service_prefixes:
+                        _add(
+                            issues,
+                            "policy.sxp.listener_service_prefix",
+                            f"{path}.listener_prefix",
+                            "SXP listener prefix must exactly match an approved ISE shared-service prefix",
+                        )
+                    if transport_vrf != service_vrf:
+                        _add(
+                            issues,
+                            "policy.sxp.transport_vrf",
+                            f"{path}.transport_vrf",
+                            "SXP transport VRF must match the shared-services VRF for ISE listeners",
+                        )
+                if connection.get("local_mode") != "speaker":
+                    _add(
+                        issues,
+                        "policy.sxp.local_mode",
+                        f"{path}.local_mode",
+                        "This workflow supports SXP speaker mode only",
+                    )
+                if policy_mode in {"ise", "hybrid"} and str(connection.get("listener_ip")) not in ise_addresses:
                     _add(
                         issues,
                         "reference.sxp_listener",
                         f"{path}.listener_ip",
-                        f"SXP listener {listener_ip!r} is not an approved ISE node",
+                        f"SXP listener {connection.get('listener_ip')!r} is not an approved ISE node",
+                    )
+                password_ref = str(connection.get("password_ref", ""))
+                if speaker_id in speaker_password_refs and speaker_password_refs[str(speaker_id)] != password_ref:
+                    _add(
+                        issues,
+                        "policy.sxp.password_scope",
+                        f"{path}.password_ref",
+                        "One SXP speaker cannot use multiple default passwords",
+                    )
+                speaker_password_refs[str(speaker_id)] = password_ref
+                if speaker_id in speaker_transport_vrfs and speaker_transport_vrfs[str(speaker_id)] != transport_vrf:
+                    _add(
+                        issues,
+                        "policy.sxp.transport_scope",
+                        f"{path}.transport_vrf",
+                        "One SXP speaker cannot use multiple transport VRFs",
+                    )
+                speaker_transport_vrfs[str(speaker_id)] = transport_vrf
+                _check_duplicate(
+                    connection_keys,
+                    (str(speaker_id), str(connection.get("listener_ip")), transport_vrf),
+                    path,
+                    "SXP speaker/listener/VRF connection",
+                    issues,
+                )
+            if environment == "production":
+                speaker_ids = {
+                    str(item.get("speaker_id"))
+                    for item in sxp.get("connections", [])
+                    if isinstance(item, Mapping)
+                }
+                listener_ips = {
+                    str(item.get("listener_ip"))
+                    for item in sxp.get("connections", [])
+                    if isinstance(item, Mapping)
+                }
+                if len(speaker_ids) < 2:
+                    _add(
+                        issues,
+                        "ha.sxp_speakers",
+                        "$.policy_plane.sxp.connections",
+                        "Production SXP requires at least two speakers",
+                    )
+                if len(listener_ips) < 2:
+                    _add(
+                        issues,
+                        "ha.sxp_listeners",
+                        "$.policy_plane.sxp.connections",
+                        "Production SXP requires at least two listeners",
                     )
 
     _check_network_overlaps(address_networks, issues)

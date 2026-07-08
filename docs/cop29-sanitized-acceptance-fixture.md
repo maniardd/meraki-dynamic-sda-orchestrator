@@ -36,9 +36,9 @@ the fixture contains no secret values.
 This is an acceptance fixture for the capabilities implemented today, not a
 claim of full COP29 or Cisco SD-Access feature parity. Fusion, shared services,
 multicast, Pub/Sub, and ISE/SXP are now explicit planning contracts. Native
-multicast, shared-services, and Pub/Sub renderers remain fail-closed pending
-platform or traffic acceptance; head-end replication and ISE/SXP remain
-renderer/API work. Wireless and service-node provisioning remain outside this
+multicast, shared-services, Pub/Sub, and ISE/SXP renderers remain fail-closed
+pending platform, API, or traffic acceptance; head-end replication remains
+renderer work. Wireless and service-node provisioning remain outside this
 fixture.
 
 The private COP29 source remains local reference material and must never be

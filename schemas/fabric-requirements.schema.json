@@ -352,23 +352,27 @@
     "policy_plane": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "security_groups", "contracts"],
+      "required": ["mode", "default_action", "security_groups", "contracts"],
       "properties": {
         "mode": {"enum": ["none", "ise", "sxp", "hybrid"]},
+        "default_action": {"const": "deny"},
         "ise": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["credential_ref", "nodes"],
+          "required": ["credential_ref", "write_node_id", "nodes"],
           "properties": {
             "credential_ref": {"type": "string", "pattern": "^secret://"},
+            "ca_bundle_ref": {"type": "string", "pattern": "^secret://"},
+            "write_node_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
             "nodes": {
               "type": "array", "minItems": 1, "maxItems": 32,
               "items": {
                 "type": "object", "additionalProperties": false,
-                "required": ["id", "address", "roles"],
+                "required": ["id", "address", "api_base_url", "roles"],
                 "properties": {
                   "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
                   "address": {"type": "string", "format": "ipv4"},
+                  "api_base_url": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$"},
                   "roles": {
                     "type": "array", "minItems": 1, "uniqueItems": true,
                     "items": {"enum": ["pan", "psn", "pxgrid"]}
@@ -387,11 +391,13 @@
               "type": "array", "minItems": 1, "maxItems": 1024,
               "items": {
                 "type": "object", "additionalProperties": false,
-                "required": ["id", "speaker_id", "listener_ip", "password_ref"],
+                "required": ["id", "speaker_id", "transport_vrf", "listener_ip", "listener_prefix", "password_ref"],
                 "properties": {
                   "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
                   "speaker_id": {"type": "string", "minLength": 1, "maxLength": 64},
+                  "transport_vrf": {"type": "string", "minLength": 1, "maxLength": 64},
                   "listener_ip": {"type": "string", "format": "ipv4"},
+                  "listener_prefix": {"type": "string"},
                   "password_ref": {"type": "string", "pattern": "^secret://"}
                 }
               }
@@ -422,7 +428,27 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "ise"}}, "required": ["mode"]},
+          "then": {"required": ["ise"], "not": {"required": ["sxp"]}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "sxp"}}, "required": ["mode"]},
+          "then": {"required": ["sxp"], "not": {"required": ["ise"]}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "hybrid"}}, "required": ["mode"]},
+          "then": {"required": ["ise", "sxp"]}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "none"}}, "required": ["mode"]},
+          "then": {
+            "not": {"anyOf": [{"required": ["ise"]}, {"required": ["sxp"]}]}
+          }
+        }
+      ]
     },
     "border_handoff": {
       "type": "object",

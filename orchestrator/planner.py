@@ -162,18 +162,33 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
 
     policy_plane = intent.get("policy_plane") or {}
     if policy_plane.get("mode") not in {None, "none"}:
+        policy_targets = sorted(
+            set(
+                str(item)
+                for item in policy_plane.get("enforcement_device_ids", [])
+            )
+            | {
+                str(item["speaker_id"])
+                for item in (policy_plane.get("sxp") or {}).get(
+                    "connections", []
+                )
+            }
+        )
         phases.append(
             {
                 "id": "policy_plane",
                 "name": "Publish and verify ISE/SGT/SXP policy-plane intent",
                 "depends_on": [assurance_dependency],
-                "targets": all_targets,
+                "targets": policy_targets,
                 "gate": "ise_sgt_contracts_and_sxp_sessions_match_approved_intent",
                 "objects": {
                     "security_groups": len(policy_plane.get("security_groups", [])),
                     "contracts": len(policy_plane.get("contracts", [])),
                     "sxp_connections": len(
                         (policy_plane.get("sxp") or {}).get("connections", [])
+                    ),
+                    "ise_write_node": (
+                        (policy_plane.get("ise") or {}).get("write_node_id")
                     ),
                 },
             }

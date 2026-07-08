@@ -30,6 +30,7 @@ class Schema12FakeAdapter:
         fail_pubsub=False,
         fail_multicast=False,
         fail_fusion_multicast=False,
+        fail_policy=False,
     ):
         self.device = device
         self.intent = intent
@@ -37,9 +38,11 @@ class Schema12FakeAdapter:
         self.fail_pubsub = fail_pubsub
         self.fail_multicast = fail_multicast
         self.fail_fusion_multicast = fail_fusion_multicast
+        self.fail_policy = fail_policy
         self.pubsub_failure_injected = False
         self.multicast_failure_injected = False
         self.fusion_multicast_failure_injected = False
+        self.policy_failure_injected = False
         self.rollback_calls = []
 
     def connect(self):
@@ -228,6 +231,13 @@ class Schema12FakeAdapter:
         return {"checkpoint": "flash:sda-{}.cfg".format(run_id), "verified": True}
 
     def apply_block(self, commands):
+        if self.fail_policy and any(
+            command.strip().startswith("cts sxp connection peer ")
+            for command in commands
+        ):
+            self.fail_policy = False
+            self.policy_failure_injected = True
+            raise RuntimeError("simulated policy-plane apply failure")
         if self.fail_pubsub and any(
             command.strip().startswith("import publication publisher ")
             for command in commands
@@ -290,6 +300,9 @@ class Schema12WorkerTests(unittest.TestCase):
             }
             self.assertIn(
                 "shared_services.hardware_acceptance_pending", blocker_codes
+            )
+            self.assertIn(
+                "policy_plane.hardware_api_acceptance_pending", blocker_codes
             )
             plan_record, _ = store.save_plan(
                 intent_record["intent_id"],
@@ -537,6 +550,74 @@ class Schema12WorkerTests(unittest.TestCase):
                 adapters["fusion-01"].fusion_multicast_failure_injected
             )
             self.assertTrue(adapters["fusion-01"].rollback_calls)
+            stored = store.get_design_reservation(reservation["reservation_id"])
+            self.assertEqual("released", stored["state"])
+
+    def test_policy_plane_failure_rolls_back_sxp_speaker(self):
+        requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
+        policy = yaml.safe_load(GUARDRAILS.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = StateStore(str(Path(temp_dir) / "schema12-policy.sqlite3"))
+            reservation, _ = store.reserve_design(
+                requirements, policy, "schema12-policy-design", "planner"
+            )
+            intent = reservation["intent"]
+            intent_record, _ = store.save_intent(intent, "planner")
+            plan = create_plan(intent)
+            artifact = copy.deepcopy(render_configuration(intent, plan))
+
+            # Simulate future ISE and platform acceptance only in this
+            # failure-injection harness. Production rendering remains blocked.
+            artifact["blocking_requirements"] = []
+            artifact_without_hash = dict(artifact)
+            artifact_without_hash.pop("artifact_hash", None)
+            artifact["artifact_hash"] = sha256_json(artifact_without_hash)
+            plan_record, _ = store.save_plan(
+                intent_record["intent_id"],
+                plan,
+                "planner",
+                artifact_hash=artifact["artifact_hash"],
+                intent_version=str(intent["schema_version"]),
+                reservation_id=reservation["reservation_id"],
+            )
+            store.record_approval(
+                plan_record["plan_id"],
+                "approved",
+                "approver",
+                "CHG-SCHEMA12-POLICY",
+                (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            now = datetime.now(timezone.utc)
+            run, _ = store.create_run(
+                plan_id=plan_record["plan_id"],
+                mode="apply",
+                idempotency_key="schema12-policy-rollback",
+                requested_by="operator",
+                execution_enabled=True,
+                maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+                maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            )
+
+            adapters = {}
+
+            def factory(device):
+                adapter = Schema12FakeAdapter(
+                    device,
+                    intent,
+                    fail_policy=(device["id"] == "border-cp-01"),
+                )
+                adapters[device["id"]] = adapter
+                return adapter
+
+            result = TransactionWorker(
+                store, factory, lambda _reference: "resolved-test-secret"
+            ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
+
+            self.assertFalse(result["succeeded"])
+            self.assertTrue(result["rolled_back"], result)
+            self.assertEqual("rolled_back", result["run"]["status"])
+            self.assertTrue(adapters["border-cp-01"].policy_failure_injected)
+            self.assertTrue(adapters["border-cp-01"].rollback_calls)
             stored = store.get_design_reservation(reservation["reservation_id"])
             self.assertEqual("released", stored["state"])
 

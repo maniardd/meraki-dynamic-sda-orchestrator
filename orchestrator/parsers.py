@@ -271,6 +271,121 @@ def verify_msdp_peers(output: str, expected_peers: List[str]) -> GateResult:
     )
 
 
+def verify_sxp_connections(
+    output: str, expected_connections: List[Mapping[str, str]]
+) -> GateResult:
+    """Require each intended peer/source tuple to be explicitly On as speaker."""
+
+    observed: List[Dict[str, str]] = []
+    for match in re.finditer(
+        r"(?ims)^\s*Peer\s+IP\s*:\s*(?P<peer>\d+\.\d+\.\d+\.\d+)\s*$"
+        r"(?P<body>.*?)(?=^\s*-{5,}\s*$|^\s*Peer\s+IP\s*:|\Z)",
+        output,
+    ):
+        body = match.group("body")
+        source_match = re.search(
+            r"(?im)^\s*Source\s+IP\s*:\s*(\d+\.\d+\.\d+\.\d+)\s*$",
+            body,
+        )
+        status_match = re.search(
+            r"(?im)^\s*Conn\s+status\s*:\s*([^\r\n]+)$", body
+        )
+        mode_match = re.search(
+            r"(?im)^\s*(?:Connection|Local)\s+mode\s*:\s*([^\r\n]+)$",
+            body,
+        )
+        observed.append(
+            {
+                "peer": match.group("peer"),
+                "source_ip": source_match.group(1) if source_match else "",
+                "status": status_match.group(1).strip() if status_match else "",
+                "mode": mode_match.group(1).strip() if mode_match else "",
+            }
+        )
+    missing = []
+    expected_pairs = {
+        (str(item["peer"]), str(item["source_ip"]))
+        for item in expected_connections
+    }
+    observed_pairs = {
+        (str(item["peer"]), str(item["source_ip"])) for item in observed
+    }
+    for expected in expected_connections:
+        peer = str(expected["peer"])
+        source_ip = str(expected["source_ip"])
+        if not any(
+            item["peer"] == peer
+            and item["source_ip"] == source_ip
+            and re.fullmatch(r"On(?:\s*\(Speaker\))?", item["status"], re.IGNORECASE)
+            and "speaker" in item["mode"].lower()
+            for item in observed
+        ):
+            missing.append({"peer": peer, "source_ip": source_ip})
+    unexpected = [
+        {"peer": peer, "source_ip": source_ip}
+        for peer, source_ip in sorted(observed_pairs - expected_pairs)
+    ]
+    duplicates = len(observed) != len(observed_pairs)
+    passed = not missing and not unexpected and not duplicates
+    return GateResult(
+        passed,
+        (
+            "The exact intended SXP speaker connection set is On"
+            if passed
+            else "The SXP connection set or operational state does not match intent"
+        ),
+        {
+            "expected": expected_connections,
+            "observed": observed,
+            "missing": missing,
+            "unexpected": unexpected,
+            "duplicates": duplicates,
+        },
+    )
+
+
+def verify_role_permission(
+    output: str, source_tag: int, destination_tag: int, sgacl_name: str
+) -> GateResult:
+    """Require an exact source/destination policy block containing the SGACL."""
+
+    header_pattern = (
+        r"^\s*(?:IPv4\s+)?Role-based permissions from group\s+{}(?:\:[^\s]+)?"
+        r"\s+to group\s+{}(?:\:[^\s]+)?\s*:\s*$"
+    ).format(
+            int(source_tag), int(destination_tag)
+        )
+    headers = list(re.finditer(header_pattern, output, flags=re.IGNORECASE | re.MULTILINE))
+    body = ""
+    if len(headers) == 1:
+        body = output[headers[0].end() :]
+        next_header = re.search(
+            r"(?im)^\s*(?:IPv4\s+)?Role-based permissions from group\s+",
+            body,
+        )
+        if next_header:
+            body = body[: next_header.start()]
+    acl_matches = re.findall(
+        r"(?m)^\s*{}\s*$".format(re.escape(str(sgacl_name))), body
+    )
+    passed = len(headers) == 1 and len(acl_matches) == 1
+    return GateResult(
+        passed,
+        (
+            "Role-based permission and SGACL match intent"
+            if passed
+            else "Role-based permission or SGACL does not match intent"
+        ),
+        {
+            "source_tag": int(source_tag),
+            "destination_tag": int(destination_tag),
+            "sgacl_name": str(sgacl_name),
+            "header_occurrences": len(headers),
+            "sgacl_occurrences": len(acl_matches),
+        },
+    )
+
+
 def verify_nve_peers(output: str, minimum_up: int = 1) -> GateResult:
     """Require data rows containing both a peer IP and an explicit UP state."""
     up_rows: List[str] = []
