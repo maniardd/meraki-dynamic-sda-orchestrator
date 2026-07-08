@@ -1596,13 +1596,16 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                     "$.lisp.multihoming_groups",
                     f"LISP multihoming group for site {site_id!r} does not have two border subscribers",
                 )
-        elif "domain_id" in lisp or "multihoming_groups" in lisp:
-            _add(
-                issues,
-                "lisp.identity.unexpected",
-                "$.lisp",
-                "LISP domain and multihoming identity fields require lisp_pubsub mode",
-            )
+    if (
+        schema_version != "1.2"
+        or fabric.get("control_plane_mode") != "lisp_pubsub"
+    ) and ("domain_id" in lisp or "multihoming_groups" in lisp):
+        _add(
+            issues,
+            "lisp.identity.unexpected",
+            "$.lisp",
+            "LISP domain and multihoming identity fields require schema 1.2 lisp_pubsub mode",
+        )
 
     if not endpoint_pools:
         _add(
