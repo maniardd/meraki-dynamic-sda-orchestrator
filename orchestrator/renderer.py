@@ -67,6 +67,7 @@ def _underlay_blocks(intent: Mapping[str, Any], device: Mapping[str, Any]) -> Li
     area_tag = _safe(fabric.get("isis_process", "SDA-ISIS"), "IS-IS process")
     area = _safe(fabric.get("isis_area", "49.0001"), "IS-IS area")
     multicast = fabric.get("multicast") or {}
+    multicast_intent = intent.get("multicast") or {}
     multicast_enabled = bool(multicast.get("enabled", True))
     system_commands = [
         "system mtu {}".format(int(fabric["mtu"])),
@@ -74,6 +75,7 @@ def _underlay_blocks(intent: Mapping[str, Any], device: Mapping[str, Any]) -> Li
     ]
     if multicast_enabled:
         system_commands.append("ip multicast-routing")
+        system_commands.append("ip pim register-source Loopback0")
         if multicast.get("ssm_default", True):
             system_commands.append("ip pim ssm default")
         if multicast.get("rp_address"):
@@ -117,7 +119,19 @@ def _underlay_blocks(intent: Mapping[str, Any], device: Mapping[str, Any]) -> Li
             ],
         ),
     ]
-    if multicast_enabled and "border" in set(device.get("roles", [])) and multicast.get("rp_address"):
+    rp_device_ids = set(
+        str(item)
+        for item in multicast_intent.get(
+            "rp_device_ids", multicast.get("rp_device_ids", [])
+        )
+    )
+    is_rp_device = (
+        device_id in rp_device_ids
+        if rp_device_ids
+        else str(intent.get("schema_version")) != "1.2"
+        and "border" in set(device.get("roles", []))
+    )
+    if multicast_enabled and is_rp_device and multicast.get("rp_address"):
         rp_loopback_id = int(multicast.get("rp_loopback_id", 60000))
         blocks.append(
             _block(
@@ -134,6 +148,31 @@ def _underlay_blocks(intent: Mapping[str, Any], device: Mapping[str, Any]) -> Li
                 ],
             )
         )
+        if multicast_intent.get("rp_mode") == "anycast":
+            devices_by_id = {
+                str(item["id"]): item for item in intent.get("devices", [])
+            }
+            peer_addresses = sorted(
+                str(devices_by_id[peer_id]["loopback0_ip"])
+                for peer_id in rp_device_ids
+                if peer_id != device_id and peer_id in devices_by_id
+            )
+            if peer_addresses:
+                blocks.append(
+                    _block(
+                        "multicast_msdp",
+                        [
+                            *[
+                                "ip msdp peer {} connect-source Loopback0".format(
+                                    _safe(address, "MSDP peer")
+                                )
+                                for address in peer_addresses
+                            ],
+                            "ip msdp cache-sa-state",
+                            "ip msdp originator-id Loopback0",
+                        ],
+                    )
+                )
     for link in sorted(intent.get("links", []), key=lambda item: str(item["id"])):
         endpoints = link["endpoints"]
         local = next((item for item in endpoints if item["device_id"] == device_id), None)
@@ -384,6 +423,11 @@ def _vrf_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
 def _edge_overlay_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
     blocks = _vrf_blocks(intent)
     virtual_networks = {item["name"]: item for item in intent["virtual_networks"]}
+    multicast = intent.get("multicast") or {}
+    bum_groups = {
+        str(item["endpoint_pool_id"]): str(item["group"])
+        for item in multicast.get("l2_bum_groups", [])
+    }
     locator_name = _safe(intent.get("lisp", {}).get("locator_set", "rloc_fabric"), "locator set")
     for pool in sorted(intent["endpoint_pools"], key=lambda item: int(item["vlan_id"])):
         vn = virtual_networks[pool["virtual_network"]]
@@ -407,27 +451,270 @@ def _edge_overlay_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
             svi.append(" ip helper-address {}".format(_safe(helper, "DHCP helper")))
         svi.append(" no shutdown")
         blocks.append(_block("svi_{}".format(vlan), svi))
+        lisp_pool_commands = [
+            "router lisp",
+            " instance-id {}".format(int(vn["l3_instance_id"])),
+            "  dynamic-eid {}".format(_safe(pool["id"], "dynamic EID")),
+            "   database-mapping {} locator-set {}".format(prefix, locator_name),
+            "   exit-dynamic-eid",
+            "  exit-instance-id",
+            " instance-id {}".format(int(pool["l2_instance_id"])),
+            "  service ethernet",
+            "   eid-table vlan {}".format(vlan),
+        ]
+        bum_group = bum_groups.get(str(pool["id"]))
+        if bum_group:
+            lisp_pool_commands.append(
+                "   broadcast-underlay {}".format(
+                    _safe(bum_group, "L2 BUM multicast group")
+                )
+            )
+        elif str(intent.get("schema_version")) != "1.2":
+            lisp_pool_commands.append("   broadcast-underlay 232.0.0.1")
+        lisp_pool_commands.extend(
+            [
+                "   database-mapping mac locator-set {}".format(locator_name),
+                "   exit-service-ethernet",
+                "  exit-instance-id",
+                " exit-router-lisp",
+            ]
+        )
         blocks.append(
             _block(
                 "lisp_pool_{}".format(_safe(pool["id"], "pool id")),
+                lisp_pool_commands,
+            )
+        )
+    return blocks
+
+
+def _multicast_overlay_blocks(
+    intent: Mapping[str, Any], device: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Render the native LISP/VXLAN Layer-3 multicast contract."""
+
+    multicast = intent.get("multicast") or {}
+    if not multicast.get("enabled"):
+        return []
+    if multicast.get("transport") != "native":
+        return []
+    device_id = str(device["id"])
+    roles = set(device.get("roles", []))
+    locator_name = _safe(
+        intent.get("lisp", {}).get("locator_set", "rloc_fabric"),
+        "locator set",
+    )
+    endpoint_pools_by_vn: Dict[str, List[Mapping[str, Any]]] = {}
+    for pool in intent.get("endpoint_pools", []):
+        endpoint_pools_by_vn.setdefault(str(pool["virtual_network"]), []).append(
+            pool
+        )
+    handoff_peers_by_vrf: Dict[str, List[Mapping[str, Any]]] = {}
+    for peer in (intent.get("border_handoff") or {}).get("peers", []):
+        if str(peer.get("device_id")) == device_id:
+            handoff_peers_by_vrf.setdefault(str(peer["vrf"]), []).append(peer)
+
+    blocks: List[Dict[str, Any]] = []
+    for policy in sorted(
+        multicast.get("overlay_policies", []),
+        key=lambda item: int(item["l3_instance_id"]),
+    ):
+        loopback = next(
+            (
+                item
+                for item in policy.get("segment_loopbacks", [])
+                if str(item.get("device_id")) == device_id
+            ),
+            None,
+        )
+        if loopback is None:
+            continue
+        virtual_network = str(policy["virtual_network"])
+        vrf = _safe(policy["vrf"], "multicast VRF")
+        instance_id = int(policy["l3_instance_id"])
+        segment_address = _safe(loopback["address"], "multicast segment address")
+        group_range = ip_network(str(policy["group_range"]))
+        access_list = _safe(policy["access_list"], "multicast access list")
+
+        policy_commands = [
+            "ip multicast-routing vrf {}".format(vrf),
+            "no ip access-list standard {}".format(access_list),
+            "ip access-list standard {}".format(access_list),
+            " 10 permit {} {}".format(group_range.network_address, group_range.hostmask),
+        ]
+        if policy["mode"] == "ssm":
+            policy_commands.append(
+                "ip pim vrf {} ssm range {}".format(vrf, access_list)
+            )
+        else:
+            policy_commands.extend(
+                [
+                    "ip pim vrf {} register-source Loopback{}".format(
+                        vrf, instance_id
+                    ),
+                    "ip pim vrf {} rp-address {} {}".format(
+                        vrf,
+                        _safe(policy["rp_address"], "overlay RP address"),
+                        access_list,
+                    ),
+                ]
+            )
+        blocks.append(
+            _block(
+                "multicast_policy_{}".format(instance_id), policy_commands
+            )
+        )
+        blocks.append(
+            _block(
+                "multicast_segment_{}".format(instance_id),
+                [
+                    "interface Loopback{}".format(instance_id),
+                    " description SDA multicast segment {}".format(
+                        _safe(virtual_network, "virtual network", True)
+                    ),
+                    " vrf forwarding {}".format(vrf),
+                    " ip address {} 255.255.255.255".format(segment_address),
+                    " ip pim sparse-mode",
+                    " no shutdown",
+                ],
+            )
+        )
+        core_group = policy["core_group"]
+        blocks.append(
+            _block(
+                "multicast_lisp_{}".format(instance_id),
+                [
+                    "interface LISP0.{}".format(instance_id),
+                    " vrf forwarding {}".format(vrf),
+                    " ip pim lisp transport multicast",
+                    " ip pim lisp core-group-range {} {}".format(
+                        _safe(core_group["start"], "core group start"),
+                        int(core_group["count"]),
+                    ),
+                ],
+            )
+        )
+        blocks.append(
+            _block(
+                "multicast_lisp_database_{}".format(instance_id),
                 [
                     "router lisp",
-                    " instance-id {}".format(int(vn["l3_instance_id"])),
-                    "  dynamic-eid {}".format(_safe(pool["id"], "dynamic EID")),
-                    "   database-mapping {} locator-set {}".format(prefix, locator_name),
-                    "   exit-dynamic-eid",
-                    "  exit-instance-id",
-                    " instance-id {}".format(int(pool["l2_instance_id"])),
-                    "  service ethernet",
-                    "   eid-table vlan {}".format(vlan),
-                    "   broadcast-underlay 232.0.0.1",
-                    "   database-mapping mac locator-set {}".format(locator_name),
-                    "   exit-service-ethernet",
+                    " instance-id {}".format(instance_id),
+                    "  service ipv4",
+                    "   database-mapping {}/32 locator-set {}".format(
+                        segment_address, locator_name
+                    ),
+                    "   exit-service-ipv4",
                     "  exit-instance-id",
                     " exit-router-lisp",
                 ],
             )
         )
+
+        if "fabric_edge" in roles:
+            for pool in sorted(
+                endpoint_pools_by_vn.get(virtual_network, []),
+                key=lambda item: int(item["vlan_id"]),
+            ):
+                vlan_id = int(pool["vlan_id"])
+                blocks.append(
+                    _block(
+                        "multicast_edge_svi_{}".format(vlan_id),
+                        [
+                            "interface Vlan{}".format(vlan_id),
+                            " ip pim passive",
+                            " ip igmp version 3",
+                            " ip igmp explicit-tracking",
+                        ],
+                    )
+                )
+        if "border" in roles:
+            for peer in sorted(
+                handoff_peers_by_vrf.get(vrf, []),
+                key=lambda item: int(item["vlan_id"]),
+            ):
+                blocks.append(
+                    _block(
+                        "multicast_border_handoff_{}".format(int(peer["vlan_id"])),
+                        [
+                            "interface {}".format(
+                                _safe(peer["interface"], "multicast handoff interface")
+                            ),
+                            " ip pim sparse-mode",
+                        ],
+                    )
+                )
+    return blocks
+
+
+def _fusion_multicast_blocks(
+    intent: Mapping[str, Any], fusion: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Render the fusion side of each native multicast VRF handoff."""
+
+    multicast = intent.get("multicast") or {}
+    if not multicast.get("enabled") or multicast.get("transport") != "native":
+        return []
+    fusion_id = str(fusion["id"])
+    handoff_peers = list((intent.get("border_handoff") or {}).get("peers", []))
+    blocks: List[Dict[str, Any]] = []
+    for policy in sorted(
+        multicast.get("overlay_policies", []),
+        key=lambda item: int(item["l3_instance_id"]),
+    ):
+        vrf = _safe(policy["vrf"], "multicast VRF")
+        peers = sorted(
+            (
+                peer
+                for peer in handoff_peers
+                if str(peer.get("fusion_node_id")) == fusion_id
+                and str(peer.get("vrf")) == str(policy["vrf"])
+            ),
+            key=lambda item: int(item["vlan_id"]),
+        )
+        if not peers:
+            continue
+        group_range = ip_network(str(policy["group_range"]))
+        access_list = _safe(policy["access_list"], "multicast access list")
+        policy_commands = [
+            "ip multicast-routing vrf {}".format(vrf),
+            "no ip access-list standard {}".format(access_list),
+            "ip access-list standard {}".format(access_list),
+            " 10 permit {} {}".format(
+                group_range.network_address, group_range.hostmask
+            ),
+        ]
+        if policy["mode"] == "ssm":
+            policy_commands.append(
+                "ip pim vrf {} ssm range {}".format(vrf, access_list)
+            )
+        else:
+            policy_commands.append(
+                "ip pim vrf {} rp-address {} {}".format(
+                    vrf,
+                    _safe(policy["rp_address"], "overlay RP address"),
+                    access_list,
+                )
+            )
+        blocks.append(
+            _block(
+                "fusion_multicast_policy_{}".format(
+                    int(policy["l3_instance_id"])
+                ),
+                policy_commands,
+            )
+        )
+        for peer in peers:
+            vlan_id = int(peer["vlan_id"])
+            blocks.append(
+                _block(
+                    "fusion_multicast_handoff_{}".format(vlan_id),
+                    [
+                        "interface Vlan{}".format(vlan_id),
+                        " ip pim sparse-mode",
+                    ],
+                )
+            )
     return blocks
 
 
@@ -805,11 +1092,19 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
                 "message": "Shared-service route leaking is rendered and rollback-tested but awaits compatible IOS XE fusion hardware acceptance",
             }
         )
-    if (intent.get("multicast") or {}).get("enabled"):
+    multicast = intent.get("multicast") or {}
+    if multicast.get("enabled") and multicast.get("transport") == "native":
         blockers.append(
             {
-                "code": "multicast.overlay_renderer_pending",
-                "message": "Overlay multicast policy remains disabled until ASM/SSM hardware acceptance passes",
+                "code": "multicast.hardware_acceptance_pending",
+                "message": "Native overlay ASM/SSM fabric and fusion CLI plus operational gates are rendered but await compatible IOS XE hardware acceptance and traffic-flow proof",
+            }
+        )
+    elif multicast.get("enabled"):
+        blockers.append(
+            {
+                "code": "multicast.head_end_replication_renderer_pending",
+                "message": "Head-end replication remains disabled until its release-specific renderer and acceptance suite are complete",
             }
         )
     if (intent.get("policy_plane") or {}).get("mode") not in {None, "none"}:
@@ -846,6 +1141,11 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
                     + _pubsub_subscriber_blocks(intent, device),
                 }
             )
+        multicast_blocks = _multicast_overlay_blocks(intent, device)
+        if multicast_blocks:
+            phases.append(
+                {"phase_id": "multicast", "blocks": multicast_blocks}
+            )
         if "border" in roles:
             phases.append(
                 {
@@ -862,21 +1162,27 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
         }
 
     for fusion in sorted(intent.get("fusion_nodes", []), key=lambda item: str(item["id"])):
+        fusion_multicast_blocks = _fusion_multicast_blocks(intent, fusion)
+        fusion_phases = [
+            {
+                "phase_id": "border_handoff",
+                "blocks": _fusion_handoff_blocks(intent, fusion),
+            },
+            {
+                "phase_id": "shared_services",
+                "blocks": _fusion_shared_service_blocks(intent, fusion),
+            },
+        ]
+        if fusion_multicast_blocks:
+            fusion_phases.append(
+                {"phase_id": "multicast", "blocks": fusion_multicast_blocks}
+            )
         artifacts[str(fusion["id"])] = {
             "hostname": str(fusion["hostname"]),
             "platform": str(fusion["platform"]),
             "software_version": str(fusion["software_version"]),
             "roles": ["fusion"],
-            "phases": [
-                {
-                    "phase_id": "border_handoff",
-                    "blocks": _fusion_handoff_blocks(intent, fusion),
-                },
-                {
-                    "phase_id": "shared_services",
-                    "blocks": _fusion_shared_service_blocks(intent, fusion),
-                },
-            ],
+            "phases": fusion_phases,
         }
 
     body = {

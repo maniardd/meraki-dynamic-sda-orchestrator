@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import ipaddress
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -21,12 +22,21 @@ GUARDRAILS = ROOT / "policy" / "guardrails.cop29-sanitized.yaml"
 
 
 class Schema12FakeAdapter:
-    def __init__(self, device, intent, fail_shared=False, fail_pubsub=False):
+    def __init__(
+        self,
+        device,
+        intent,
+        fail_shared=False,
+        fail_pubsub=False,
+        fail_multicast=False,
+    ):
         self.device = device
         self.intent = intent
         self.fail_shared = fail_shared
         self.fail_pubsub = fail_pubsub
+        self.fail_multicast = fail_multicast
         self.pubsub_failure_injected = False
+        self.multicast_failure_injected = False
         self.rollback_calls = []
 
     def connect(self):
@@ -44,6 +54,15 @@ class Schema12FakeAdapter:
             output = "\n".join(
                 "peer-{0} L2 Twe1/0/{0} 10.255.0.{0} UP 24 0A".format(index)
                 for index in range(1, 9)
+            )
+        elif command == "show ip msdp peer":
+            devices = {item["id"]: item for item in self.intent["devices"]}
+            output = "\n".join(
+                "MSDP Peer {} (?), AS 0, state: established".format(
+                    devices[peer_id]["loopback0_ip"]
+                )
+                for peer_id in self.intent["multicast"]["rp_device_ids"]
+                if peer_id != self.device["id"]
             )
         elif command == "show lisp session":
             output = "Sessions for VRF default, total: 2, established: 2"
@@ -82,6 +101,91 @@ class Schema12FakeAdapter:
                 "nve1 8100 L2CP 10.255.255.1 2 8100 UP A/M 00:12:00\n"
                 "nve1 8100 L2CP 10.255.255.2 2 8100 UP A/M 00:12:00"
             )
+        elif command.startswith(
+            "show running-config | include ^ip multicast-routing vrf "
+        ):
+            vrf = command.split("vrf ", 1)[1].split("|", 1)[0]
+            policy = next(
+                item
+                for item in self.intent["multicast"]["overlay_policies"]
+                if item["vrf"] == vrf
+            )
+            lines = ["ip multicast-routing vrf {}".format(vrf)]
+            if policy["mode"] == "ssm":
+                lines.append(
+                    "ip pim vrf {} ssm range {}".format(
+                        vrf, policy["access_list"]
+                    )
+                )
+            else:
+                if "fusion" not in set(self.device.get("roles", [])):
+                    lines.append(
+                        "ip pim vrf {} register-source Loopback{}".format(
+                            vrf, policy["l3_instance_id"]
+                        )
+                    )
+                lines.append(
+                        "ip pim vrf {} rp-address {} {}".format(
+                            vrf,
+                            policy["rp_address"],
+                            policy["access_list"],
+                        )
+                )
+            output = "\n".join(lines)
+        elif command.startswith(
+            "show running-config | section ^ip access-list standard SDA-MCAST-"
+        ):
+            access_list = command.rsplit(" ", 1)[1].rstrip("$")
+            policy = next(
+                item
+                for item in self.intent["multicast"]["overlay_policies"]
+                if item["access_list"] == access_list
+            )
+            group_range = ipaddress.ip_network(policy["group_range"])
+            output = "\n".join(
+                [
+                    "ip access-list standard {}".format(access_list),
+                    " 10 permit {} {}".format(
+                        group_range.network_address, group_range.hostmask
+                    ),
+                ]
+            )
+        elif command.startswith("show ip pim vrf ") and command.endswith(" interface"):
+            vrf = command.split()[4]
+            policy = next(
+                item
+                for item in self.intent["multicast"]["overlay_policies"]
+                if item["vrf"] == vrf
+            )
+            interfaces = [
+                "Loopback{}".format(policy["l3_instance_id"]),
+                "LISP0.{}".format(policy["l3_instance_id"]),
+            ]
+            roles = set(self.device.get("roles", []))
+            if "fabric_edge" in roles:
+                interfaces.extend(
+                    "Vlan{}".format(pool["vlan_id"])
+                    for pool in self.intent["endpoint_pools"]
+                    if pool["virtual_network"] == policy["virtual_network"]
+                )
+            if "border" in roles:
+                interfaces.extend(
+                    peer["interface"]
+                    for peer in self.intent["border_handoff"]["peers"]
+                    if peer["device_id"] == self.device["id"]
+                    and peer["vrf"] == vrf
+                )
+            if "fusion" in roles:
+                interfaces.extend(
+                    "Vlan{}".format(peer["vlan_id"])
+                    for peer in self.intent["border_handoff"]["peers"]
+                    if peer.get("fusion_node_id") == self.device["id"]
+                    and peer["vrf"] == vrf
+                )
+            output = "\n".join(
+                "10.0.0.1 {} v2/S 0 30 1".format(interface)
+                for interface in sorted(set(interfaces))
+            )
         elif command.startswith("show bgp"):
             device_id = str(self.device["id"])
             neighbors = []
@@ -116,6 +220,13 @@ class Schema12FakeAdapter:
             self.fail_pubsub = False
             self.pubsub_failure_injected = True
             raise RuntimeError("simulated LISP Pub/Sub apply failure")
+        if self.fail_multicast and any(
+            command.strip() == "ip pim lisp transport multicast"
+            for command in commands
+        ):
+            self.fail_multicast = False
+            self.multicast_failure_injected = True
+            raise RuntimeError("simulated multicast apply failure")
         if self.fail_shared and any(
             command.startswith("ip route vrf ") for command in commands
         ):
@@ -265,6 +376,74 @@ class Schema12WorkerTests(unittest.TestCase):
             self.assertEqual("rolled_back", result["run"]["status"])
             self.assertTrue(adapters["border-cp-01"].pubsub_failure_injected)
             self.assertTrue(adapters["border-cp-01"].rollback_calls)
+            stored = store.get_design_reservation(reservation["reservation_id"])
+            self.assertEqual("released", stored["state"])
+
+    def test_multicast_failure_rolls_back_fabric_edge(self):
+        requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
+        policy = yaml.safe_load(GUARDRAILS.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = StateStore(str(Path(temp_dir) / "schema12-multicast.sqlite3"))
+            reservation, _ = store.reserve_design(
+                requirements, policy, "schema12-multicast-design", "planner"
+            )
+            intent = reservation["intent"]
+            intent_record, _ = store.save_intent(intent, "planner")
+            plan = create_plan(intent)
+            artifact = copy.deepcopy(render_configuration(intent, plan))
+
+            # Simulate a future platform-acceptance decision only inside this
+            # failure-injection harness. Production rendering stays blocked.
+            artifact["blocking_requirements"] = []
+            artifact_without_hash = dict(artifact)
+            artifact_without_hash.pop("artifact_hash", None)
+            artifact["artifact_hash"] = sha256_json(artifact_without_hash)
+            plan_record, _ = store.save_plan(
+                intent_record["intent_id"],
+                plan,
+                "planner",
+                artifact_hash=artifact["artifact_hash"],
+                intent_version=str(intent["schema_version"]),
+                reservation_id=reservation["reservation_id"],
+            )
+            store.record_approval(
+                plan_record["plan_id"],
+                "approved",
+                "approver",
+                "CHG-SCHEMA12-MULTICAST",
+                (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            now = datetime.now(timezone.utc)
+            run, _ = store.create_run(
+                plan_id=plan_record["plan_id"],
+                mode="apply",
+                idempotency_key="schema12-multicast-rollback",
+                requested_by="operator",
+                execution_enabled=True,
+                maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+                maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            )
+
+            adapters = {}
+
+            def factory(device):
+                adapter = Schema12FakeAdapter(
+                    device,
+                    intent,
+                    fail_multicast=(device["id"] == "edge-01"),
+                )
+                adapters[device["id"]] = adapter
+                return adapter
+
+            result = TransactionWorker(
+                store, factory, lambda _reference: "resolved-test-secret"
+            ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
+
+            self.assertFalse(result["succeeded"])
+            self.assertTrue(result["rolled_back"], result)
+            self.assertEqual("rolled_back", result["run"]["status"])
+            self.assertTrue(adapters["edge-01"].multicast_failure_injected)
+            self.assertTrue(adapters["edge-01"].rollback_calls)
             stored = store.get_design_reservation(reservation["reservation_id"])
             self.assertEqual("released", stored["state"])
 

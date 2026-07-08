@@ -183,6 +183,93 @@ def verify_lisp_identity(
     )
 
 
+def verify_exact_config_lines(output: str, expected_lines: List[str]) -> GateResult:
+    """Require every expected configuration line exactly once."""
+
+    observed = [line.strip() for line in output.splitlines() if line.strip()]
+    expected = [str(line).strip() for line in expected_lines]
+    missing = [line for line in expected if observed.count(line) != 1]
+    passed = not missing
+    reason = (
+        "Every expected configuration line is present exactly once"
+        if passed
+        else "Expected configuration lines are missing or duplicated"
+    )
+    return GateResult(
+        passed,
+        reason,
+        {"expected_lines": expected, "observed_lines": observed, "failed_lines": missing},
+    )
+
+
+def verify_pim_interfaces(output: str, expected_interfaces: List[str]) -> GateResult:
+    """Require an explicit sparse-mode PIM row for every intended interface."""
+
+    expected = sorted(set(str(item) for item in expected_interfaces))
+    sparse_interfaces = set()
+    rows: List[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        interface = fields[1] if re.fullmatch(IPV4_PATTERN, fields[0]) else fields[0]
+        if interface not in expected:
+            continue
+        if not re.search(r"\bv\d+/S\w*\b", line, flags=re.IGNORECASE):
+            continue
+        sparse_interfaces.add(interface)
+        rows.append(line)
+    missing = sorted(set(expected) - sparse_interfaces)
+    passed = not missing
+    reason = (
+        "Every expected PIM interface is present in sparse mode"
+        if passed
+        else "One or more expected PIM sparse-mode interfaces are absent"
+    )
+    return GateResult(
+        passed,
+        reason,
+        {
+            "expected_interfaces": expected,
+            "sparse_interfaces": sorted(sparse_interfaces),
+            "missing_interfaces": missing,
+            "matched_rows": rows,
+        },
+    )
+
+
+def verify_msdp_peers(output: str, expected_peers: List[str]) -> GateResult:
+    """Require an explicit established state block for every expected MSDP peer."""
+
+    expected = sorted(set(str(item) for item in expected_peers))
+    established: List[str] = []
+    for peer in expected:
+        block = re.search(
+            r"(?ims)^\s*MSDP\s+Peer\s+{}\b(?:(?!^\s*MSDP\s+Peer\s+).)*?"
+            r"\bstate\s*:\s*(?:established|up)\b".format(re.escape(peer)),
+            output,
+        )
+        if block:
+            established.append(peer)
+    missing = sorted(set(expected) - set(established))
+    return GateResult(
+        not missing,
+        (
+            "Every expected MSDP peer is established"
+            if not missing
+            else "One or more expected MSDP peers are not established"
+        ),
+        {
+            "expected_peers": expected,
+            "established_peers": established,
+            "missing_peers": missing,
+        },
+    )
+
+
 def verify_nve_peers(output: str, minimum_up: int = 1) -> GateResult:
     """Require data rows containing both a peer IP and an explicit UP state."""
     up_rows: List[str] = []

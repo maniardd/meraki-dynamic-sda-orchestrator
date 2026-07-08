@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from ipaddress import ip_network
 from typing import Any, Dict, List, Mapping
 
 from .parsers import (
     GateResult,
     verify_bgp_neighbors,
+    verify_exact_config_lines,
     verify_isis_neighbors,
     verify_ios_xe_version,
     verify_lisp_identity,
     verify_lisp_publishers,
     verify_lisp_sessions,
+    verify_msdp_peers,
     verify_nve_peers,
+    verify_pim_interfaces,
     verify_route_prefix,
 )
 
@@ -61,6 +65,32 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 "blocking": True,
             }
         )
+        multicast = intent.get("multicast") or {}
+        rp_device_ids = set(str(item) for item in multicast.get("rp_device_ids", []))
+        if (
+            multicast.get("enabled")
+            and multicast.get("rp_mode") == "anycast"
+            and device_id in rp_device_ids
+        ):
+            devices = {
+                str(item["id"]): item for item in intent.get("devices", [])
+            }
+            expected_msdp_peers = sorted(
+                str(devices[peer_id]["loopback0_ip"])
+                for peer_id in rp_device_ids
+                if peer_id != device_id and peer_id in devices
+            )
+            gates.append(
+                {
+                    "gate_id": "underlay.msdp.{}".format(device_id),
+                    "phase_id": "underlay",
+                    "device_id": device_id,
+                    "command": "show ip msdp peer",
+                    "evaluator": "msdp_peers",
+                    "expected": {"peers": expected_msdp_peers},
+                    "blocking": True,
+                }
+            )
         gates.append(
             {
                 "gate_id": "underlay.isis.{}".format(device_id),
@@ -145,6 +175,130 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                         "blocking": True,
                     }
                 )
+        multicast = intent.get("multicast") or {}
+        if multicast.get("enabled") and multicast.get("transport") == "native":
+            endpoint_pools_by_vn: Dict[str, List[Mapping[str, Any]]] = {}
+            for pool in intent.get("endpoint_pools", []):
+                endpoint_pools_by_vn.setdefault(
+                    str(pool["virtual_network"]), []
+                ).append(pool)
+            for policy in sorted(
+                multicast.get("overlay_policies", []),
+                key=lambda item: int(item["l3_instance_id"]),
+            ):
+                if device_id not in {
+                    str(item["device_id"])
+                    for item in policy.get("segment_loopbacks", [])
+                }:
+                    continue
+                vrf = str(policy["vrf"])
+                instance_id = int(policy["l3_instance_id"])
+                access_list = str(policy["access_list"])
+                expected_interfaces = [
+                    "Loopback{}".format(instance_id),
+                    "LISP0.{}".format(instance_id),
+                ]
+                if "fabric_edge" in roles:
+                    expected_interfaces.extend(
+                        "Vlan{}".format(int(pool["vlan_id"]))
+                        for pool in endpoint_pools_by_vn.get(
+                            str(policy["virtual_network"]), []
+                        )
+                    )
+                if "border" in roles:
+                    expected_interfaces.extend(
+                        str(peer["interface"])
+                        for peer in handoff.get("peers", [])
+                        if str(peer.get("device_id")) == device_id
+                        and str(peer.get("vrf")) == vrf
+                    )
+                expected_policy_lines = ["ip multicast-routing vrf {}".format(vrf)]
+                if policy["mode"] == "ssm":
+                    expected_policy_lines.append(
+                        "ip pim vrf {} ssm range {}".format(vrf, access_list)
+                    )
+                else:
+                    expected_policy_lines.extend(
+                        [
+                            "ip pim vrf {} register-source Loopback{}".format(
+                                vrf, instance_id
+                            ),
+                            "ip pim vrf {} rp-address {} {}".format(
+                                vrf, policy["rp_address"], access_list
+                            ),
+                        ]
+                    )
+                gates.extend(
+                    [
+                        {
+                            "gate_id": "multicast.policy.{}.{}".format(
+                                device_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": device_id,
+                            "command": "show running-config | include ^ip multicast-routing vrf {}|^ip pim vrf {}".format(
+                                vrf, vrf
+                            ),
+                            "evaluator": "exact_config_lines",
+                            "expected": {"lines": expected_policy_lines},
+                            "blocking": True,
+                        },
+                        {
+                            "gate_id": "multicast.acl.{}.{}".format(
+                                device_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": device_id,
+                            "command": "show running-config | section ^ip access-list standard {}$".format(
+                                access_list
+                            ),
+                            "evaluator": "exact_config_lines",
+                            "expected": {
+                                "lines": [
+                                    "ip access-list standard {}".format(access_list),
+                                    "10 permit {} {}".format(
+                                        ip_network(
+                                            str(policy["group_range"])
+                                        ).network_address,
+                                        ip_network(
+                                            str(policy["group_range"])
+                                        ).hostmask,
+                                    ),
+                                ]
+                            },
+                            "blocking": True,
+                        },
+                        {
+                            "gate_id": "multicast.pim.{}.{}".format(
+                                device_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": device_id,
+                            "command": "show ip pim vrf {} interface".format(vrf),
+                            "evaluator": "pim_interfaces",
+                            "expected": {
+                                "interfaces": sorted(set(expected_interfaces))
+                            },
+                            "blocking": True,
+                        },
+                    ]
+                )
+                if policy["mode"] == "asm":
+                    gates.append(
+                        {
+                            "gate_id": "multicast.rp_route.{}.{}".format(
+                                device_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": device_id,
+                            "command": "show ip route vrf {} {}".format(
+                                vrf, policy["rp_prefix"]
+                            ),
+                            "evaluator": "route_prefix",
+                            "expected": {"prefix": str(policy["rp_prefix"])},
+                            "blocking": True,
+                        }
+                    )
     for fusion in sorted(intent.get("fusion_nodes", []), key=lambda item: str(item["id"])):
         fusion_id = str(fusion["id"])
         gates.append(
@@ -170,6 +324,109 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                     "blocking": True,
                 }
             )
+        multicast = intent.get("multicast") or {}
+        if multicast.get("enabled") and multicast.get("transport") == "native":
+            for policy in sorted(
+                multicast.get("overlay_policies", []),
+                key=lambda item: int(item["l3_instance_id"]),
+            ):
+                vrf = str(policy["vrf"])
+                peers = [
+                    peer
+                    for peer in handoff.get("peers", [])
+                    if str(peer.get("fusion_node_id")) == fusion_id
+                    and str(peer.get("vrf")) == vrf
+                ]
+                if not peers:
+                    continue
+                instance_id = int(policy["l3_instance_id"])
+                access_list = str(policy["access_list"])
+                expected_policy_lines = [
+                    "ip multicast-routing vrf {}".format(vrf)
+                ]
+                if policy["mode"] == "ssm":
+                    expected_policy_lines.append(
+                        "ip pim vrf {} ssm range {}".format(vrf, access_list)
+                    )
+                else:
+                    expected_policy_lines.append(
+                        "ip pim vrf {} rp-address {} {}".format(
+                            vrf, policy["rp_address"], access_list
+                        )
+                    )
+                group_range = ip_network(str(policy["group_range"]))
+                gates.extend(
+                    [
+                        {
+                            "gate_id": "multicast.policy.{}.{}".format(
+                                fusion_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": fusion_id,
+                            "command": "show running-config | include ^ip multicast-routing vrf {}|^ip pim vrf {}".format(
+                                vrf, vrf
+                            ),
+                            "evaluator": "exact_config_lines",
+                            "expected": {"lines": expected_policy_lines},
+                            "blocking": True,
+                        },
+                        {
+                            "gate_id": "multicast.acl.{}.{}".format(
+                                fusion_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": fusion_id,
+                            "command": "show running-config | section ^ip access-list standard {}$".format(
+                                access_list
+                            ),
+                            "evaluator": "exact_config_lines",
+                            "expected": {
+                                "lines": [
+                                    "ip access-list standard {}".format(access_list),
+                                    "10 permit {} {}".format(
+                                        group_range.network_address,
+                                        group_range.hostmask,
+                                    ),
+                                ]
+                            },
+                            "blocking": True,
+                        },
+                        {
+                            "gate_id": "multicast.pim.{}.{}".format(
+                                fusion_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": fusion_id,
+                            "command": "show ip pim vrf {} interface".format(vrf),
+                            "evaluator": "pim_interfaces",
+                            "expected": {
+                                "interfaces": sorted(
+                                    {
+                                        "Vlan{}".format(int(peer["vlan_id"]))
+                                        for peer in peers
+                                    }
+                                )
+                            },
+                            "blocking": True,
+                        },
+                    ]
+                )
+                if policy["mode"] == "asm":
+                    gates.append(
+                        {
+                            "gate_id": "multicast.rp_route.{}.{}".format(
+                                fusion_id, instance_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": fusion_id,
+                            "command": "show ip route vrf {} {}".format(
+                                vrf, policy["rp_prefix"]
+                            ),
+                            "evaluator": "route_prefix",
+                            "expected": {"prefix": str(policy["rp_prefix"])},
+                            "blocking": True,
+                        }
+                    )
         shared = intent.get("shared_services") or {}
         if shared:
             service_vrf = str(shared["vrf"])
@@ -236,6 +493,12 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
                 else int(expected["multihoming_id"])
             ),
         )
+    if evaluator == "exact_config_lines":
+        return verify_exact_config_lines(output, list(expected["lines"]))
+    if evaluator == "pim_interfaces":
+        return verify_pim_interfaces(output, list(expected["interfaces"]))
+    if evaluator == "msdp_peers":
+        return verify_msdp_peers(output, list(expected["peers"]))
     if evaluator == "nve_peers":
         return verify_nve_peers(output, int(expected["minimum_up"]))
     if evaluator == "bgp_neighbors":

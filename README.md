@@ -65,6 +65,9 @@ Implemented foundation:
 - LISP Pub/Sub border-subscriber rendering with per-IID publisher-state gates
   plus ledger-backed domain/site multihoming identities, exact identity gates,
   and failure/rollback coverage; redundant platform acceptance remains blocked
+- Native L2 BUM and Layer-3 ASM/SSM multicast rendering with ledger-backed
+  segment loopbacks/core groups, exact gates, and rollback coverage; platform
+  and real traffic-flow acceptance remain blocked
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. Meraki import packaging and hardware
@@ -114,3 +117,6 @@ records the schema 1.2 contracts, Cisco design basis, and execution blockers.
 The [LISP Pub/Sub acceptance boundary](docs/lisp-pubsub-renderer.md) records
 the rendered subscriber contract, operational evidence, and remaining
 redundant-hardware tests.
+The [native multicast acceptance boundary](docs/multicast-overlay-renderer.md)
+records per-VN planning, rendered IOS XE policy, gates, and traffic tests still
+required before enablement.
