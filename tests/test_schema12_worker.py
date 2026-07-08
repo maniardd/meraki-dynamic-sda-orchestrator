@@ -58,6 +58,25 @@ class Schema12FakeAdapter:
                 )
                 for publisher_id in self.intent["lisp"]["publishers"]
             )
+        elif command == "show running-config | section ^router lisp":
+            commands = [
+                "router lisp",
+                " domain-id {}".format(self.intent["lisp"]["domain_id"]),
+            ]
+            group = next(
+                (
+                    item
+                    for item in self.intent["lisp"]["multihoming_groups"]
+                    if self.device["id"] in item["border_device_ids"]
+                ),
+                None,
+            )
+            if group is not None:
+                commands.append(
+                    " multihoming-id {}".format(group["multihoming_id"])
+                )
+            commands.append(" service ipv4")
+            output = "\n".join(commands)
         elif command == "show nve peers":
             output = (
                 "nve1 8100 L2CP 10.255.255.1 2 8100 UP A/M 00:12:00\n"

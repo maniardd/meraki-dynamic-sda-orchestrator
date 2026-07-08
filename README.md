@@ -63,7 +63,8 @@ Implemented foundation:
 - Deny-by-default shared-service route-leak rendering, exact route gates, and
   fusion-node failure/rollback coverage; hardware acceptance remains blocked
 - LISP Pub/Sub border-subscriber rendering with per-IID publisher-state gates
-  and failure/rollback coverage; redundant hardware acceptance remains blocked
+  plus ledger-backed domain/site multihoming identities, exact identity gates,
+  and failure/rollback coverage; redundant platform acceptance remains blocked
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. Meraki import packaging and hardware

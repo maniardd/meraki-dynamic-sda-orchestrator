@@ -40,6 +40,8 @@ The allocator derives and reserves:
   an explicit tag.
 - LISP Pub/Sub publisher and subscriber sets from the approved control-plane
   and border roles.
+- One ledger-backed fabric LISP domain ID and one site-scoped multihoming ID
+  shared by every redundant border pair/group in that site.
 
 ## Design guardrails
 
@@ -87,7 +89,8 @@ limited to compatible IOS XE hardware or trusted virtual-lab acceptance, as
 described in [Shared-services renderer and acceptance
 boundary](shared-services-renderer.md).
 
-The LISP Pub/Sub subscriber renderer, per-IID publisher gates, and
-failure-injection rollback coverage are also complete. Apply remains blocked
-until redundant publisher/subscriber hardware acceptance satisfies the
-[LISP Pub/Sub acceptance boundary](lisp-pubsub-renderer.md).
+The LISP Pub/Sub subscriber renderer, ledger-backed domain/multihoming
+identities, exact identity and per-IID publisher gates, and failure-injection
+rollback coverage are complete. Apply remains blocked until redundant
+publisher/subscriber platform acceptance satisfies the [LISP Pub/Sub
+acceptance boundary](lisp-pubsub-renderer.md).

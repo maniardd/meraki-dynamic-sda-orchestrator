@@ -9,6 +9,7 @@ from .parsers import (
     verify_bgp_neighbors,
     verify_isis_neighbors,
     verify_ios_xe_version,
+    verify_lisp_identity,
     verify_lisp_publishers,
     verify_lisp_sessions,
     verify_nve_peers,
@@ -31,6 +32,11 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
         for device_id in sorted(lisp.get("publishers", []))
     ]
     pubsub_subscribers = set(str(item) for item in lisp.get("subscribers", []))
+    pubsub_multihoming_by_device = {
+        str(device_id): int(group["multihoming_id"])
+        for group in lisp.get("multihoming_groups", [])
+        for device_id in group.get("border_device_ids", [])
+    }
     handoff = intent.get("border_handoff") or {}
     peers_by_device: Dict[str, List[str]] = {}
     peers_by_fusion: Dict[str, List[str]] = {}
@@ -105,6 +111,20 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
             lisp.get("control_plane_mode") == "lisp_pubsub"
             and device_id in pubsub_subscribers
         ):
+            gates.append(
+                {
+                    "gate_id": "lisp.identity.{}".format(device_id),
+                    "phase_id": "overlay",
+                    "device_id": device_id,
+                    "command": "show running-config | section ^router lisp",
+                    "evaluator": "lisp_identity",
+                    "expected": {
+                        "domain_id": int(lisp["domain_id"]),
+                        "multihoming_id": pubsub_multihoming_by_device.get(device_id),
+                    },
+                    "blocking": True,
+                }
+            )
             for virtual_network in sorted(
                 intent.get("virtual_networks", []),
                 key=lambda item: int(item["l3_instance_id"]),
@@ -206,6 +226,16 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
         return verify_lisp_sessions(output, int(expected["minimum_established"]))
     if evaluator == "lisp_publishers":
         return verify_lisp_publishers(output, list(expected["publishers"]))
+    if evaluator == "lisp_identity":
+        return verify_lisp_identity(
+            output,
+            int(expected["domain_id"]),
+            (
+                None
+                if expected.get("multihoming_id") is None
+                else int(expected["multihoming_id"])
+            ),
+        )
     if evaluator == "nve_peers":
         return verify_nve_peers(output, int(expected["minimum_up"]))
     if evaluator == "bgp_neighbors":

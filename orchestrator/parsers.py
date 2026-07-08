@@ -138,6 +138,51 @@ def verify_lisp_publishers(output: str, expected_publishers: List[str]) -> GateR
     )
 
 
+def verify_lisp_identity(
+    output: str, expected_domain_id: int, expected_multihoming_id: int | None
+) -> GateResult:
+    """Require exact router-LISP domain and topology identity configuration."""
+
+    domain_ids = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"^\s*domain-id\s+(\d+)\s*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    ]
+    multihoming_ids = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"^\s*multihoming-id\s+(\d+)\s*$",
+            output,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    ]
+    expected_multihoming = (
+        [] if expected_multihoming_id is None else [int(expected_multihoming_id)]
+    )
+    passed = (
+        domain_ids == [int(expected_domain_id)]
+        and multihoming_ids == expected_multihoming
+    )
+    reason = (
+        "LISP domain and multihoming identity match intent"
+        if passed
+        else "LISP domain or multihoming identity does not match intent"
+    )
+    return GateResult(
+        passed,
+        reason,
+        {
+            "expected_domain_id": int(expected_domain_id),
+            "observed_domain_ids": domain_ids,
+            "expected_multihoming_id": expected_multihoming_id,
+            "observed_multihoming_ids": multihoming_ids,
+        },
+    )
+
+
 def verify_nve_peers(output: str, minimum_up: int = 1) -> GateResult:
     """Require data rows containing both a peer IP and an explicit UP state."""
     up_rows: List[str] = []

@@ -277,6 +277,26 @@ def _pubsub_subscriber_blocks(
     ):
         return []
 
+    identity_commands = [
+        "router lisp",
+        " domain-id {}".format(int(lisp["domain_id"])),
+    ]
+    multihoming_group = next(
+        (
+            group
+            for group in lisp.get("multihoming_groups", [])
+            if device_id in set(group.get("border_device_ids", []))
+        ),
+        None,
+    )
+    if multihoming_group is not None:
+        identity_commands.append(
+            " multihoming-id {}".format(
+                int(multihoming_group["multihoming_id"])
+            )
+        )
+    identity_commands.append(" exit-router-lisp")
+
     devices = {str(item["id"]): item for item in intent["devices"]}
     publishers = [
         devices[str(publisher_id)]
@@ -321,7 +341,10 @@ def _pubsub_subscriber_blocks(
             ]
         )
     commands.extend(["  exit-service-ipv4", " exit-router-lisp"])
-    return [_block("lisp_pubsub_subscriber", commands, [auth_ref])]
+    return [
+        _block("lisp_pubsub_identity", identity_commands),
+        _block("lisp_pubsub_subscriber", commands, [auth_ref]),
+    ]
 
 
 def _vrf_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:

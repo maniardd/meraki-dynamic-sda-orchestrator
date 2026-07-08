@@ -5,6 +5,7 @@ import unittest
 from orchestrator.parsers import (
     verify_bgp_neighbors,
     verify_isis_neighbors,
+    verify_lisp_identity,
     verify_lisp_publishers,
     verify_lisp_sessions,
     verify_nve_peers,
@@ -65,6 +66,22 @@ Publisher                 State            Session             PubSub State
         self.assertFalse(
             verify_lisp_publishers(
                 "Publisher State Session PubSub State", ["192.0.2.10"]
+            ).passed
+        )
+
+    def test_lisp_identity_requires_exact_domain_and_multihoming_values(self):
+        output = """
+router lisp
+ domain-id 424242
+ multihoming-id 4242
+ service ipv4
+"""
+        self.assertTrue(verify_lisp_identity(output, 424242, 4242).passed)
+        self.assertFalse(verify_lisp_identity(output, 424243, 4242).passed)
+        self.assertFalse(verify_lisp_identity(output, 424242, None).passed)
+        self.assertTrue(
+            verify_lisp_identity(
+                "router lisp\n domain-id 424242\n service ipv4", 424242, None
             ).passed
         )
 

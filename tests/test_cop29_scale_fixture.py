@@ -96,6 +96,110 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             ["border-cp-01", "border-cp-02"], intent["lisp"]["publishers"]
         )
         self.assertEqual("lisp_pubsub", intent["lisp"]["control_plane_mode"])
+        self.assertEqual(1, intent["lisp"]["domain_id"])
+        self.assertEqual(
+            [
+                {
+                    "site_id": "SITE-LARGE-CAMPUS",
+                    "multihoming_id": 1,
+                    "border_device_ids": ["border-cp-01", "border-cp-02"],
+                }
+            ],
+            intent["lisp"]["multihoming_groups"],
+        )
+
+    def test_pubsub_site_identities_are_ledger_backed_and_allow_brownfield_values(self):
+        result = self.derive()
+        identity_reservations = {
+            item["resource_type"]: item["value"]
+            for item in result["reservations"]["scalar"]
+            if item["resource_type"]
+            in {"lisp_domain_id", "lisp_multihoming_id"}
+        }
+        self.assertEqual(
+            {"lisp_domain_id": "1", "lisp_multihoming_id": "1"},
+            identity_reservations,
+        )
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["fabric"]["lisp_domain_id"] = 424242
+        candidate["fabric_sites"][0]["lisp_multihoming_id"] = 4242
+        intent = derive_fabric_intent(candidate, self.policy)["intent"]
+        self.assertEqual(424242, intent["lisp"]["domain_id"])
+        self.assertEqual(
+            4242, intent["lisp"]["multihoming_groups"][0]["multihoming_id"]
+        )
+
+        active_identity_ledger = [
+            {
+                "allocation_domain": "acceptance-large-campus",
+                "resource_type": resource_type,
+                "value": "1",
+                "state": "committed",
+            }
+            for resource_type in ("lisp_domain_id", "lisp_multihoming_id")
+        ]
+        intent = derive_fabric_intent(
+            self.requirements,
+            self.policy,
+            scalar_ledger=active_identity_ledger,
+        )["intent"]
+        self.assertEqual(2, intent["lisp"]["domain_id"])
+        self.assertEqual(
+            2, intent["lisp"]["multihoming_groups"][0]["multihoming_id"]
+        )
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["fabric"]["lisp_domain_id"] = 1
+        with self.assertRaisesRegex(
+            AllocationError, "Requested lisp_domain_id value 1 is unavailable"
+        ):
+            derive_fabric_intent(
+                candidate,
+                self.policy,
+                scalar_ledger=active_identity_ledger,
+            )
+
+    def test_requested_pubsub_identity_must_fit_guardrails(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["fabric"]["lisp_domain_id"] = 500
+        policy = copy.deepcopy(self.policy)
+        policy["ranges"]["lisp_domain_id"] = {"min": 1, "max": 100}
+        with self.assertRaisesRegex(
+            AllocationError, "Requested lisp_domain_id value 500 is outside"
+        ):
+            derive_fabric_intent(candidate, policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["metadata"]["environment"] = "lab"
+        candidate["fabric_sites"][0]["lisp_multihoming_id"] = 4242
+        border = next(
+            item for item in candidate["devices"] if item["id"] == "border-cp-02"
+        )
+        border["roles"] = ["control_plane"]
+        candidate["multicast"]["rp_device_ids"] = ["border-cp-01"]
+        with self.assertRaisesRegex(
+            AllocationError, "requires at least two borders"
+        ):
+            derive_fabric_intent(candidate, self.policy)
+
+    def test_pubsub_identity_inputs_fail_closed_when_context_or_ranges_are_invalid(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["fabric"]["control_plane_mode"] = "classic_lisp"
+        candidate["fabric"]["lisp_domain_id"] = 424242
+        with self.assertRaisesRegex(
+            AllocationError, "require schema 1.2 lisp_pubsub mode"
+        ):
+            derive_fabric_intent(candidate, self.policy)
+
+        for range_name in ("lisp_domain_id", "lisp_multihoming_id"):
+            with self.subTest(range_name=range_name):
+                policy = copy.deepcopy(self.policy)
+                policy["ranges"].pop(range_name)
+                with self.assertRaisesRegex(
+                    AllocationError, f"Guardrail range {range_name} is missing"
+                ):
+                    derive_fabric_intent(self.requirements, policy)
 
     def test_shared_services_multicast_and_policy_are_fully_derived(self):
         result = self.derive()
@@ -267,6 +371,52 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertIn("bgp.fusion_without_peer", codes)
         self.assertIn("bgp.border_vrf_without_peer", codes)
 
+    def test_intent_validation_rejects_missing_or_incomplete_multihoming_group(self):
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["lisp"]["multihoming_groups"] = []
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn(
+            "lisp.multihoming.group.missing",
+            {item.code for item in result.issues},
+        )
+
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["lisp"]["multihoming_groups"][0]["border_device_ids"] = [
+            "border-cp-01"
+        ]
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn(
+            "lisp.multihoming.group.membership",
+            {item.code for item in result.issues},
+        )
+
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["lisp"]["subscribers"] = ["border-cp-01"]
+        result = validate_intent(candidate)
+        self.assertFalse(result.is_valid)
+        self.assertIn(
+            "lisp.pubsub.subscribers", {item.code for item in result.issues}
+        )
+
+    def test_intent_validation_rejects_cross_site_and_duplicate_multihoming_identity(self):
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["lisp"]["multihoming_groups"][0]["site_id"] = "OTHER-SITE"
+        result = validate_intent(candidate)
+        codes = {item.code for item in result.issues}
+        self.assertFalse(result.is_valid)
+        self.assertIn("lisp.multihoming.member.wrong_site", codes)
+
+        candidate = copy.deepcopy(self.derive()["intent"])
+        duplicate = copy.deepcopy(candidate["lisp"]["multihoming_groups"][0])
+        duplicate["site_id"] = "OTHER-SITE"
+        candidate["lisp"]["multihoming_groups"].append(duplicate)
+        result = validate_intent(candidate)
+        codes = {item.code for item in result.issues}
+        self.assertFalse(result.is_valid)
+        self.assertIn("unique.duplicate", codes)
+
     def test_intent_validation_rejects_asm_without_rp(self):
         candidate = copy.deepcopy(self.derive()["intent"])
         candidate["multicast"]["rp_mode"] = "none"
@@ -333,6 +483,20 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
                 for item in phase["blocks"]
                 if item["block_id"] == "lisp_pubsub_subscriber"
             )
+            identity_block = next(
+                item
+                for item in phase["blocks"]
+                if item["block_id"] == "lisp_pubsub_identity"
+            )
+            self.assertEqual(
+                [
+                    "router lisp",
+                    " domain-id 1",
+                    " multihoming-id 1",
+                    " exit-router-lisp",
+                ],
+                identity_block["commands"],
+            )
             commands = "\n".join(block["commands"])
             self.assertEqual(["router lisp", " service ipv4"], block["commands"][:2])
             self.assertFalse(
@@ -391,6 +555,19 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             )
         )
         self.assertTrue(all(gate["phase_id"] == "overlay" for gate in pubsub_gates))
+        identity_gates = [
+            gate
+            for gate in build_gate_plan(intent)
+            if gate["evaluator"] == "lisp_identity"
+        ]
+        self.assertEqual(2, len(identity_gates))
+        self.assertTrue(
+            all(
+                gate["expected"]
+                == {"domain_id": 1, "multihoming_id": 1}
+                for gate in identity_gates
+            )
+        )
 
     def test_separated_pubsub_subscriber_owns_transport_and_proxy_commands(self):
         intent = self.derive()["intent"]
@@ -398,7 +575,11 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             next(item for item in intent["devices"] if item["id"] == "border-cp-01")
         )
         subscriber["roles"] = ["border"]
-        block = _pubsub_subscriber_blocks(intent, subscriber)[0]
+        block = next(
+            item
+            for item in _pubsub_subscriber_blocks(intent, subscriber)
+            if item["block_id"] == "lisp_pubsub_subscriber"
+        )
         self.assertIn("  encapsulation vxlan", block["commands"])
         self.assertIn(
             "  no map-cache away-eids send-map-request", block["commands"]

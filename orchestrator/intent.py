@@ -515,6 +515,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
     loopbacks: Dict[IPv4Address, str] = {}
     role_counts = {role: 0 for role in ALLOWED_ROLES}
     device_roles: Dict[str, set] = {}
+    device_sites: Dict[str, str] = {}
     fusion_ids: Dict[str, str] = {}
     fusion_asns: Dict[str, int] = {}
     address_networks: List[Tuple[str, IPv4Network, str]] = []
@@ -563,6 +564,8 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         roles = _list(device.get("roles"), f"{path}.roles", issues)
         if device_id:
             device_roles[device_id] = set(roles)
+            if site:
+                device_sites[device_id] = site
         if not roles:
             _add(issues, "device.roles.empty", f"{path}.roles", "At least one role is required")
         for role in roles:
@@ -1460,6 +1463,7 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
         if control_plane_mode == "lisp_pubsub":
             publishers = _list(lisp.get("publishers"), "$.lisp.publishers", issues)
             subscribers = _list(lisp.get("subscribers"), "$.lisp.subscribers", issues)
+            _integer(lisp, "domain_id", "$.lisp", issues, 1, 4_294_967_295)
             if set(publishers) != set(map_servers):
                 _add(
                     issues,
@@ -1483,6 +1487,125 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                         f"$.lisp.subscribers[{index}]",
                         "LISP subscribers must be border nodes",
                     )
+            expected_subscribers = {
+                device_id
+                for device_id, roles in device_roles.items()
+                if "border" in roles
+            }
+            if set(subscribers) != expected_subscribers:
+                _add(
+                    issues,
+                    "lisp.pubsub.subscribers",
+                    "$.lisp.subscribers",
+                    "Pub/Sub subscribers must match the complete border-node set",
+                )
+            multihoming_groups = _list(
+                lisp.get("multihoming_groups"),
+                "$.lisp.multihoming_groups",
+                issues,
+            )
+            group_sites: Dict[str, str] = {}
+            group_ids: Dict[int, str] = {}
+            actual_groups: Dict[str, set] = {}
+            for index, raw_group in enumerate(multihoming_groups):
+                path = f"$.lisp.multihoming_groups[{index}]"
+                group = _mapping(raw_group, path, issues)
+                site_id = _required_string(group, "site_id", path, issues)
+                multihoming_id = _integer(
+                    group, "multihoming_id", path, issues, 1, 65_535
+                )
+                border_device_ids = _list(
+                    group.get("border_device_ids"),
+                    f"{path}.border_device_ids",
+                    issues,
+                )
+                if site_id:
+                    _check_duplicate(
+                        group_sites,
+                        site_id,
+                        f"{path}.site_id",
+                        "LISP multihoming site",
+                        issues,
+                    )
+                if multihoming_id is not None:
+                    _check_duplicate(
+                        group_ids,
+                        multihoming_id,
+                        f"{path}.multihoming_id",
+                        "LISP multihoming id",
+                        issues,
+                    )
+                members = set()
+                for member_index, member in enumerate(border_device_ids):
+                    member_path = f"{path}.border_device_ids[{member_index}]"
+                    if member in members:
+                        _add(
+                            issues,
+                            "unique.duplicate",
+                            member_path,
+                            "Duplicate border in LISP multihoming group",
+                        )
+                    members.add(member)
+                    if "border" not in device_roles.get(member, set()):
+                        _add(
+                            issues,
+                            "lisp.multihoming.member.not_border",
+                            member_path,
+                            "LISP multihoming members must be border nodes",
+                        )
+                    elif site_id and device_sites.get(member) != site_id:
+                        _add(
+                            issues,
+                            "lisp.multihoming.member.wrong_site",
+                            member_path,
+                            "LISP multihoming members must belong to the group site",
+                        )
+                if site_id:
+                    actual_groups[site_id] = members
+
+            borders_by_site: Dict[str, set] = {}
+            for device_id, roles in device_roles.items():
+                if "border" in roles and device_id in subscribers:
+                    borders_by_site.setdefault(device_sites.get(device_id, ""), set()).add(
+                        device_id
+                    )
+            expected_groups = {
+                site_id: members
+                for site_id, members in borders_by_site.items()
+                if site_id and len(members) >= 2
+            }
+            for site_id, expected_members in sorted(expected_groups.items()):
+                if site_id not in actual_groups:
+                    _add(
+                        issues,
+                        "lisp.multihoming.group.missing",
+                        "$.lisp.multihoming_groups",
+                        f"Missing LISP multihoming group for site {site_id!r}",
+                    )
+                elif actual_groups[site_id] != expected_members:
+                    _add(
+                        issues,
+                        "lisp.multihoming.group.membership",
+                        "$.lisp.multihoming_groups",
+                        f"LISP multihoming group for site {site_id!r} must contain every border subscriber in that site",
+                    )
+            for site_id in sorted(set(actual_groups) - set(expected_groups)):
+                _add(
+                    issues,
+                    "lisp.multihoming.group.unexpected",
+                    "$.lisp.multihoming_groups",
+                    f"LISP multihoming group for site {site_id!r} does not have two border subscribers",
+                )
+    if (
+        schema_version != "1.2"
+        or fabric.get("control_plane_mode") != "lisp_pubsub"
+    ) and ("domain_id" in lisp or "multihoming_groups" in lisp):
+        _add(
+            issues,
+            "lisp.identity.unexpected",
+            "$.lisp",
+            "LISP domain and multihoming identity fields require schema 1.2 lisp_pubsub mode",
+        )
 
     if not endpoint_pools:
         _add(

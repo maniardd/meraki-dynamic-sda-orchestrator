@@ -41,6 +41,8 @@ ranges:
   bgp_asn_local: {min: 65001, max: 65100}
   rd_asn: 65000
   handoff_vlan_id: {min: 3000, max: 3900}
+  lisp_domain_id: {min: 1, max: 4294967295}
+  lisp_multihoming_id: {min: 1, max: 65535}
 
 platform_matrix:
   - model: C9500-48Y4C

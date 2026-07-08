@@ -226,6 +226,25 @@
         "subscribers": {
           "type": "array", "minItems": 1, "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
+        },
+        "domain_id": {
+          "type": "integer", "minimum": 1, "maximum": 4294967295
+        },
+        "multihoming_groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["site_id", "multihoming_id", "border_device_ids"],
+            "properties": {
+              "site_id": {"type": "string", "minLength": 1},
+              "multihoming_id": {"type": "integer", "minimum": 1, "maximum": 65535},
+              "border_device_ids": {
+                "type": "array", "minItems": 2, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              }
+            }
+          }
         }
       }
     },
@@ -488,6 +507,22 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "lisp": {
+            "properties": {"control_plane_mode": {"const": "lisp_pubsub"}},
+            "required": ["control_plane_mode"]
+          }
+        },
+        "required": ["lisp"]
+      },
+      "then": {
+        "properties": {
+          "lisp": {"required": ["domain_id", "multihoming_groups"]}
+        }
+      }
+    },
     {
       "if": {
         "properties": {"schema_version": {"const": "1.2"}},

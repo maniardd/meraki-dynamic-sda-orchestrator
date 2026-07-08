@@ -139,6 +139,16 @@ class FabricIntentValidationTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertIn("schema.not", self.codes(result))
 
+    def test_schema_1_0_and_1_1_reject_lisp_pubsub_identity_fields(self):
+        for candidate in (self.intent, self.cvd_intent):
+            with self.subTest(schema_version=candidate["schema_version"]):
+                candidate = copy.deepcopy(candidate)
+                candidate["lisp"]["domain_id"] = 424242
+                candidate["lisp"]["multihoming_groups"] = []
+                result = validate_intent(candidate)
+                self.assertFalse(result.is_valid)
+                self.assertIn("lisp.identity.unexpected", self.codes(result))
+
     def test_duplicate_loopback_is_rejected(self):
         candidate = copy.deepcopy(self.intent)
         candidate["devices"][1]["loopback0_ip"] = candidate["devices"][0]["loopback0_ip"]
