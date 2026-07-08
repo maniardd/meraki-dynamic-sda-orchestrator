@@ -40,6 +40,20 @@ and is resolved only inside the separately enabled worker. Publisher and
 subscriber order is deterministic. No customer configuration or encrypted
 device secret is copied from the reference configurations.
 
+## Domain and multihoming identity
+
+For Pub/Sub intent, the allocator reserves one fabric-wide `domain-id` from
+the scalar ledger. For every site with two or more border subscribers, it also
+reserves one `multihoming-id` shared by every border in that site. Optional
+brownfield values may be requested in requirements, but must remain inside the
+organizational guardrail ranges and cannot collide with active reservations.
+
+The intent validator requires exact site membership and rejects missing,
+partial, duplicate, cross-site, or non-border multihoming groups. The renderer
+emits the identities only on approved border subscribers. An exact operational
+gate compares the running `router lisp` section with the approved domain and
+site-specific multihoming identity.
+
 ## Operational and rollback gates
 
 After the overlay instance IDs are configured, every border and every L3
@@ -66,9 +80,8 @@ apply remains impossible. Clear that blocker only after the target IOS XE
 release and topology pass all of the following:
 
 1. CLI parser acceptance on every supported border platform and release.
-2. The fabric's `domain-id` and topology-specific `multihoming-id` requirements
-   are modeled in intent/guardrails, rendered, and verified. They are not
-   emitted by the current renderer.
+2. The rendered `domain-id` and topology-specific `multihoming-id` commands are
+   accepted by every target platform/release and match operational state.
 3. Two publishers and two subscribers establish for every intended IID.
 4. Publisher restart and control-plane-node loss retain deterministic
    convergence and forwarding.

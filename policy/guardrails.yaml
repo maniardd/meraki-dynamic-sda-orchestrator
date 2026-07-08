@@ -53,6 +53,8 @@ ranges:
   handoff_vlan_id: {min: 3000, max: 3900}
   sgt: {min: 2, max: 65519}
   shared_service_vlan_id: {min: 3901, max: 3999}
+  lisp_domain_id: {min: 1, max: 4294967295}
+  lisp_multihoming_id: {min: 1, max: 65535}
 
 fusion:
   require_full_mesh_production: true

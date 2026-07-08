@@ -64,6 +64,10 @@
           },
           "profile": {
             "enum": ["fabric_in_a_box", "small_site", "medium_site", "large_site"]
+          },
+          "lisp_multihoming_id": {
+            "type": "integer", "minimum": 1, "maximum": 65535,
+            "description": "Optional brownfield override shared by redundant border nodes in this site."
           }
         }
       }
@@ -114,7 +118,11 @@
         "isis_area": {"type": "string", "pattern": "^49\\.[0-9]{4}$"},
         "lisp_site_name": {"type": "string", "minLength": 1, "maxLength": 64},
         "lisp_auth_key_ref": {"type": "string", "pattern": "^secret://"},
-        "locator_set": {"type": "string", "minLength": 1, "maxLength": 64}
+        "locator_set": {"type": "string", "minLength": 1, "maxLength": 64},
+        "lisp_domain_id": {
+          "type": "integer", "minimum": 1, "maximum": 4294967295,
+          "description": "Optional brownfield override; otherwise allocated from guardrails."
+        }
       }
     },
     "devices": {

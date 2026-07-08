@@ -474,6 +474,16 @@ def derive_fabric_intent(
     allowed_modes = set(policy.get("fabric_control_plane", {}).get("allowed_modes", []))
     if mode not in allowed_modes:
         raise AllocationError("Control-plane mode {} is not approved".format(mode))
+    identity_override_requested = fabric.get("lisp_domain_id") is not None or any(
+        site.get("lisp_multihoming_id") is not None
+        for site in requirements.get("fabric_sites", [])
+    )
+    if identity_override_requested and (
+        str(requirements["schema_version"]) != "1.2" or mode != "lisp_pubsub"
+    ):
+        raise AllocationError(
+            "LISP identity overrides require schema 1.2 lisp_pubsub mode"
+        )
     site_context = _derive_site_context(requirements, policy)
 
     pools = policy.get("supernets", {})
@@ -493,6 +503,8 @@ def derive_fabric_intent(
         "l3_instance_id": "l3_instance_id",
         "asn": "bgp_asn_local",
         "sgt": "sgt",
+        "lisp_domain_id": "lisp_domain_id",
+        "lisp_multihoming_id": "lisp_multihoming_id",
     }
     scalar_taken: Dict[str, set] = {
         kind: _active_scalars(scalar_ledger, domain, kind)
@@ -1071,6 +1083,72 @@ def derive_fabric_intent(
         ):
             raise AllocationError("Production guardrails require redundant fusion nodes")
 
+    lisp_domain_id = None
+    multihoming_groups: List[Dict[str, Any]] = []
+    if str(requirements["schema_version"]) == "1.2" and mode == "lisp_pubsub":
+        domain_range = ranges.get("lisp_domain_id")
+        multihoming_range = ranges.get("lisp_multihoming_id")
+        if not isinstance(domain_range, Mapping):
+            raise AllocationError("Guardrail range lisp_domain_id is missing")
+        if not isinstance(multihoming_range, Mapping):
+            raise AllocationError("Guardrail range lisp_multihoming_id is missing")
+        if fabric.get("lisp_domain_id") is None:
+            lisp_domain_id = reserve_scalar(
+                "lisp_domain_id",
+                int(domain_range["min"]),
+                int(domain_range["max"]),
+            )
+        else:
+            lisp_domain_id = reserve_requested_scalar(
+                "lisp_domain_id",
+                int(fabric["lisp_domain_id"]),
+                int(domain_range["min"]),
+                int(domain_range["max"]),
+            )
+
+        sites_by_id = {
+            str(item["id"]): item for item in requirements.get("fabric_sites", [])
+        }
+        borders_by_site: Dict[str, List[str]] = {}
+        for device in devices:
+            if "border" in device["roles"]:
+                borders_by_site.setdefault(str(device["site"]), []).append(
+                    str(device["id"])
+                )
+        for site_id, site in sorted(sites_by_id.items()):
+            if site.get("lisp_multihoming_id") is not None and len(
+                borders_by_site.get(site_id, [])
+            ) < 2:
+                raise AllocationError(
+                    "Requested lisp_multihoming_id for site {} requires at least two borders".format(
+                        site_id
+                    )
+                )
+        for site_id, border_ids in sorted(borders_by_site.items()):
+            if len(border_ids) < 2:
+                continue
+            site = sites_by_id.get(site_id, {})
+            if site.get("lisp_multihoming_id") is None:
+                multihoming_id = reserve_scalar(
+                    "lisp_multihoming_id",
+                    int(multihoming_range["min"]),
+                    int(multihoming_range["max"]),
+                )
+            else:
+                multihoming_id = reserve_requested_scalar(
+                    "lisp_multihoming_id",
+                    int(site["lisp_multihoming_id"]),
+                    int(multihoming_range["min"]),
+                    int(multihoming_range["max"]),
+                )
+            multihoming_groups.append(
+                {
+                    "site_id": site_id,
+                    "multihoming_id": multihoming_id,
+                    "border_device_ids": sorted(border_ids),
+                }
+            )
+
     intent = {
         "schema_version": str(requirements["schema_version"]),
         "metadata": copy.deepcopy(requirements["metadata"]),
@@ -1102,6 +1180,8 @@ def derive_fabric_intent(
             intent["lisp"]["subscribers"] = sorted(
                 item["id"] for item in devices if "border" in item["roles"]
             )
+            intent["lisp"]["domain_id"] = lisp_domain_id
+            intent["lisp"]["multihoming_groups"] = multihoming_groups
         intent["fusion_nodes"] = fusion_nodes
         intent["shared_services"] = shared_services
         intent["multicast"] = multicast
