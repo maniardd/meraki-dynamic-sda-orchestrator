@@ -46,3 +46,36 @@ renderer, and platform acceptance before enablement.
 
 The hardware/platform-acceptance blocker remains unconditional. Production
 apply is still unreachable for LISP Pub/Sub artifacts.
+
+## Independent re-review outcome (2026-07-08)
+
+**Reviewer:** Claude (independent)
+
+**Delta reviewed:** `8fae875` to `0101ff7`
+
+**Method:** isolated worktree, complete delta review, and independent full-suite run.
+
+**Final result: PASS — no remaining blocking findings.** Claude independently
+reproduced 186 tests: 181 passed, 5 skipped, and 0 failed.
+
+The re-review confirmed:
+
+1. M1 is closed by Cisco's documented top-level/default `router lisp` to
+   `service ipv4` hierarchy and a no-`instance-id` regression assertion.
+2. The per-IID command is an operational `show` gate, not configuration
+   placement.
+3. `domain-id` and topology-specific `multihoming-id` remain explicit hard
+   prerequisites before platform acceptance can pass.
+4. Colocated border/control-plane nodes no longer receive duplicate
+   encapsulation, proxy, map-server, or map-resolver commands.
+5. Separated border/control-plane roles retain the required transport and
+   proxy commands.
+6. IPv4 prefix Pub/Sub is the explicit scope; Ethernet/EID Pub/Sub requires
+   separate modeling and acceptance.
+7. `lisp_pubsub.hardware_acceptance_pending` remains unconditional and apply
+   remains unreachable.
+8. No customer data, real credentials, or private configuration was added.
+
+Claude concluded that PR #7 is safe to merge while the platform-acceptance
+blocker remains enabled. The `domain-id`/`multihoming-id` implementation is the
+only required carry-forward from this review.
