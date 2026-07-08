@@ -71,7 +71,7 @@ The Phase 5 renderer produces reviewable fusion VRF, VLAN, trunk, and eBGP
 artifacts and creates operational BGP gates for both ends of every handoff.
 Apply remains disabled for four deliberately visible blockers:
 
-- `lisp_pubsub.renderer_pending`
+- `lisp_pubsub.hardware_acceptance_pending`
 - `shared_services.hardware_acceptance_pending`
 - `multicast.overlay_renderer_pending`
 - `policy_plane.renderer_pending`
@@ -86,3 +86,8 @@ failure-injection rollback test are complete. Its remaining blocker is now
 limited to compatible IOS XE hardware or trusted virtual-lab acceptance, as
 described in [Shared-services renderer and acceptance
 boundary](shared-services-renderer.md).
+
+The LISP Pub/Sub subscriber renderer, per-IID publisher gates, and
+failure-injection rollback coverage are also complete. Apply remains blocked
+until redundant publisher/subscriber hardware acceptance satisfies the
+[LISP Pub/Sub acceptance boundary](lisp-pubsub-renderer.md).

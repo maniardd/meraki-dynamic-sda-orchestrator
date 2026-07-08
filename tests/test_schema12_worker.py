@@ -21,10 +21,12 @@ GUARDRAILS = ROOT / "policy" / "guardrails.cop29-sanitized.yaml"
 
 
 class Schema12FakeAdapter:
-    def __init__(self, device, intent, fail_shared=False):
+    def __init__(self, device, intent, fail_shared=False, fail_pubsub=False):
         self.device = device
         self.intent = intent
         self.fail_shared = fail_shared
+        self.fail_pubsub = fail_pubsub
+        self.pubsub_failure_injected = False
         self.rollback_calls = []
 
     def connect(self):
@@ -45,6 +47,17 @@ class Schema12FakeAdapter:
             )
         elif command == "show lisp session":
             output = "Sessions for VRF default, total: 2, established: 2"
+        elif (
+            command.startswith("show lisp instance-id")
+            and command.endswith("publisher config-propagation")
+        ):
+            devices = {item["id"]: item for item in self.intent["devices"]}
+            output = "\n".join(
+                "{} Reachable Up Established".format(
+                    devices[publisher_id]["loopback0_ip"]
+                )
+                for publisher_id in self.intent["lisp"]["publishers"]
+            )
         elif command == "show nve peers":
             output = (
                 "nve1 8100 L2CP 10.255.255.1 2 8100 UP A/M 00:12:00\n"
@@ -77,6 +90,13 @@ class Schema12FakeAdapter:
         return {"checkpoint": "flash:sda-{}.cfg".format(run_id), "verified": True}
 
     def apply_block(self, commands):
+        if self.fail_pubsub and any(
+            command.strip().startswith("import publication publisher ")
+            for command in commands
+        ):
+            self.fail_pubsub = False
+            self.pubsub_failure_injected = True
+            raise RuntimeError("simulated LISP Pub/Sub apply failure")
         if self.fail_shared and any(
             command.startswith("ip route vrf ") for command in commands
         ):
@@ -160,6 +180,74 @@ class Schema12WorkerTests(unittest.TestCase):
             self.assertEqual([], store.run_evidence(run["run_id"]))
             stored = store.get_design_reservation(reservation["reservation_id"])
             self.assertEqual("reserved", stored["state"])
+
+    def test_pubsub_failure_rolls_back_subscriber_node(self):
+        requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
+        policy = yaml.safe_load(GUARDRAILS.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = StateStore(str(Path(temp_dir) / "schema12-pubsub.sqlite3"))
+            reservation, _ = store.reserve_design(
+                requirements, policy, "schema12-pubsub-design", "planner"
+            )
+            intent = reservation["intent"]
+            intent_record, _ = store.save_intent(intent, "planner")
+            plan = create_plan(intent)
+            artifact = copy.deepcopy(render_configuration(intent, plan))
+
+            # Model an explicit future hardware-acceptance decision only inside
+            # this failure-injection harness. Production apply remains blocked.
+            artifact["blocking_requirements"] = []
+            artifact_without_hash = dict(artifact)
+            artifact_without_hash.pop("artifact_hash", None)
+            artifact["artifact_hash"] = sha256_json(artifact_without_hash)
+            plan_record, _ = store.save_plan(
+                intent_record["intent_id"],
+                plan,
+                "planner",
+                artifact_hash=artifact["artifact_hash"],
+                intent_version=str(intent["schema_version"]),
+                reservation_id=reservation["reservation_id"],
+            )
+            store.record_approval(
+                plan_record["plan_id"],
+                "approved",
+                "approver",
+                "CHG-SCHEMA12-PUBSUB",
+                (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            now = datetime.now(timezone.utc)
+            run, _ = store.create_run(
+                plan_id=plan_record["plan_id"],
+                mode="apply",
+                idempotency_key="schema12-pubsub-rollback",
+                requested_by="operator",
+                execution_enabled=True,
+                maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+                maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            )
+
+            adapters = {}
+
+            def factory(device):
+                adapter = Schema12FakeAdapter(
+                    device,
+                    intent,
+                    fail_pubsub=(device["id"] == "border-cp-01"),
+                )
+                adapters[device["id"]] = adapter
+                return adapter
+
+            result = TransactionWorker(
+                store, factory, lambda _reference: "resolved-test-secret"
+            ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
+
+            self.assertFalse(result["succeeded"])
+            self.assertTrue(result["rolled_back"], result)
+            self.assertEqual("rolled_back", result["run"]["status"])
+            self.assertTrue(adapters["border-cp-01"].pubsub_failure_injected)
+            self.assertTrue(adapters["border-cp-01"].rollback_calls)
+            stored = store.get_design_reservation(reservation["reservation_id"])
+            self.assertEqual("released", stored["state"])
 
     def test_shared_service_failure_rolls_back_fusion_node(self):
         requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))

@@ -5,6 +5,7 @@ import unittest
 from orchestrator.parsers import (
     verify_bgp_neighbors,
     verify_isis_neighbors,
+    verify_lisp_publishers,
     verify_lisp_sessions,
     verify_nve_peers,
     verify_route_prefix,
@@ -36,6 +37,36 @@ Peer               State      Up/Down        In/Out    Users
         result = verify_lisp_sessions("LISP output unavailable")
         self.assertFalse(result.passed)
         self.assertIsNone(result.observations["established"])
+
+    def test_all_expected_lisp_publishers_must_be_established(self):
+        output = """
+Publisher                 State            Session             PubSub State
+192.0.2.10                Reachable        Up                  Established
+192.0.2.11                Reachable        Up                  Established
+"""
+        result = verify_lisp_publishers(output, ["192.0.2.10", "192.0.2.11"])
+        self.assertTrue(result.passed)
+        self.assertEqual(
+            ["192.0.2.10", "192.0.2.11"],
+            result.observations["established_publishers"],
+        )
+
+    def test_lisp_publisher_header_or_partial_state_fails_closed(self):
+        output = """
+Publisher                 State            Session             PubSub State
+192.0.2.10                Reachable        Up                  Established
+192.0.2.11                Reachable        Down                Disconnected
+"""
+        result = verify_lisp_publishers(output, ["192.0.2.10", "192.0.2.11"])
+        self.assertFalse(result.passed)
+        self.assertEqual(
+            ["192.0.2.11"], result.observations["missing_publishers"]
+        )
+        self.assertFalse(
+            verify_lisp_publishers(
+                "Publisher State Session PubSub State", ["192.0.2.10"]
+            ).passed
+        )
 
     def test_isis_table_header_without_neighbor_fails(self):
         output = "System Id Type Interface IP Address State Holdtime Circuit Id"

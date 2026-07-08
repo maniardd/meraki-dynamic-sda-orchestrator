@@ -88,6 +88,56 @@ def verify_lisp_sessions(output: str, minimum_established: int = 1) -> GateResul
     )
 
 
+def verify_lisp_publishers(output: str, expected_publishers: List[str]) -> GateResult:
+    """Require every expected Pub/Sub publisher to be fully established."""
+
+    publisher_rows: Dict[str, Dict[str, str]] = {}
+    for raw_line in output.splitlines():
+        match = re.match(
+            rf"^\s*(?P<publisher>{IPV4_PATTERN})\s+"
+            r"(?P<state>\S+)\s+(?P<session>\S+)\s+(?P<pubsub>\S+)\s*$",
+            raw_line,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        publisher_rows[match.group("publisher")] = {
+            "state": match.group("state").lower(),
+            "session": match.group("session").lower(),
+            "pubsub_state": match.group("pubsub").lower(),
+        }
+
+    established = sorted(
+        publisher
+        for publisher, row in publisher_rows.items()
+        if row == {
+            "state": "reachable",
+            "session": "up",
+            "pubsub_state": "established",
+        }
+    )
+    expected = sorted(set(str(item) for item in expected_publishers))
+    missing = sorted(set(expected) - set(established))
+    passed = bool(expected) and not missing
+    reason = (
+        "All {} expected LISP publisher(s) are established".format(len(expected))
+        if passed
+        else "Missing established LISP publishers: {}".format(
+            ", ".join(missing) or "none specified"
+        )
+    )
+    return GateResult(
+        passed,
+        reason,
+        {
+            "expected_publishers": expected,
+            "established_publishers": established,
+            "missing_publishers": missing,
+            "publisher_rows": publisher_rows,
+        },
+    )
+
+
 def verify_nve_peers(output: str, minimum_up: int = 1) -> GateResult:
     """Require data rows containing both a peer IP and an explicit UP state."""
     up_rows: List[str] = []

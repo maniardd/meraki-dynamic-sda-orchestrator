@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Mapping
 from .parsers import (
     GateResult,
     verify_bgp_neighbors,
-    verify_ios_xe_version,
     verify_isis_neighbors,
+    verify_ios_xe_version,
+    verify_lisp_publishers,
     verify_lisp_sessions,
     verify_nve_peers,
     verify_route_prefix,
@@ -23,6 +24,13 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
             incident_links[str(endpoint["device_id"])] += 1
 
     map_server_count = len(intent["lisp"]["map_servers"])
+    devices_by_id = {str(device["id"]): device for device in intent["devices"]}
+    lisp = intent.get("lisp") or {}
+    pubsub_publishers = [
+        str(devices_by_id[str(device_id)]["loopback0_ip"])
+        for device_id in sorted(lisp.get("publishers", []))
+    ]
+    pubsub_subscribers = set(str(item) for item in lisp.get("subscribers", []))
     handoff = intent.get("border_handoff") or {}
     peers_by_device: Dict[str, List[str]] = {}
     peers_by_fusion: Dict[str, List[str]] = {}
@@ -93,6 +101,30 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                     "blocking": True,
                 }
             )
+        if (
+            lisp.get("control_plane_mode") == "lisp_pubsub"
+            and device_id in pubsub_subscribers
+        ):
+            for virtual_network in sorted(
+                intent.get("virtual_networks", []),
+                key=lambda item: int(item["l3_instance_id"]),
+            ):
+                instance_id = int(virtual_network["l3_instance_id"])
+                gates.append(
+                    {
+                        "gate_id": "lisp.pubsub.{}.{}".format(
+                            device_id, instance_id
+                        ),
+                        "phase_id": "overlay",
+                        "device_id": device_id,
+                        "command": "show lisp instance-id {} ipv4 publisher config-propagation".format(
+                            instance_id
+                        ),
+                        "evaluator": "lisp_publishers",
+                        "expected": {"publishers": pubsub_publishers},
+                        "blocking": True,
+                    }
+                )
     for fusion in sorted(intent.get("fusion_nodes", []), key=lambda item: str(item["id"])):
         fusion_id = str(fusion["id"])
         gates.append(
@@ -172,6 +204,8 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
         return verify_isis_neighbors(output, int(expected["minimum_up"]))
     if evaluator == "lisp_sessions":
         return verify_lisp_sessions(output, int(expected["minimum_established"]))
+    if evaluator == "lisp_publishers":
+        return verify_lisp_publishers(output, list(expected["publishers"]))
     if evaluator == "nve_peers":
         return verify_nve_peers(output, int(expected["minimum_up"]))
     if evaluator == "bgp_neighbors":
