@@ -283,12 +283,14 @@ def _pubsub_subscriber_blocks(
         for publisher_id in sorted(lisp.get("publishers", []))
     ]
     auth_ref = str(lisp["auth_key_ref"])
+    colocated_control_plane = "control_plane" in set(device.get("roles", []))
     commands = [
         "router lisp",
         " service ipv4",
-        "  encapsulation vxlan",
-        "  map-cache publications",
     ]
+    if not colocated_control_plane:
+        commands.append("  encapsulation vxlan")
+    commands.append("  map-cache publications")
     for publisher in publishers:
         address = _safe(publisher["loopback0_ip"], "LISP publisher address")
         commands.extend(
@@ -306,15 +308,18 @@ def _pubsub_subscriber_blocks(
         [
             "  route-export publications",
             "  distance publications 250",
-            "  no map-cache away-eids send-map-request",
-            "  proxy-etr",
-            "  proxy-itr {}".format(
-                _safe(device["loopback0_ip"], "subscriber loopback")
-            ),
         ]
     )
-    if "control_plane" in set(device.get("roles", [])):
-        commands.extend(["  map-server", "  map-resolver"])
+    if not colocated_control_plane:
+        commands.extend(
+            [
+                "  no map-cache away-eids send-map-request",
+                "  proxy-etr",
+                "  proxy-itr {}".format(
+                    _safe(device["loopback0_ip"], "subscriber loopback")
+                ),
+            ]
+        )
     commands.extend(["  exit-service-ipv4", " exit-router-lisp"])
     return [_block("lisp_pubsub_subscriber", commands, [auth_ref])]
 

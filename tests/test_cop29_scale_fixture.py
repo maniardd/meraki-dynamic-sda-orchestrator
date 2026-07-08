@@ -12,7 +12,7 @@ from orchestrator.allocator import AllocationError, derive_fabric_intent
 from orchestrator.gates import build_gate_plan
 from orchestrator.intent import validate_intent
 from orchestrator.planner import create_plan
-from orchestrator.renderer import render_configuration
+from orchestrator.renderer import _pubsub_subscriber_blocks, render_configuration
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -334,14 +334,33 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
                 if item["block_id"] == "lisp_pubsub_subscriber"
             )
             commands = "\n".join(block["commands"])
+            self.assertEqual(["router lisp", " service ipv4"], block["commands"][:2])
+            self.assertFalse(
+                any("instance-id" in command for command in block["commands"])
+            )
+            device_commands = "\n".join(
+                command
+                for device_phase in artifacts["devices"][subscriber_id]["phases"]
+                for device_block in device_phase["blocks"]
+                for command in device_block["commands"]
+            )
             self.assertIn("map-cache publications", commands)
             self.assertIn("route-export publications", commands)
             self.assertIn("distance publications 250", commands)
-            self.assertIn("no map-cache away-eids send-map-request", commands)
             self.assertIn(
                 "proxy-itr {}".format(devices[subscriber_id]["loopback0_ip"]),
-                commands,
+                device_commands,
             )
+            self.assertNotIn("  encapsulation vxlan", block["commands"])
+            self.assertNotIn(
+                "  no map-cache away-eids send-map-request", block["commands"]
+            )
+            self.assertNotIn("  proxy-etr", block["commands"])
+            self.assertFalse(
+                any(command.startswith("  proxy-itr ") for command in block["commands"])
+            )
+            self.assertNotIn("  map-server", block["commands"])
+            self.assertNotIn("  map-resolver", block["commands"])
             for address in publisher_addresses:
                 self.assertIn(
                     "import publication publisher {}".format(address), commands
@@ -372,6 +391,24 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             )
         )
         self.assertTrue(all(gate["phase_id"] == "overlay" for gate in pubsub_gates))
+
+    def test_separated_pubsub_subscriber_owns_transport_and_proxy_commands(self):
+        intent = self.derive()["intent"]
+        subscriber = copy.deepcopy(
+            next(item for item in intent["devices"] if item["id"] == "border-cp-01")
+        )
+        subscriber["roles"] = ["border"]
+        block = _pubsub_subscriber_blocks(intent, subscriber)[0]
+        self.assertIn("  encapsulation vxlan", block["commands"])
+        self.assertIn(
+            "  no map-cache away-eids send-map-request", block["commands"]
+        )
+        self.assertIn("  proxy-etr", block["commands"])
+        self.assertIn(
+            "  proxy-itr {}".format(subscriber["loopback0_ip"]), block["commands"]
+        )
+        self.assertNotIn("  map-server", block["commands"])
+        self.assertNotIn("  map-resolver", block["commands"])
 
     def test_shared_service_renderer_is_exact_deny_by_default_and_deterministic(self):
         intent = self.derive()["intent"]
