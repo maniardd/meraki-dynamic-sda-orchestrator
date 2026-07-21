@@ -71,12 +71,14 @@ The allocator derives and reserves:
 
 The Phase 5 renderer produces reviewable fusion VRF, VLAN, trunk, and eBGP
 artifacts and creates operational BGP gates for both ends of every handoff.
-Apply remains disabled for four deliberately visible blockers:
+Apply remains disabled for the following deliberately visible blockers:
 
 - `lisp_pubsub.hardware_acceptance_pending`
 - `shared_services.hardware_acceptance_pending`
 - `multicast.hardware_acceptance_pending` for native transport, or
   `multicast.head_end_replication_renderer_pending` for head-end replication
+- `multicast.reconciliation_pending` until prior owned multicast state is
+  diffed and stale configuration removal is proven
 - `policy_plane.renderer_pending`
 
 Each blocker is removed only after its release-specific renderer, rollback,

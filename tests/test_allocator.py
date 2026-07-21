@@ -174,6 +174,24 @@ class DynamicAllocatorTests(unittest.TestCase):
         with self.assertRaisesRegex(AllocationError, "Requirements schema error"):
             self.derive(requirements=candidate)
 
+    def test_pre_1_2_top_level_multicast_is_rejected_by_version(self):
+        legacy_multicast = {
+            "enabled": True,
+            "transport": "native",
+            "rp_mode": "static",
+            "asm_virtual_networks": ["Corporate"],
+            "ssm_virtual_networks": [],
+        }
+        for original in (self.requirements, self.cvd_requirements):
+            with self.subTest(schema_version=original["schema_version"]):
+                candidate = copy.deepcopy(original)
+                candidate["multicast"] = copy.deepcopy(legacy_multicast)
+                with self.assertRaisesRegex(
+                    AllocationError,
+                    "Top-level multicast requirements require schema_version 1.2",
+                ):
+                    self.derive(requirements=candidate)
+
     def test_cvd_site_rejects_selected_profile_overflow(self):
         candidate = copy.deepcopy(self.cvd_requirements)
         candidate["fabric_sites"][0]["endpoint_count"] = 10000

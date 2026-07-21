@@ -29,14 +29,17 @@ class Schema12FakeAdapter:
         fail_shared=False,
         fail_pubsub=False,
         fail_multicast=False,
+        fail_fusion_multicast=False,
     ):
         self.device = device
         self.intent = intent
         self.fail_shared = fail_shared
         self.fail_pubsub = fail_pubsub
         self.fail_multicast = fail_multicast
+        self.fail_fusion_multicast = fail_fusion_multicast
         self.pubsub_failure_injected = False
         self.multicast_failure_injected = False
+        self.fusion_multicast_failure_injected = False
         self.rollback_calls = []
 
     def connect(self):
@@ -150,6 +153,18 @@ class Schema12FakeAdapter:
                     ),
                 ]
             )
+        elif command.startswith(
+            "show running-config | section ^interface Vlan"
+        ):
+            vlan_id = command.split("Vlan", 1)[1].rstrip("$")
+            output = "\n".join(
+                [
+                    "interface Vlan{}".format(vlan_id),
+                    " ip pim passive",
+                    " ip igmp version 3",
+                    " ip igmp explicit-tracking",
+                ]
+            )
         elif command.startswith("show ip pim vrf ") and command.endswith(" interface"):
             vrf = command.split()[4]
             policy = next(
@@ -227,6 +242,14 @@ class Schema12FakeAdapter:
             self.fail_multicast = False
             self.multicast_failure_injected = True
             raise RuntimeError("simulated multicast apply failure")
+        if self.fail_fusion_multicast and any(
+            command.strip().startswith("ip pim vrf ")
+            and " rp-address " in command
+            for command in commands
+        ):
+            self.fail_fusion_multicast = False
+            self.fusion_multicast_failure_injected = True
+            raise RuntimeError("simulated fusion multicast apply failure")
         if self.fail_shared and any(
             command.startswith("ip route vrf ") for command in commands
         ):
@@ -444,6 +467,76 @@ class Schema12WorkerTests(unittest.TestCase):
             self.assertEqual("rolled_back", result["run"]["status"])
             self.assertTrue(adapters["edge-01"].multicast_failure_injected)
             self.assertTrue(adapters["edge-01"].rollback_calls)
+            stored = store.get_design_reservation(reservation["reservation_id"])
+            self.assertEqual("released", stored["state"])
+
+    def test_fusion_multicast_failure_rolls_back_fusion_node(self):
+        requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
+        policy = yaml.safe_load(GUARDRAILS.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = StateStore(str(Path(temp_dir) / "schema12-fusion-multicast.sqlite3"))
+            reservation, _ = store.reserve_design(
+                requirements, policy, "schema12-fusion-multicast-design", "planner"
+            )
+            intent = reservation["intent"]
+            intent_record, _ = store.save_intent(intent, "planner")
+            plan = create_plan(intent)
+            artifact = copy.deepcopy(render_configuration(intent, plan))
+
+            # Bypass pending acceptance blockers only in this failure-injection
+            # harness. The production renderer remains fail-closed.
+            artifact["blocking_requirements"] = []
+            artifact_without_hash = dict(artifact)
+            artifact_without_hash.pop("artifact_hash", None)
+            artifact["artifact_hash"] = sha256_json(artifact_without_hash)
+            plan_record, _ = store.save_plan(
+                intent_record["intent_id"],
+                plan,
+                "planner",
+                artifact_hash=artifact["artifact_hash"],
+                intent_version=str(intent["schema_version"]),
+                reservation_id=reservation["reservation_id"],
+            )
+            store.record_approval(
+                plan_record["plan_id"],
+                "approved",
+                "approver",
+                "CHG-SCHEMA12-FUSION-MULTICAST",
+                (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            now = datetime.now(timezone.utc)
+            run, _ = store.create_run(
+                plan_id=plan_record["plan_id"],
+                mode="apply",
+                idempotency_key="schema12-fusion-multicast-rollback",
+                requested_by="operator",
+                execution_enabled=True,
+                maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+                maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            )
+
+            adapters = {}
+
+            def factory(device):
+                adapter = Schema12FakeAdapter(
+                    device,
+                    intent,
+                    fail_fusion_multicast=(device["id"] == "fusion-01"),
+                )
+                adapters[device["id"]] = adapter
+                return adapter
+
+            result = TransactionWorker(
+                store, factory, lambda _reference: "resolved-test-secret"
+            ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
+
+            self.assertFalse(result["succeeded"])
+            self.assertTrue(result["rolled_back"], result)
+            self.assertEqual("rolled_back", result["run"]["status"])
+            self.assertTrue(
+                adapters["fusion-01"].fusion_multicast_failure_injected
+            )
+            self.assertTrue(adapters["fusion-01"].rollback_calls)
             stored = store.get_design_reservation(reservation["reservation_id"])
             self.assertEqual("released", stored["state"])
 

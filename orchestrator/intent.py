@@ -289,6 +289,13 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
             "$.schema_version",
             "Supported schema_version values are '1.0', '1.1', and '1.2'",
         )
+    if schema_version != "1.2" and "multicast" in root:
+        _add(
+            issues,
+            "multicast.unexpected",
+            "$.multicast",
+            "Top-level multicast intent requires schema_version 1.2",
+        )
 
     metadata = _mapping(root.get("metadata"), "$.metadata", issues)
     _required_string(metadata, "name", "$.metadata", issues)

@@ -383,7 +383,7 @@
     "multicast": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "transport", "rp_mode", "asm_virtual_networks", "ssm_virtual_networks", "overlay_policies", "l2_bum_groups"],
+      "required": ["enabled", "transport", "rp_mode", "asm_virtual_networks", "ssm_virtual_networks"],
       "properties": {
         "enabled": {"type": "boolean"},
         "transport": {"enum": ["native", "head_end_replication"]},
@@ -596,7 +596,15 @@
         "required": [
           "deployment_model", "site_hierarchy", "fabric_sites", "fusion_nodes",
           "shared_services", "multicast", "policy_plane"
-        ]
+        ],
+        "properties": {
+          "multicast": {
+            "required": [
+              "enabled", "transport", "rp_mode", "asm_virtual_networks",
+              "ssm_virtual_networks", "overlay_policies", "l2_bum_groups"
+            ]
+          }
+        }
       }
     },
     {
@@ -610,7 +618,6 @@
           "anyOf": [
             {"required": ["fusion_nodes"]},
             {"required": ["shared_services"]},
-            {"required": ["multicast"]},
             {"required": ["policy_plane"]}
           ]
         }
@@ -630,7 +637,6 @@
             {"required": ["fabric_zones"]},
             {"required": ["fusion_nodes"]},
             {"required": ["shared_services"]},
-            {"required": ["multicast"]},
             {"required": ["policy_plane"]}
           ]
         }

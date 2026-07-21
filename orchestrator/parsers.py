@@ -218,7 +218,8 @@ def verify_pim_interfaces(output: str, expected_interfaces: List[str]) -> GateRe
         interface = fields[1] if re.fullmatch(IPV4_PATTERN, fields[0]) else fields[0]
         if interface not in expected:
             continue
-        if not re.search(r"\bv\d+/S\w*\b", line, flags=re.IGNORECASE):
+        mode = re.search(r"\bv\d+/([A-Z]+)\b", line, flags=re.IGNORECASE)
+        if mode is None or mode.group(1).upper() not in {"S", "SM"}:
             continue
         sparse_interfaces.add(interface)
         rows.append(line)

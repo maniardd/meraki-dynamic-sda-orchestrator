@@ -1093,6 +1093,13 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
             }
         )
     multicast = intent.get("multicast") or {}
+    if str(intent.get("schema_version")) == "1.2" and "multicast" in intent:
+        blockers.append(
+            {
+                "code": "multicast.reconciliation_pending",
+                "message": "Multicast apply remains disabled until the last committed owned-state manifest is diffed and stale ACL, RP/SSM, loopback, LISP, MSDP, and BUM configuration is deterministically removed",
+            }
+        )
     if multicast.get("enabled") and multicast.get("transport") == "native":
         blockers.append(
             {

@@ -460,6 +460,13 @@ def derive_fabric_intent(
     """
 
     validate_requirements_shape(requirements)
+    if (
+        str(requirements.get("schema_version")) != "1.2"
+        and "multicast" in requirements
+    ):
+        raise AllocationError(
+            "Top-level multicast requirements require schema_version 1.2"
+        )
     _require_keys(
         requirements,
         ["schema_version", "metadata", "allocation_domain", "fabric", "devices", "links", "virtual_networks"],

@@ -667,6 +667,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
                 "lisp_pubsub.hardware_acceptance_pending",
                 "shared_services.hardware_acceptance_pending",
                 "multicast.hardware_acceptance_pending",
+                "multicast.reconciliation_pending",
                 "policy_plane.renderer_pending",
             },
             blocker_codes,
@@ -789,7 +790,53 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             for item in build_gate_plan(intent)
             if item["phase_id"] == "multicast"
         ]
-        self.assertEqual(56, len(multicast_gates))
+        edge_ids = {
+            item["id"]
+            for item in intent["devices"]
+            if "fabric_edge" in item.get("roles", [])
+        }
+        passive_svi_gates = [
+            item
+            for item in multicast_gates
+            if item["gate_id"].startswith("multicast.passive_svi.")
+        ]
+        self.assertEqual(
+            len(edge_ids)
+            * len(
+                [
+                    pool
+                    for pool in intent["endpoint_pools"]
+                    if pool["virtual_network"] in policies
+                ]
+            ),
+            len(passive_svi_gates),
+        )
+        self.assertTrue(
+            all(item["evaluator"] == "exact_config_lines" for item in passive_svi_gates)
+        )
+        self.assertTrue(
+            all(
+                "ip pim passive" in item["expected"]["lines"]
+                for item in passive_svi_gates
+            )
+        )
+        edge_pim_gates = [
+            item
+            for item in multicast_gates
+            if item["gate_id"].startswith("multicast.pim.edge-")
+        ]
+        self.assertTrue(
+            all(
+                not any(
+                    interface.startswith("Vlan")
+                    for interface in item["expected"]["interfaces"]
+                )
+                for item in edge_pim_gates
+            )
+        )
+        self.assertEqual(
+            56 + len(passive_svi_gates), len(multicast_gates)
+        )
         self.assertEqual(
             {"exact_config_lines", "pim_interfaces", "route_prefix"},
             {item["evaluator"] for item in multicast_gates},
@@ -802,6 +849,80 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         ]
         self.assertEqual(2, len(msdp_gates))
         self.assertTrue(all(item["phase_id"] == "underlay" for item in msdp_gates))
+
+    def test_multicast_removal_and_mode_change_require_reconciliation(self):
+        intent = self.derive()["intent"]
+        native_artifact = render_configuration(intent, create_plan(intent))
+        native_codes = {
+            item["code"] for item in native_artifact["blocking_requirements"]
+        }
+        self.assertIn("multicast.reconciliation_pending", native_codes)
+
+        disabled = copy.deepcopy(intent)
+        disabled["fabric"]["multicast"].update(
+            {"enabled": False, "transport": "native"}
+        )
+        disabled["fabric"]["multicast"].pop("rp_address", None)
+        disabled["fabric"]["multicast"].pop("rp_device_ids", None)
+        disabled["multicast"] = {
+            "enabled": False,
+            "transport": "native",
+            "rp_mode": "none",
+            "asm_virtual_networks": [],
+            "ssm_virtual_networks": [],
+            "ssm_range": "232.0.0.0/8",
+            "overlay_policies": [],
+            "l2_bum_groups": [],
+        }
+        result = validate_intent(disabled)
+        self.assertTrue(result.is_valid, result.as_dict())
+        disabled_artifact = render_configuration(disabled, create_plan(disabled))
+        disabled_codes = {
+            item["code"] for item in disabled_artifact["blocking_requirements"]
+        }
+        self.assertIn("multicast.reconciliation_pending", disabled_codes)
+        self.assertNotIn("multicast.hardware_acceptance_pending", disabled_codes)
+
+        flipped_requirements = copy.deepcopy(self.requirements)
+        flipped_multicast = flipped_requirements["multicast"]
+        flipped_multicast["asm_virtual_networks"] = ["IoT"]
+        flipped_multicast["ssm_virtual_networks"] = ["Media"]
+        for policy in flipped_multicast["overlay_policies"]:
+            if policy["virtual_network"] == "Media":
+                policy["mode"] = "ssm"
+                policy["group_range"] = "232.64.0.0/10"
+                policy.pop("rp_address", None)
+                policy.pop("rp_prefix", None)
+            elif policy["virtual_network"] == "IoT":
+                policy.update(
+                    {
+                        "mode": "asm",
+                        "group_range": "239.129.0.0/16",
+                        "rp_address": "203.0.113.30",
+                        "rp_prefix": "203.0.113.0/26",
+                    }
+                )
+        flipped_intent = derive_fabric_intent(
+            flipped_requirements, self.policy
+        )["intent"]
+        original_acls = {
+            item["access_list"] for item in intent["multicast"]["overlay_policies"]
+        }
+        flipped_acls = {
+            item["access_list"]
+            for item in flipped_intent["multicast"]["overlay_policies"]
+        }
+        self.assertTrue(original_acls.isdisjoint(flipped_acls))
+        flipped_artifact = render_configuration(
+            flipped_intent, create_plan(flipped_intent)
+        )
+        self.assertIn(
+            "multicast.reconciliation_pending",
+            {
+                item["code"]
+                for item in flipped_artifact["blocking_requirements"]
+            },
+        )
 
     def test_pubsub_subscriber_renderer_and_gates_cover_every_publisher_and_vn(self):
         intent = self.derive()["intent"]

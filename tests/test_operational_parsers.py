@@ -117,6 +117,14 @@ Address          Interface       Ver/Mode  Nbr  Query
         self.assertFalse(
             verify_pim_interfaces("Interface Ver/Mode Nbr Query", expected).passed
         )
+        for rejected_mode in ("v2/SD", "v2/D"):
+            with self.subTest(mode=rejected_mode):
+                self.assertFalse(
+                    verify_pim_interfaces(
+                        "10.1.1.1 Loopback5003 {} 0 30".format(rejected_mode),
+                        ["Loopback5003"],
+                    ).passed
+                )
 
     def test_msdp_requires_each_exact_peer_to_be_established(self):
         output = """

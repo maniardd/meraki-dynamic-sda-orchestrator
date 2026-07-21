@@ -198,13 +198,16 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                     "Loopback{}".format(instance_id),
                     "LISP0.{}".format(instance_id),
                 ]
-                if "fabric_edge" in roles:
-                    expected_interfaces.extend(
-                        "Vlan{}".format(int(pool["vlan_id"]))
+                passive_svis = (
+                    sorted(
+                        int(pool["vlan_id"])
                         for pool in endpoint_pools_by_vn.get(
                             str(policy["virtual_network"]), []
                         )
                     )
+                    if "fabric_edge" in roles
+                    else []
+                )
                 if "border" in roles:
                     expected_interfaces.extend(
                         str(peer["interface"])
@@ -283,6 +286,29 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                         },
                     ]
                 )
+                for vlan_id in passive_svis:
+                    gates.append(
+                        {
+                            "gate_id": "multicast.passive_svi.{}.{}".format(
+                                device_id, vlan_id
+                            ),
+                            "phase_id": "multicast",
+                            "device_id": device_id,
+                            "command": "show running-config | section ^interface Vlan{}$".format(
+                                vlan_id
+                            ),
+                            "evaluator": "exact_config_lines",
+                            "expected": {
+                                "lines": [
+                                    "interface Vlan{}".format(vlan_id),
+                                    "ip pim passive",
+                                    "ip igmp version 3",
+                                    "ip igmp explicit-tracking",
+                                ]
+                            },
+                            "blocking": True,
+                        }
+                    )
                 if policy["mode"] == "asm":
                     gates.append(
                         {

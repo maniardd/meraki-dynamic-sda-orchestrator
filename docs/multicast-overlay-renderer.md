@@ -70,20 +70,32 @@ Every rendered VN/device tuple has blocking gates for:
 - the exact global per-VRF multicast policy lines;
 - the exact owned group ACL;
 - explicit sparse-mode PIM rows for the multicast segment loopback, LISP
-  interface, edge SVI, and border handoff interfaces; and
+  interface, and border/fusion handoff interfaces;
+- exact running configuration for passive edge SVIs (`ip pim passive`,
+  IGMPv3, and explicit tracking); and
 - for ASM, an exact route-table entry for the declared RP prefix.
 - for redundant underlay Anycast-RP, every exact MSDP peer is established.
 
 Header-only, partial, duplicated, or wrong-mode output fails closed. A worker
-failure-injection test rejects configuration inside the multicast LISP block,
-verifies checkpoint rollback, and releases IPAM state only after rollback is
-verified.
+failure-injection tests reject configuration inside both a fabric-edge
+multicast LISP block and a fusion multicast policy block, verify checkpoint
+rollback, and release IPAM state only after rollback is verified.
+
+The renderer also emits `multicast.reconciliation_pending` for every schema
+1.2 multicast lifecycle. This blocker is independent of platform acceptance:
+it cannot be removed until the last committed owned-state manifest is diffed
+against the candidate and deterministic negations remove stale ACL, RP/SSM,
+loopback, LISP, MSDP, and BUM configuration. It remains present even when the
+candidate disables multicast, so policy removal cannot silently leave device
+state behind.
 
 ## Platform acceptance still required
 
-Native multicast emits `multicast.hardware_acceptance_pending`, so production
-apply remains impossible. Remove it only when the exact target platform and
-IOS XE release pass all of the following:
+Native multicast emits `multicast.hardware_acceptance_pending`, and every 1.2
+multicast lifecycle emits `multicast.reconciliation_pending`, so production
+apply remains impossible. Remove each blocker only after its distinct
+acceptance contract has passed. Hardware acceptance requires the exact target
+platform and IOS XE release to pass all of the following:
 
 1. Every generated CLI block is accepted on border, edge, and fusion roles.
 2. PIM sparse-mode interfaces and the external ASM RP route match intent.
@@ -93,8 +105,9 @@ IOS XE release pass all of the following:
    border/fusion path.
 6. Border, link, and RP failure tests converge without unauthorized flooding.
 7. A rejected multicast block restores the verified checkpoint.
-8. Removal or mode-change of a previously deployed policy reconciles stale RP,
-   ACL, loopback, and multicast state on the target release.
+8. The state-reconciliation implementation has separately cleared
+   `multicast.reconciliation_pending` by proving removal and ASM/SSM mode-change
+   negations against the last committed artifact.
 9. Evidence is attached to the immutable plan, artifact, approval, and change
    record.
 
