@@ -6,6 +6,7 @@ fabric document before planning, configuration rendering, or deployment.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, ip_address, ip_network
 from pathlib import Path
@@ -287,6 +288,13 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
             "schema.unsupported",
             "$.schema_version",
             "Supported schema_version values are '1.0', '1.1', and '1.2'",
+        )
+    if schema_version != "1.2" and "multicast" in root:
+        _add(
+            issues,
+            "multicast.unexpected",
+            "$.multicast",
+            "Top-level multicast intent requires schema_version 1.2",
         )
 
     metadata = _mapping(root.get("metadata"), "$.metadata", issues)
@@ -1286,6 +1294,31 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 "$.multicast.rp_device_ids",
                 "Production Anycast-RP requires at least two border nodes",
             )
+        fabric_multicast = _mapping(
+            fabric.get("multicast"), "$.fabric.multicast", issues
+        )
+        alignment_fields = {
+            "enabled": multicast_context.get("enabled"),
+            "transport": multicast_context.get("transport"),
+            "rp_address": multicast_context.get("rp_address"),
+        }
+        for field, expected_value in alignment_fields.items():
+            if fabric_multicast.get(field) != expected_value:
+                _add(
+                    issues,
+                    "multicast.fabric_alignment",
+                    f"$.fabric.multicast.{field}",
+                    f"Fabric multicast {field} must match the top-level multicast intent",
+                )
+        if sorted(fabric_multicast.get("rp_device_ids", [])) != sorted(
+            rp_device_ids
+        ):
+            _add(
+                issues,
+                "multicast.fabric_alignment",
+                "$.fabric.multicast.rp_device_ids",
+                "Fabric multicast RP devices must match the top-level multicast intent",
+            )
         if multicast_enabled and transport == "native":
             for index, link in enumerate(links):
                 if not bool(link.get("pim_sparse_mode")):
@@ -1340,6 +1373,374 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 "multicast.mode_conflict",
                 "$.multicast",
                 f"Virtual network {vn_name!r} cannot use both ASM and SSM",
+            )
+
+        vn_context = {
+            str(item.get("name")): item
+            for item in virtual_networks
+            if isinstance(item, Mapping) and item.get("name")
+        }
+        expected_multicast_devices = {
+            device_id
+            for device_id, roles in device_roles.items()
+            if roles & {"border", "fabric_edge"}
+        }
+        overlay_policies = _list(
+            multicast_context.get("overlay_policies", []),
+            "$.multicast.overlay_policies",
+            issues,
+        )
+        overlay_policy_names: Dict[str, str] = {}
+        overlay_access_lists: Dict[str, str] = {}
+        segment_addresses: Dict[IPv4Address, str] = {}
+        core_group_prefixes: List[Tuple[str, IPv4Network]] = []
+        for index, raw_overlay_policy in enumerate(overlay_policies):
+            path = f"$.multicast.overlay_policies[{index}]"
+            overlay_policy = _mapping(raw_overlay_policy, path, issues)
+            vn_name = _required_string(
+                overlay_policy, "virtual_network", path, issues
+            )
+            overlay_mode = _required_string(overlay_policy, "mode", path, issues)
+            access_list = _required_string(
+                overlay_policy, "access_list", path, issues
+            )
+            if access_list:
+                _check_duplicate(
+                    overlay_access_lists,
+                    access_list,
+                    f"{path}.access_list",
+                    "multicast overlay access list",
+                    issues,
+                )
+                if not re.fullmatch(r"SDA-MCAST-[A-F0-9]{12}", access_list):
+                    _add(
+                        issues,
+                        "multicast.overlay.access_list",
+                        f"{path}.access_list",
+                        "Multicast access-list name must be an owned deterministic name",
+                    )
+            vrf = _required_string(overlay_policy, "vrf", path, issues)
+            l3_instance_id = _integer(
+                overlay_policy, "l3_instance_id", path, issues, 1, 16_777_215
+            )
+            group_range = _ipv4_network(
+                overlay_policy.get("group_range"), f"{path}.group_range", issues
+            )
+            if vn_name:
+                _check_duplicate(
+                    overlay_policy_names,
+                    vn_name,
+                    f"{path}.virtual_network",
+                    "multicast overlay virtual network",
+                    issues,
+                )
+                vn = vn_context.get(vn_name)
+                if vn is None:
+                    _add(
+                        issues,
+                        "reference.virtual_network",
+                        f"{path}.virtual_network",
+                        f"Unknown multicast virtual network {vn_name!r}",
+                    )
+                else:
+                    if vrf != vn.get("vrf"):
+                        _add(
+                            issues,
+                            "multicast.overlay.vrf_mismatch",
+                            f"{path}.vrf",
+                            "Multicast overlay VRF must match the virtual network",
+                        )
+                    if l3_instance_id != vn.get("l3_instance_id"):
+                        _add(
+                            issues,
+                            "multicast.overlay.instance_mismatch",
+                            f"{path}.l3_instance_id",
+                            "Multicast overlay instance ID must match the virtual network",
+                        )
+                expected_mode = (
+                    "asm" if vn_name in asm_vns else "ssm" if vn_name in ssm_vns else None
+                )
+                if overlay_mode != expected_mode:
+                    _add(
+                        issues,
+                        "multicast.overlay.mode_mismatch",
+                        f"{path}.mode",
+                        "Multicast overlay mode must match the ASM/SSM selection",
+                    )
+            if group_range and not group_range.subnet_of(
+                ip_network("224.0.0.0/4")
+            ):
+                _add(
+                    issues,
+                    "multicast.overlay.group_range",
+                    f"{path}.group_range",
+                    "Overlay group range must be an IPv4 multicast prefix",
+                )
+            if (
+                group_range
+                and overlay_mode == "ssm"
+                and ssm_range
+                and not group_range.subnet_of(ssm_range)
+            ):
+                _add(
+                    issues,
+                    "multicast.overlay.ssm_range",
+                    f"{path}.group_range",
+                    "SSM overlay group range must be inside the fabric SSM range",
+                )
+            if (
+                group_range
+                and overlay_mode == "asm"
+                and group_range.overlaps(ip_network("232.0.0.0/8"))
+            ):
+                _add(
+                    issues,
+                    "multicast.overlay.asm_range",
+                    f"{path}.group_range",
+                    "ASM overlay group range cannot overlap SSM space",
+                )
+
+            if overlay_mode == "asm":
+                rp_address = _ipv4_address(
+                    overlay_policy.get("rp_address"), f"{path}.rp_address", issues
+                )
+                rp_prefix = _ipv4_network(
+                    overlay_policy.get("rp_prefix"), f"{path}.rp_prefix", issues
+                )
+                if rp_address and rp_address.is_multicast:
+                    _add(
+                        issues,
+                        "multicast.overlay.rp_address",
+                        f"{path}.rp_address",
+                        "Overlay RP address must be unicast",
+                    )
+                if rp_address and rp_prefix and rp_address not in rp_prefix:
+                    _add(
+                        issues,
+                        "multicast.overlay.rp_prefix",
+                        f"{path}.rp_address",
+                        "Overlay RP address must be inside rp_prefix",
+                    )
+            elif "rp_address" in overlay_policy or "rp_prefix" in overlay_policy:
+                _add(
+                    issues,
+                    "multicast.overlay.rp_unexpected",
+                    path,
+                    "SSM overlay policy cannot declare an RP",
+                )
+
+            loopbacks = _list(
+                overlay_policy.get("segment_loopbacks", []),
+                f"{path}.segment_loopbacks",
+                issues,
+            )
+            loopback_devices = set()
+            for loopback_index, raw_loopback in enumerate(loopbacks):
+                loopback_path = f"{path}.segment_loopbacks[{loopback_index}]"
+                loopback = _mapping(raw_loopback, loopback_path, issues)
+                device_id = _required_string(
+                    loopback, "device_id", loopback_path, issues
+                )
+                address = _ipv4_address(
+                    loopback.get("address"), f"{loopback_path}.address", issues
+                )
+                if device_id in loopback_devices:
+                    _add(
+                        issues,
+                        "unique.duplicate",
+                        f"{loopback_path}.device_id",
+                        "Duplicate multicast segment-loopback device",
+                    )
+                loopback_devices.add(device_id)
+                if device_id not in expected_multicast_devices:
+                    _add(
+                        issues,
+                        "multicast.overlay.loopback_device",
+                        f"{loopback_path}.device_id",
+                        "Segment loopbacks are allowed only on border and fabric-edge devices",
+                    )
+                _check_duplicate(
+                    segment_addresses,
+                    address,
+                    f"{loopback_path}.address",
+                    "multicast segment-loopback address",
+                    issues,
+                )
+                if address:
+                    address_networks.append(
+                        (
+                            f"{loopback_path}.address",
+                            ip_network(f"{address}/32"),
+                            "multicast segment loopback",
+                        )
+                    )
+            if loopback_devices != expected_multicast_devices:
+                _add(
+                    issues,
+                    "multicast.overlay.loopback_membership",
+                    f"{path}.segment_loopbacks",
+                    "Every border and fabric-edge device requires one segment loopback",
+                )
+
+            core_group_raw = overlay_policy.get("core_group")
+            if transport == "native":
+                core_group = _mapping(
+                    core_group_raw, f"{path}.core_group", issues
+                )
+                core_prefix = _ipv4_network(
+                    core_group.get("prefix"), f"{path}.core_group.prefix", issues
+                )
+                core_start = _ipv4_address(
+                    core_group.get("start"), f"{path}.core_group.start", issues
+                )
+                core_count = _integer(
+                    core_group,
+                    "count",
+                    f"{path}.core_group",
+                    issues,
+                    1,
+                    16_777_214,
+                )
+                if core_prefix:
+                    if not core_prefix.subnet_of(ip_network("232.0.0.0/8")):
+                        _add(
+                            issues,
+                            "multicast.overlay.core_group_range",
+                            f"{path}.core_group.prefix",
+                            "Native transport core groups must be inside 232.0.0.0/8",
+                        )
+                    for previous_path, previous_prefix in core_group_prefixes:
+                        if core_prefix.overlaps(previous_prefix):
+                            _add(
+                                issues,
+                                "multicast.overlay.core_group_overlap",
+                                f"{path}.core_group.prefix",
+                                f"Core group prefix overlaps {previous_path}",
+                            )
+                    core_group_prefixes.append(
+                        (f"{path}.core_group.prefix", core_prefix)
+                    )
+                    expected_start = core_prefix.network_address + 1
+                    if core_start and core_start != expected_start:
+                        _add(
+                            issues,
+                            "multicast.overlay.core_group_start",
+                            f"{path}.core_group.start",
+                            "Core group start must be the first address after the network boundary",
+                        )
+                    if core_count and core_count > core_prefix.num_addresses - 1:
+                        _add(
+                            issues,
+                            "multicast.overlay.core_group_count",
+                            f"{path}.core_group.count",
+                            "Core group count exceeds the reserved prefix",
+                        )
+            elif core_group_raw is not None:
+                _add(
+                    issues,
+                    "multicast.overlay.core_group_unexpected",
+                    f"{path}.core_group",
+                    "Head-end replication cannot declare native core groups",
+                )
+
+        if multicast_enabled and set(overlay_policy_names) != (asm_vns | ssm_vns):
+            _add(
+                issues,
+                "multicast.overlay.policy_membership",
+                "$.multicast.overlay_policies",
+                "Overlay policies must match the complete ASM/SSM virtual-network set",
+            )
+        if not multicast_enabled and overlay_policies:
+            _add(
+                issues,
+                "multicast.overlay.disabled",
+                "$.multicast.overlay_policies",
+                "Disabled multicast cannot contain overlay policies",
+            )
+
+        endpoint_pool_context = {
+            str(item.get("id")): item
+            for item in endpoint_pools
+            if isinstance(item, Mapping) and item.get("id")
+        }
+        l2_bum_groups = _list(
+            multicast_context.get("l2_bum_groups", []),
+            "$.multicast.l2_bum_groups",
+            issues,
+        )
+        bum_pool_ids: Dict[str, str] = {}
+        bum_addresses: Dict[IPv4Address, str] = {}
+        for index, raw_bum_group in enumerate(l2_bum_groups):
+            path = f"$.multicast.l2_bum_groups[{index}]"
+            bum_group = _mapping(raw_bum_group, path, issues)
+            pool_id = _required_string(
+                bum_group, "endpoint_pool_id", path, issues
+            )
+            l2_instance_id = _integer(
+                bum_group, "l2_instance_id", path, issues, 1, 16_777_215
+            )
+            vlan_id = _integer(bum_group, "vlan_id", path, issues, 1, 4094)
+            group = _ipv4_address(
+                bum_group.get("group"), f"{path}.group", issues
+            )
+            if pool_id:
+                _check_duplicate(
+                    bum_pool_ids,
+                    pool_id,
+                    f"{path}.endpoint_pool_id",
+                    "L2 BUM endpoint pool",
+                    issues,
+                )
+                endpoint_pool = endpoint_pool_context.get(pool_id)
+                if endpoint_pool is None:
+                    _add(
+                        issues,
+                        "reference.endpoint_pool",
+                        f"{path}.endpoint_pool_id",
+                        f"Unknown endpoint pool {pool_id!r}",
+                    )
+                else:
+                    if l2_instance_id != endpoint_pool.get("l2_instance_id"):
+                        _add(
+                            issues,
+                            "multicast.bum.instance_mismatch",
+                            f"{path}.l2_instance_id",
+                            "BUM L2 instance must match the endpoint pool",
+                        )
+                    if vlan_id != endpoint_pool.get("vlan_id"):
+                        _add(
+                            issues,
+                            "multicast.bum.vlan_mismatch",
+                            f"{path}.vlan_id",
+                            "BUM VLAN must match the endpoint pool",
+                        )
+            _check_duplicate(
+                bum_addresses,
+                group,
+                f"{path}.group",
+                "L2 BUM multicast group",
+                issues,
+            )
+            if group and (
+                not group.is_multicast or group in ip_network("232.0.0.0/8")
+            ):
+                _add(
+                    issues,
+                    "multicast.bum.group",
+                    f"{path}.group",
+                    "L2 BUM group must use non-SSM IPv4 multicast space",
+                )
+        expected_bum_pool_ids = (
+            set(endpoint_pool_context)
+            if multicast_enabled and transport == "native"
+            else set()
+        )
+        if set(bum_pool_ids) != expected_bum_pool_ids:
+            _add(
+                issues,
+                "multicast.bum.membership",
+                "$.multicast.l2_bum_groups",
+                "Native multicast requires exactly one BUM group per endpoint pool",
             )
 
         policy_plane = _mapping(root.get("policy_plane"), "$.policy_plane", issues)

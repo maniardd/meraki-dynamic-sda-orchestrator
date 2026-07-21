@@ -387,12 +387,76 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "transport": {"enum": ["native", "head_end_replication"]},
-        "rp_mode": {"enum": ["anycast", "static", "none"]},
+        "rp_mode": {
+          "enum": ["anycast", "static", "none"],
+          "description": "Underlay/L2-BUM rendezvous-point mode; overlay ASM RPs are derived per VN in overlay_policies."
+        },
         "rp_address": {"type": "string", "format": "ipv4"},
         "rp_device_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "asm_virtual_networks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "ssm_virtual_networks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-        "ssm_range": {"type": "string"}
+        "ssm_range": {"type": "string"},
+        "overlay_policies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "virtual_network", "vrf", "l3_instance_id", "mode",
+              "group_range", "access_list", "segment_loopbacks"
+            ],
+            "properties": {
+              "virtual_network": {"type": "string", "minLength": 1},
+              "vrf": {"type": "string", "minLength": 1},
+              "l3_instance_id": {"type": "integer", "minimum": 1, "maximum": 16777215},
+              "mode": {"enum": ["asm", "ssm"]},
+              "group_range": {"type": "string"},
+              "access_list": {"type": "string", "pattern": "^SDA-MCAST-[A-F0-9]{12}$"},
+              "rp_address": {"type": "string", "format": "ipv4"},
+              "rp_prefix": {"type": "string"},
+              "segment_loopbacks": {
+                "type": "array", "minItems": 1,
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["device_id", "address"],
+                  "properties": {
+                    "device_id": {"type": "string", "minLength": 1},
+                    "address": {"type": "string", "format": "ipv4"}
+                  }
+                }
+              },
+              "core_group": {
+                "type": "object", "additionalProperties": false,
+                "required": ["prefix", "start", "count"],
+                "properties": {
+                  "prefix": {"type": "string"},
+                  "start": {"type": "string", "format": "ipv4"},
+                  "count": {"type": "integer", "minimum": 1, "maximum": 16777214}
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"mode": {"const": "asm"}}, "required": ["mode"]},
+                "then": {"required": ["rp_address", "rp_prefix"]},
+                "else": {"not": {"anyOf": [{"required": ["rp_address"]}, {"required": ["rp_prefix"]}]}}
+              }
+            ]
+          }
+        },
+        "l2_bum_groups": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["endpoint_pool_id", "l2_instance_id", "vlan_id", "group"],
+            "properties": {
+              "endpoint_pool_id": {"type": "string", "minLength": 1},
+              "l2_instance_id": {"type": "integer", "minimum": 1, "maximum": 16777215},
+              "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+              "group": {"type": "string", "format": "ipv4"}
+            }
+          }
+        }
       }
     },
     "policy_plane": {
@@ -532,7 +596,15 @@
         "required": [
           "deployment_model", "site_hierarchy", "fabric_sites", "fusion_nodes",
           "shared_services", "multicast", "policy_plane"
-        ]
+        ],
+        "properties": {
+          "multicast": {
+            "required": [
+              "enabled", "transport", "rp_mode", "asm_virtual_networks",
+              "ssm_virtual_networks", "overlay_policies", "l2_bum_groups"
+            ]
+          }
+        }
       }
     },
     {
@@ -546,7 +618,6 @@
           "anyOf": [
             {"required": ["fusion_nodes"]},
             {"required": ["shared_services"]},
-            {"required": ["multicast"]},
             {"required": ["policy_plane"]}
           ]
         }
@@ -566,7 +637,6 @@
             {"required": ["fabric_zones"]},
             {"required": ["fusion_nodes"]},
             {"required": ["shared_services"]},
-            {"required": ["multicast"]},
             {"required": ["policy_plane"]}
           ]
         }

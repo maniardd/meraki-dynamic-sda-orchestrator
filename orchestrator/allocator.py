@@ -460,6 +460,13 @@ def derive_fabric_intent(
     """
 
     validate_requirements_shape(requirements)
+    if (
+        str(requirements.get("schema_version")) != "1.2"
+        and "multicast" in requirements
+    ):
+        raise AllocationError(
+            "Top-level multicast requirements require schema_version 1.2"
+        )
     _require_keys(
         requirements,
         ["schema_version", "metadata", "allocation_domain", "fabric", "devices", "links", "virtual_networks"],
@@ -924,7 +931,7 @@ def derive_fabric_intent(
             not bool(item.get("pim_sparse_mode")) for item in links
         ):
             raise AllocationError("Native multicast requires PIM sparse mode on every fabric link")
-        rp_address = None
+        underlay_rp_address = None
         if enabled and rp_mode in {"anycast", "static"}:
             if "multicast_rp" not in pools:
                 raise AllocationError("Guardrail pool multicast_rp is missing")
@@ -935,10 +942,207 @@ def derive_fabric_intent(
             rp_prefix = reserve_prefix(
                 "multicast_rp", int(pools["multicast_rp"].get("prefix_len", 32))
             )
-            rp_address = str(rp_prefix.network_address)
+            underlay_rp_address = str(rp_prefix.network_address)
         ssm_range = _network(str(raw_multicast.get("ssm_range", "232.0.0.0/8")))
         if not ssm_range.subnet_of(_network("232.0.0.0/8")):
             raise AllocationError("Multicast ssm_range must be inside 232.0.0.0/8")
+        raw_overlay_policies = raw_multicast.get("overlay_policies", [])
+        if enabled and (asm_vns or ssm_vns) and not raw_overlay_policies:
+            raise AllocationError(
+                "Enabled overlay multicast requires explicit per-VN overlay_policies"
+            )
+        if not enabled and raw_overlay_policies:
+            raise AllocationError(
+                "Disabled multicast cannot declare overlay_policies"
+            )
+        multicast_devices = sorted(
+            (
+                item
+                for item in devices
+                if set(item.get("roles", [])) & {"border", "fabric_edge"}
+            ),
+            key=lambda item: str(item["id"]),
+        )
+        if enabled and raw_overlay_policies and not multicast_devices:
+            raise AllocationError(
+                "Overlay multicast requires at least one border or fabric-edge device"
+            )
+        if raw_overlay_policies and "multicast_overlay_loopbacks" not in pools:
+            raise AllocationError(
+                "Guardrail pool multicast_overlay_loopbacks is missing"
+            )
+        core_group_pool = None
+        core_group_count = None
+        if enabled and transport == "native" and raw_overlay_policies:
+            if "multicast_core_groups" not in pools:
+                raise AllocationError("Guardrail pool multicast_core_groups is missing")
+            core_group_pool = pools["multicast_core_groups"]
+            core_supernet = _network(str(core_group_pool["cidr"]))
+            if not core_supernet.subnet_of(_network("232.0.0.0/8")):
+                raise AllocationError(
+                    "Guardrail pool multicast_core_groups must be inside 232.0.0.0/8"
+                )
+            core_prefix_len = int(core_group_pool["prefix_len"])
+            if core_prefix_len < core_supernet.prefixlen or core_prefix_len > 32:
+                raise AllocationError(
+                    "Guardrail multicast_core_groups prefix_len is invalid"
+                )
+            core_group_count = int(core_group_pool.get("usable_count", 1000))
+            if core_group_count < 1 or core_group_count > (2 ** (32 - core_prefix_len)) - 1:
+                raise AllocationError(
+                    "Guardrail multicast_core_groups usable_count does not fit its prefix"
+                )
+
+        overlay_policies = []
+        overlay_policy_names = set()
+        for raw_policy in sorted(
+            raw_overlay_policies,
+            key=lambda item: str(item.get("virtual_network", "")),
+        ):
+            virtual_network = str(raw_policy["virtual_network"])
+            if virtual_network in overlay_policy_names:
+                raise AllocationError(
+                    "Duplicate multicast overlay policy for virtual network {}".format(
+                        virtual_network
+                    )
+                )
+            overlay_policy_names.add(virtual_network)
+            if virtual_network not in vn_by_name:
+                raise AllocationError(
+                    "Multicast overlay policy references unknown virtual network {}".format(
+                        virtual_network
+                    )
+                )
+            overlay_mode = str(raw_policy["mode"])
+            expected_mode = "asm" if virtual_network in set(asm_vns) else "ssm"
+            if virtual_network not in set(asm_vns) | set(ssm_vns):
+                raise AllocationError(
+                    "Multicast overlay policy {} is absent from ASM/SSM selections".format(
+                        virtual_network
+                    )
+                )
+            if overlay_mode != expected_mode:
+                raise AllocationError(
+                    "Multicast overlay policy {} mode does not match ASM/SSM selection".format(
+                        virtual_network
+                    )
+                )
+            group_range = _network(str(raw_policy["group_range"]))
+            if not group_range.subnet_of(_network("224.0.0.0/4")):
+                raise AllocationError(
+                    "Multicast overlay policy {} group_range is not multicast".format(
+                        virtual_network
+                    )
+                )
+            if overlay_mode == "ssm" and not group_range.subnet_of(ssm_range):
+                raise AllocationError(
+                    "SSM policy {} group_range must be inside {}".format(
+                        virtual_network, ssm_range
+                    )
+                )
+            if overlay_mode == "asm" and group_range.overlaps(
+                _network("232.0.0.0/8")
+            ):
+                raise AllocationError(
+                    "ASM policy {} group_range cannot overlap SSM space".format(
+                        virtual_network
+                    )
+                )
+
+            vn = vn_by_name[virtual_network]
+            derived_policy = {
+                "virtual_network": virtual_network,
+                "vrf": str(vn["vrf"]),
+                "l3_instance_id": int(vn["l3_instance_id"]),
+                "mode": overlay_mode,
+                "group_range": str(group_range),
+                "access_list": "SDA-MCAST-{}".format(
+                    sha256_json(
+                        {
+                            "vrf": str(vn["vrf"]),
+                            "mode": overlay_mode,
+                            "group_range": str(group_range),
+                        }
+                    )[:12].upper()
+                ),
+                "segment_loopbacks": [],
+            }
+            if overlay_mode == "asm":
+                overlay_rp_address = ipaddress.ip_address(
+                    str(raw_policy["rp_address"])
+                )
+                rp_prefix = _network(str(raw_policy["rp_prefix"]))
+                if overlay_rp_address.is_multicast or overlay_rp_address not in rp_prefix:
+                    raise AllocationError(
+                        "ASM policy {} RP address must be unicast and inside rp_prefix".format(
+                            virtual_network
+                        )
+                    )
+                derived_policy["rp_address"] = str(overlay_rp_address)
+                derived_policy["rp_prefix"] = str(rp_prefix)
+            for device in multicast_devices:
+                segment_prefix = reserve_prefix(
+                    "multicast_overlay_loopbacks",
+                    int(pools["multicast_overlay_loopbacks"].get("prefix_len", 32)),
+                )
+                if segment_prefix.prefixlen != 32:
+                    raise AllocationError(
+                        "Guardrail multicast_overlay_loopbacks must allocate /32 addresses"
+                    )
+                derived_policy["segment_loopbacks"].append(
+                    {
+                        "device_id": str(device["id"]),
+                        "address": str(segment_prefix.network_address),
+                    }
+                )
+            if core_group_pool is not None:
+                core_prefix = reserve_prefix(
+                    "multicast_core_groups", int(core_group_pool["prefix_len"])
+                )
+                derived_policy["core_group"] = {
+                    "prefix": str(core_prefix),
+                    "start": str(core_prefix.network_address + 1),
+                    "count": int(core_group_count),
+                }
+            overlay_policies.append(derived_policy)
+
+        expected_policy_names = set(asm_vns) | set(ssm_vns)
+        if overlay_policy_names != expected_policy_names:
+            missing = sorted(expected_policy_names - overlay_policy_names)
+            raise AllocationError(
+                "Missing multicast overlay policy for virtual network {}".format(
+                    missing[0]
+                )
+            )
+        l2_bum_groups = []
+        if enabled and transport == "native":
+            if "multicast_bum_groups" not in pools:
+                raise AllocationError("Guardrail pool multicast_bum_groups is missing")
+            bum_pool = pools["multicast_bum_groups"]
+            bum_supernet = _network(str(bum_pool["cidr"]))
+            if (
+                not bum_supernet.subnet_of(_network("224.0.0.0/4"))
+                or bum_supernet.overlaps(_network("232.0.0.0/8"))
+            ):
+                raise AllocationError(
+                    "Guardrail pool multicast_bum_groups must be ASM multicast space"
+                )
+            if int(bum_pool.get("prefix_len", 32)) != 32:
+                raise AllocationError(
+                    "Guardrail multicast_bum_groups must allocate /32 groups"
+                )
+            for endpoint_pool in sorted(
+                endpoint_pools, key=lambda item: int(item["l2_instance_id"])
+            ):
+                bum_prefix = reserve_prefix("multicast_bum_groups", 32)
+                l2_bum_groups.append(
+                    {
+                        "endpoint_pool_id": str(endpoint_pool["id"]),
+                        "l2_instance_id": int(endpoint_pool["l2_instance_id"]),
+                        "vlan_id": int(endpoint_pool["vlan_id"]),
+                        "group": str(bum_prefix.network_address),
+                    }
+                )
         multicast = {
             "enabled": enabled,
             "transport": transport,
@@ -947,9 +1151,11 @@ def derive_fabric_intent(
             "asm_virtual_networks": asm_vns,
             "ssm_virtual_networks": ssm_vns,
             "ssm_range": str(ssm_range),
+            "overlay_policies": overlay_policies,
+            "l2_bum_groups": l2_bum_groups,
         }
-        if rp_address:
-            multicast["rp_address"] = rp_address
+        if underlay_rp_address:
+            multicast["rp_address"] = underlay_rp_address
 
     policy_plane = None
     raw_policy_plane = requirements.get("policy_plane")

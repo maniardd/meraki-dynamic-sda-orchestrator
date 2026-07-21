@@ -22,7 +22,7 @@ class ConfigurationRejectedError(AdapterError):
     pass
 
 
-SAFE_SHOW = re.compile(r"^show [A-Za-z0-9_.:/|,() -]+$")
+SAFE_SHOW = re.compile(r"^show [A-Za-z0-9_.:/|,() ^$-]+$")
 SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 CLI_ERROR = re.compile(
     r"^%\s*(Invalid input|Incomplete command|Ambiguous command|Error|Failed)",

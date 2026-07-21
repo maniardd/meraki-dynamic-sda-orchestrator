@@ -308,7 +308,10 @@
       "properties": {
         "enabled": {"type": "boolean"},
         "transport": {"enum": ["native", "head_end_replication"]},
-        "rp_mode": {"enum": ["anycast", "static", "none"]},
+        "rp_mode": {
+          "enum": ["anycast", "static", "none"],
+          "description": "Underlay/L2-BUM rendezvous-point mode; overlay ASM RPs are declared per VN in overlay_policies."
+        },
         "rp_device_ids": {
           "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true,
           "items": {"type": "string", "minLength": 1, "maxLength": 64}
@@ -321,7 +324,29 @@
           "type": "array", "maxItems": 512, "uniqueItems": true,
           "items": {"type": "string", "minLength": 1, "maxLength": 64}
         },
-        "ssm_range": {"type": "string"}
+        "ssm_range": {"type": "string"},
+        "overlay_policies": {
+          "type": "array", "maxItems": 512,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["virtual_network", "mode", "group_range"],
+            "properties": {
+              "virtual_network": {"type": "string", "minLength": 1, "maxLength": 64},
+              "mode": {"enum": ["asm", "ssm"]},
+              "group_range": {"type": "string"},
+              "rp_address": {"type": "string", "format": "ipv4"},
+              "rp_prefix": {"type": "string"}
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"mode": {"const": "asm"}}, "required": ["mode"]},
+                "then": {"required": ["rp_address", "rp_prefix"]},
+                "else": {"not": {"anyOf": [{"required": ["rp_address"]}, {"required": ["rp_prefix"]}]}}
+              }
+            ]
+          }
+        }
       }
     },
     "policy_plane": {
@@ -454,7 +479,15 @@
         "required": [
           "deployment_model", "site_hierarchy", "fabric_sites", "fusion_nodes",
           "shared_services", "multicast", "policy_plane", "border_handoff"
-        ]
+        ],
+        "properties": {
+          "multicast": {
+            "required": [
+              "enabled", "transport", "rp_mode", "asm_virtual_networks",
+              "ssm_virtual_networks", "overlay_policies"
+            ]
+          }
+        }
       }
     },
     {
@@ -468,7 +501,6 @@
           "anyOf": [
             {"required": ["fusion_nodes"]},
             {"required": ["shared_services"]},
-            {"required": ["multicast"]},
             {"required": ["policy_plane"]}
           ]
         }
@@ -488,7 +520,6 @@
             {"required": ["fabric_zones"]},
             {"required": ["fusion_nodes"]},
             {"required": ["shared_services"]},
-            {"required": ["multicast"]},
             {"required": ["policy_plane"]}
           ]
         }

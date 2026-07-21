@@ -53,10 +53,18 @@ class DeviceAdapterTests(unittest.TestCase):
     def test_show_commands_are_bounded(self):
         result = self.adapter.run_show("show version")
         self.assertEqual("show version", result["command"])
+        anchored = self.adapter.run_show(
+            "show running-config | section ^router lisp$"
+        )
+        self.assertEqual(
+            "show running-config | section ^router lisp$", anchored["command"]
+        )
         with self.assertRaises(ConfigurationRejectedError):
             self.adapter.run_show("configure terminal")
         with self.assertRaises(ConfigurationRejectedError):
             self.adapter.run_show("show version\nreload")
+        with self.assertRaises(ConfigurationRejectedError):
+            self.adapter.run_show("show version & reload")
 
     def test_checkpoint_is_created_and_verified(self):
         result = self.adapter.create_checkpoint("run_123")

@@ -149,6 +149,23 @@ class FabricIntentValidationTests(unittest.TestCase):
                 self.assertFalse(result.is_valid)
                 self.assertIn("lisp.identity.unexpected", self.codes(result))
 
+    def test_pre_1_2_top_level_multicast_is_rejected_by_version(self):
+        legacy_multicast = {
+            "enabled": True,
+            "transport": "native",
+            "rp_mode": "static",
+            "asm_virtual_networks": ["Corporate"],
+            "ssm_virtual_networks": [],
+        }
+        for original in (self.intent, self.cvd_intent):
+            with self.subTest(schema_version=original["schema_version"]):
+                candidate = copy.deepcopy(original)
+                candidate["multicast"] = copy.deepcopy(legacy_multicast)
+                result = validate_intent(candidate)
+                self.assertFalse(result.is_valid)
+                self.assertIn("multicast.unexpected", self.codes(result))
+                self.assertNotIn("schema.required", self.codes(result))
+
     def test_duplicate_loopback_is_rejected(self):
         candidate = copy.deepcopy(self.intent)
         candidate["devices"][1]["loopback0_ip"] = candidate["devices"][0]["loopback0_ip"]

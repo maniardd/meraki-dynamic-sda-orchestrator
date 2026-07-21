@@ -71,11 +71,14 @@ The allocator derives and reserves:
 
 The Phase 5 renderer produces reviewable fusion VRF, VLAN, trunk, and eBGP
 artifacts and creates operational BGP gates for both ends of every handoff.
-Apply remains disabled for four deliberately visible blockers:
+Apply remains disabled for the following deliberately visible blockers:
 
 - `lisp_pubsub.hardware_acceptance_pending`
 - `shared_services.hardware_acceptance_pending`
-- `multicast.overlay_renderer_pending`
+- `multicast.hardware_acceptance_pending` for native transport, or
+  `multicast.head_end_replication_renderer_pending` for head-end replication
+- `multicast.reconciliation_pending` until prior owned multicast state is
+  diffed and stale configuration removal is proven
 - `policy_plane.renderer_pending`
 
 Each blocker is removed only after its release-specific renderer, rollback,
@@ -94,3 +97,10 @@ identities, exact identity and per-IID publisher gates, and failure-injection
 rollback coverage are complete. Apply remains blocked until redundant
 publisher/subscriber platform acceptance satisfies the [LISP Pub/Sub
 acceptance boundary](lisp-pubsub-renderer.md).
+
+The native multicast renderer now owns per-VN ASM/SSM policy, multicast segment
+loopbacks, core transport groups, L2 BUM groups, exact configuration and PIM
+gates, and failure-injection rollback coverage. Native apply remains blocked
+until platform and real traffic-flow acceptance satisfies the [native multicast
+acceptance boundary](multicast-overlay-renderer.md). Head-end replication is a
+separate unimplemented renderer and remains explicitly blocked.

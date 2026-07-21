@@ -40,6 +40,16 @@ supernets:
   multicast_rp:
     cidr: 10.254.0.0/24
     prefix_len: 32
+  multicast_overlay_loopbacks:
+    cidr: 10.254.1.0/24
+    prefix_len: 32
+  multicast_core_groups:
+    cidr: 232.0.0.0/8
+    prefix_len: 22
+    usable_count: 1000
+  multicast_bum_groups:
+    cidr: 239.0.0.0/8
+    prefix_len: 32
   shared_service_handoff:
     cidr: 172.30.0.0/24
     prefix_len: 30

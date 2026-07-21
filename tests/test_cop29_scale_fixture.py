@@ -223,6 +223,50 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertEqual(["Media"], multicast["asm_virtual_networks"])
         self.assertEqual(["IoT"], multicast["ssm_virtual_networks"])
         self.assertEqual("10.242.0.0", multicast["rp_address"])
+        overlay = {
+            item["virtual_network"]: item
+            for item in multicast["overlay_policies"]
+        }
+        self.assertEqual({"IoT", "Media"}, set(overlay))
+        self.assertEqual("ssm", overlay["IoT"]["mode"])
+        self.assertEqual("asm", overlay["Media"]["mode"])
+        self.assertEqual("203.0.113.30", overlay["Media"]["rp_address"])
+        self.assertTrue(
+            all(len(item["segment_loopbacks"]) == 6 for item in overlay.values())
+        )
+        self.assertEqual(
+            12,
+            len(
+                {
+                    loopback["address"]
+                    for item in overlay.values()
+                    for loopback in item["segment_loopbacks"]
+                }
+            ),
+        )
+        self.assertEqual(
+            {"232.0.0.0/22", "232.0.4.0/22"},
+            {item["core_group"]["prefix"] for item in overlay.values()},
+        )
+        self.assertTrue(
+            all(
+                item["access_list"].startswith("SDA-MCAST-")
+                for item in overlay.values()
+            )
+        )
+        multicast_reservations = [
+            item
+            for item in result["reservations"]["network"]
+            if item["resource_pool_id"].startswith("multicast_")
+        ]
+        self.assertEqual(21, len(multicast_reservations))
+        self.assertEqual(6, len(multicast["l2_bum_groups"]))
+        self.assertEqual(
+            6, len({item["group"] for item in multicast["l2_bum_groups"]})
+        )
+        self.assertTrue(
+            all(item["group"].startswith("239.") for item in multicast["l2_bum_groups"])
+        )
 
         policy = intent["policy_plane"]
         self.assertEqual("hybrid", policy["mode"])
@@ -266,6 +310,126 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         candidate["links"][0]["pim_sparse_mode"] = False
         with self.assertRaisesRegex(AllocationError, "requires PIM sparse mode"):
             derive_fabric_intent(candidate, self.policy)
+
+    def test_overlay_multicast_contract_fails_closed_on_unsafe_inputs(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["multicast"]["overlay_policies"] = []
+        with self.assertRaisesRegex(AllocationError, "requires explicit per-VN"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["multicast"]["overlay_policies"][0]["mode"] = "ssm"
+        candidate["multicast"]["overlay_policies"][0].pop("rp_address")
+        candidate["multicast"]["overlay_policies"][0].pop("rp_prefix")
+        with self.assertRaisesRegex(AllocationError, "does not match ASM/SSM"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["multicast"]["overlay_policies"][0]["group_range"] = "232.1.0.0/16"
+        with self.assertRaisesRegex(AllocationError, "cannot overlap SSM"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["multicast"]["overlay_policies"][0]["rp_address"] = "203.0.113.100"
+        with self.assertRaisesRegex(AllocationError, "inside rp_prefix"):
+            derive_fabric_intent(candidate, self.policy)
+
+        candidate = copy.deepcopy(self.requirements)
+        candidate["multicast"]["overlay_policies"][0]["group_range"] = (
+            "224.0.0.0/3"
+        )
+        with self.assertRaisesRegex(AllocationError, "is not multicast"):
+            derive_fabric_intent(candidate, self.policy)
+
+        policy = copy.deepcopy(self.policy)
+        policy["supernets"].pop("multicast_overlay_loopbacks")
+        with self.assertRaisesRegex(
+            AllocationError, "multicast_overlay_loopbacks is missing"
+        ):
+            derive_fabric_intent(self.requirements, policy)
+
+        policy = copy.deepcopy(self.policy)
+        policy["supernets"].pop("multicast_bum_groups")
+        with self.assertRaisesRegex(AllocationError, "multicast_bum_groups is missing"):
+            derive_fabric_intent(self.requirements, policy)
+
+        policy = copy.deepcopy(self.policy)
+        policy["supernets"].pop("multicast_core_groups")
+        with self.assertRaisesRegex(AllocationError, "multicast_core_groups is missing"):
+            derive_fabric_intent(self.requirements, policy)
+
+        policy = copy.deepcopy(self.policy)
+        policy["supernets"]["multicast_bum_groups"]["cidr"] = "224.0.0.0/3"
+        with self.assertRaisesRegex(AllocationError, "must be ASM multicast space"):
+            derive_fabric_intent(self.requirements, policy)
+
+    def test_head_end_replication_remains_fail_closed_without_native_artifacts(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["multicast"]["transport"] = "head_end_replication"
+        intent = derive_fabric_intent(candidate, self.policy)["intent"]
+
+        self.assertEqual([], intent["multicast"]["l2_bum_groups"])
+        self.assertTrue(
+            all(
+                "core_group" not in item
+                for item in intent["multicast"]["overlay_policies"]
+            )
+        )
+
+        artifacts = render_configuration(intent, create_plan(intent))
+        blocker_codes = {
+            item["code"] for item in artifacts["blocking_requirements"]
+        }
+        self.assertIn(
+            "multicast.head_end_replication_renderer_pending", blocker_codes
+        )
+        self.assertNotIn("multicast.hardware_acceptance_pending", blocker_codes)
+        self.assertFalse(artifacts["executable"])
+        self.assertTrue(
+            all(
+                phase["phase_id"] != "multicast"
+                for device in artifacts["devices"].values()
+                for phase in device["phases"]
+            )
+        )
+
+    def test_overlay_multicast_allocations_skip_active_ledger_entries(self):
+        network_ledger = [
+            {
+                "allocation_domain": "acceptance-large-campus",
+                "resource_pool_id": "multicast_overlay_loopbacks",
+                "prefix": "10.243.0.0/32",
+                "state": "committed",
+            },
+            {
+                "allocation_domain": "acceptance-large-campus",
+                "resource_pool_id": "multicast_core_groups",
+                "prefix": "232.0.0.0/22",
+                "state": "reserved",
+            },
+            {
+                "allocation_domain": "acceptance-large-campus",
+                "resource_pool_id": "multicast_bum_groups",
+                "prefix": "239.0.0.0/32",
+                "state": "committed",
+            },
+        ]
+        intent = derive_fabric_intent(
+            self.requirements,
+            self.policy,
+            network_ledger=network_ledger,
+        )["intent"]
+        policies = intent["multicast"]["overlay_policies"]
+        self.assertEqual(
+            "10.243.0.1", policies[0]["segment_loopbacks"][0]["address"]
+        )
+        self.assertEqual(
+            ["232.0.4.0/22", "232.0.8.0/22"],
+            [item["core_group"]["prefix"] for item in policies],
+        )
+        self.assertEqual(
+            "239.0.0.1", intent["multicast"]["l2_bum_groups"][0]["group"]
+        )
 
     def test_shared_service_address_must_be_inside_advertised_prefix(self):
         candidate = copy.deepcopy(self.requirements)
@@ -427,6 +591,28 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             "multicast.asm.rp_required", {item.code for item in result.issues}
         )
 
+    def test_intent_validation_rejects_multicast_resource_drift(self):
+        candidate = copy.deepcopy(self.derive()["intent"])
+        candidate["multicast"]["overlay_policies"][0]["segment_loopbacks"].pop()
+        candidate["multicast"]["overlay_policies"][1]["core_group"] = copy.deepcopy(
+            candidate["multicast"]["overlay_policies"][0]["core_group"]
+        )
+        candidate["multicast"]["overlay_policies"][1]["rp_address"] = "203.0.113.100"
+        candidate["multicast"]["l2_bum_groups"].pop()
+        candidate["multicast"]["l2_bum_groups"][1]["group"] = candidate[
+            "multicast"
+        ]["l2_bum_groups"][0]["group"]
+        candidate["fabric"]["multicast"]["rp_address"] = "10.242.0.99"
+        result = validate_intent(candidate)
+        codes = {item.code for item in result.issues}
+        self.assertFalse(result.is_valid)
+        self.assertIn("multicast.overlay.loopback_membership", codes)
+        self.assertIn("multicast.overlay.core_group_overlap", codes)
+        self.assertIn("multicast.overlay.rp_prefix", codes)
+        self.assertIn("multicast.bum.membership", codes)
+        self.assertIn("multicast.fabric_alignment", codes)
+        self.assertIn("unique.duplicate", codes)
+
     def test_plan_targets_fusion_services_multicast_and_policy_phases(self):
         intent = self.derive()["intent"]
         plan = create_plan(intent)
@@ -436,7 +622,31 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             phases["border_handoff"]["targets"],
         )
         self.assertEqual(["fusion-01", "fusion-02"], phases["shared_services"]["targets"])
-        self.assertEqual(["multicast"], phases["border_handoff"]["depends_on"])
+        self.assertEqual(
+            [
+                "border-cp-01",
+                "border-cp-02",
+                "edge-01",
+                "edge-02",
+                "edge-03",
+                "edge-04",
+                "fusion-01",
+                "fusion-02",
+            ],
+            phases["multicast"]["targets"],
+        )
+        self.assertEqual(["overlay"], phases["border_handoff"]["depends_on"])
+        self.assertEqual(
+            ["border_handoff"], phases["shared_services"]["depends_on"]
+        )
+        self.assertEqual(["shared_services"], phases["multicast"]["depends_on"])
+        phase_order = [item["id"] for item in plan["phases"]]
+        self.assertLess(
+            phase_order.index("border_handoff"), phase_order.index("multicast")
+        )
+        self.assertLess(
+            phase_order.index("shared_services"), phase_order.index("multicast")
+        )
         self.assertEqual(["policy_plane"], phases["endpoint_assurance"]["depends_on"])
         self.assertIn("fusion-01", plan["targets"])
 
@@ -456,7 +666,8 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             {
                 "lisp_pubsub.hardware_acceptance_pending",
                 "shared_services.hardware_acceptance_pending",
-                "multicast.overlay_renderer_pending",
+                "multicast.hardware_acceptance_pending",
+                "multicast.reconciliation_pending",
                 "policy_plane.renderer_pending",
             },
             blocker_codes,
@@ -464,6 +675,254 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertFalse(artifacts["executable"])
         self.assertEqual("1.0", artifacts["artifact_schema_version"])
         self.assertEqual("1.2", artifacts["intent_schema_version"])
+
+    def test_native_multicast_renderer_and_gates_cover_every_overlay_policy(self):
+        intent = self.derive()["intent"]
+        artifacts = render_configuration(intent, create_plan(intent))
+        policies = {
+            item["virtual_network"]: item
+            for item in intent["multicast"]["overlay_policies"]
+        }
+        edge_phase = next(
+            item
+            for item in artifacts["devices"]["edge-01"]["phases"]
+            if item["phase_id"] == "multicast"
+        )
+        edge_commands = "\n".join(
+            command
+            for block in edge_phase["blocks"]
+            for command in block["commands"]
+        )
+        for policy in policies.values():
+            instance_id = policy["l3_instance_id"]
+            self.assertIn(
+                "interface Loopback{}".format(instance_id), edge_commands
+            )
+            self.assertIn("interface LISP0.{}".format(instance_id), edge_commands)
+            self.assertIn("ip pim lisp transport multicast", edge_commands)
+            self.assertIn(policy["access_list"], edge_commands)
+            self.assertIn(policy["core_group"]["start"], edge_commands)
+        self.assertIn("ip igmp version 3", edge_commands)
+        self.assertIn("ip igmp explicit-tracking", edge_commands)
+        self.assertIn("ip pim passive", edge_commands)
+        for bum_group in intent["multicast"]["l2_bum_groups"]:
+            self.assertIn(
+                "broadcast-underlay {}".format(bum_group["group"]),
+                "\n".join(
+                    command
+                    for phase in artifacts["devices"]["edge-01"]["phases"]
+                    for block in phase["blocks"]
+                    for command in block["commands"]
+                ),
+            )
+        self.assertIn(
+            "ip pim vrf MEDIA_VN rp-address 203.0.113.30", edge_commands
+        )
+        self.assertIn("ip pim vrf IOT_VN ssm range", edge_commands)
+
+        border_phase = next(
+            item
+            for item in artifacts["devices"]["border-cp-01"]["phases"]
+            if item["phase_id"] == "multicast"
+        )
+        border_commands = "\n".join(
+            command
+            for block in border_phase["blocks"]
+            for command in block["commands"]
+        )
+        media_handoffs = [
+            item
+            for item in intent["border_handoff"]["peers"]
+            if item["device_id"] == "border-cp-01" and item["vrf"] == "MEDIA_VN"
+        ]
+        self.assertTrue(media_handoffs)
+        self.assertTrue(
+            all(item["interface"] in border_commands for item in media_handoffs)
+        )
+        border_artifact = "\n".join(
+            command
+            for phase in artifacts["devices"]["border-cp-01"]["phases"]
+            for block in phase["blocks"]
+            for command in block["commands"]
+        )
+        devices_by_id = {item["id"]: item for item in intent["devices"]}
+        peer_address = devices_by_id["border-cp-02"]["loopback0_ip"]
+        self.assertIn(
+            "ip msdp peer {} connect-source Loopback0".format(peer_address),
+            border_artifact,
+        )
+        self.assertIn("ip msdp cache-sa-state", border_artifact)
+        self.assertIn("ip msdp originator-id Loopback0", border_artifact)
+        self.assertIn("ip pim register-source Loopback0", border_artifact)
+
+        fusion_phase = next(
+            item
+            for item in artifacts["devices"]["fusion-01"]["phases"]
+            if item["phase_id"] == "multicast"
+        )
+        fusion_commands = "\n".join(
+            command
+            for block in fusion_phase["blocks"]
+            for command in block["commands"]
+        )
+        self.assertIn("ip multicast-routing vrf MEDIA_VN", fusion_commands)
+        self.assertIn(
+            "ip pim vrf MEDIA_VN rp-address 203.0.113.30", fusion_commands
+        )
+        self.assertNotIn("register-source", fusion_commands)
+        fusion_media_handoffs = [
+            item
+            for item in intent["border_handoff"]["peers"]
+            if item["fusion_node_id"] == "fusion-01"
+            and item["vrf"] == "MEDIA_VN"
+        ]
+        self.assertTrue(fusion_media_handoffs)
+        self.assertTrue(
+            all(
+                "interface Vlan{}".format(item["vlan_id"])
+                in fusion_commands
+                for item in fusion_media_handoffs
+            )
+        )
+
+        multicast_gates = [
+            item
+            for item in build_gate_plan(intent)
+            if item["phase_id"] == "multicast"
+        ]
+        edge_ids = {
+            item["id"]
+            for item in intent["devices"]
+            if "fabric_edge" in item.get("roles", [])
+        }
+        passive_svi_gates = [
+            item
+            for item in multicast_gates
+            if item["gate_id"].startswith("multicast.passive_svi.")
+        ]
+        self.assertEqual(
+            len(edge_ids)
+            * len(
+                [
+                    pool
+                    for pool in intent["endpoint_pools"]
+                    if pool["virtual_network"] in policies
+                ]
+            ),
+            len(passive_svi_gates),
+        )
+        self.assertTrue(
+            all(item["evaluator"] == "exact_config_lines" for item in passive_svi_gates)
+        )
+        self.assertTrue(
+            all(
+                "ip pim passive" in item["expected"]["lines"]
+                for item in passive_svi_gates
+            )
+        )
+        edge_pim_gates = [
+            item
+            for item in multicast_gates
+            if item["gate_id"].startswith("multicast.pim.edge-")
+        ]
+        self.assertTrue(
+            all(
+                not any(
+                    interface.startswith("Vlan")
+                    for interface in item["expected"]["interfaces"]
+                )
+                for item in edge_pim_gates
+            )
+        )
+        self.assertEqual(
+            56 + len(passive_svi_gates), len(multicast_gates)
+        )
+        self.assertEqual(
+            {"exact_config_lines", "pim_interfaces", "route_prefix"},
+            {item["evaluator"] for item in multicast_gates},
+        )
+        self.assertTrue(all(item["blocking"] for item in multicast_gates))
+        msdp_gates = [
+            item
+            for item in build_gate_plan(intent)
+            if item["evaluator"] == "msdp_peers"
+        ]
+        self.assertEqual(2, len(msdp_gates))
+        self.assertTrue(all(item["phase_id"] == "underlay" for item in msdp_gates))
+
+    def test_multicast_removal_and_mode_change_require_reconciliation(self):
+        intent = self.derive()["intent"]
+        native_artifact = render_configuration(intent, create_plan(intent))
+        native_codes = {
+            item["code"] for item in native_artifact["blocking_requirements"]
+        }
+        self.assertIn("multicast.reconciliation_pending", native_codes)
+
+        disabled = copy.deepcopy(intent)
+        disabled["fabric"]["multicast"].update(
+            {"enabled": False, "transport": "native"}
+        )
+        disabled["fabric"]["multicast"].pop("rp_address", None)
+        disabled["fabric"]["multicast"].pop("rp_device_ids", None)
+        disabled["multicast"] = {
+            "enabled": False,
+            "transport": "native",
+            "rp_mode": "none",
+            "asm_virtual_networks": [],
+            "ssm_virtual_networks": [],
+            "ssm_range": "232.0.0.0/8",
+            "overlay_policies": [],
+            "l2_bum_groups": [],
+        }
+        result = validate_intent(disabled)
+        self.assertTrue(result.is_valid, result.as_dict())
+        disabled_artifact = render_configuration(disabled, create_plan(disabled))
+        disabled_codes = {
+            item["code"] for item in disabled_artifact["blocking_requirements"]
+        }
+        self.assertIn("multicast.reconciliation_pending", disabled_codes)
+        self.assertNotIn("multicast.hardware_acceptance_pending", disabled_codes)
+
+        flipped_requirements = copy.deepcopy(self.requirements)
+        flipped_multicast = flipped_requirements["multicast"]
+        flipped_multicast["asm_virtual_networks"] = ["IoT"]
+        flipped_multicast["ssm_virtual_networks"] = ["Media"]
+        for policy in flipped_multicast["overlay_policies"]:
+            if policy["virtual_network"] == "Media":
+                policy["mode"] = "ssm"
+                policy["group_range"] = "232.64.0.0/10"
+                policy.pop("rp_address", None)
+                policy.pop("rp_prefix", None)
+            elif policy["virtual_network"] == "IoT":
+                policy.update(
+                    {
+                        "mode": "asm",
+                        "group_range": "239.129.0.0/16",
+                        "rp_address": "203.0.113.30",
+                        "rp_prefix": "203.0.113.0/26",
+                    }
+                )
+        flipped_intent = derive_fabric_intent(
+            flipped_requirements, self.policy
+        )["intent"]
+        original_acls = {
+            item["access_list"] for item in intent["multicast"]["overlay_policies"]
+        }
+        flipped_acls = {
+            item["access_list"]
+            for item in flipped_intent["multicast"]["overlay_policies"]
+        }
+        self.assertTrue(original_acls.isdisjoint(flipped_acls))
+        flipped_artifact = render_configuration(
+            flipped_intent, create_plan(flipped_intent)
+        )
+        self.assertIn(
+            "multicast.reconciliation_pending",
+            {
+                item["code"]
+                for item in flipped_artifact["blocking_requirements"]
+            },
+        )
 
     def test_pubsub_subscriber_renderer_and_gates_cover_every_publisher_and_vn(self):
         intent = self.derive()["intent"]

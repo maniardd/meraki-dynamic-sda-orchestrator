@@ -4,11 +4,14 @@ import unittest
 
 from orchestrator.parsers import (
     verify_bgp_neighbors,
+    verify_exact_config_lines,
     verify_isis_neighbors,
     verify_lisp_identity,
     verify_lisp_publishers,
     verify_lisp_sessions,
+    verify_msdp_peers,
     verify_nve_peers,
+    verify_pim_interfaces,
     verify_route_prefix,
 )
 
@@ -83,6 +86,59 @@ router lisp
             verify_lisp_identity(
                 "router lisp\n domain-id 424242\n service ipv4", 424242, None
             ).passed
+        )
+
+    def test_exact_config_lines_require_one_exact_occurrence(self):
+        expected = [
+            "ip multicast-routing vrf MEDIA_VN",
+            "ip pim vrf MEDIA_VN register-source Loopback5003",
+        ]
+        output = "\n".join(expected)
+        self.assertTrue(verify_exact_config_lines(output, expected).passed)
+        self.assertFalse(
+            verify_exact_config_lines(output + "\n" + expected[0], expected).passed
+        )
+        self.assertFalse(
+            verify_exact_config_lines("multicast-routing vrf MEDIA_VN", expected).passed
+        )
+
+    def test_pim_interfaces_require_explicit_sparse_mode_rows(self):
+        expected = ["Loopback5003", "LISP0.5003", "Vlan123"]
+        output = """
+Address          Interface       Ver/Mode  Nbr  Query
+10.1.1.1         Loopback5003    v2/S      0    30
+10.1.1.1         LISP0.5003      v2/S      0    30
+10.1.1.2         Vlan123         v2/S      0    30
+"""
+        self.assertTrue(verify_pim_interfaces(output, expected).passed)
+        self.assertFalse(
+            verify_pim_interfaces(output.replace("Vlan123", "Vlan124"), expected).passed
+        )
+        self.assertFalse(
+            verify_pim_interfaces("Interface Ver/Mode Nbr Query", expected).passed
+        )
+        for rejected_mode in ("v2/SD", "v2/D"):
+            with self.subTest(mode=rejected_mode):
+                self.assertFalse(
+                    verify_pim_interfaces(
+                        "10.1.1.1 Loopback5003 {} 0 30".format(rejected_mode),
+                        ["Loopback5003"],
+                    ).passed
+                )
+
+    def test_msdp_requires_each_exact_peer_to_be_established(self):
+        output = """
+MSDP Peer 10.242.255.2 (?), AS 0, state: established
+  Connection source: Loopback0
+MSDP Peer 10.242.255.3 (?), AS 0, state: inactive
+  Connection source: Loopback0
+"""
+        result = verify_msdp_peers(output, ["10.242.255.2", "10.242.255.3"])
+        self.assertFalse(result.passed)
+        self.assertEqual(["10.242.255.3"], result.observations["missing_peers"])
+        self.assertTrue(verify_msdp_peers(output, ["10.242.255.2"]).passed)
+        self.assertFalse(
+            verify_msdp_peers("MSDP Peer State", ["10.242.255.2"]).passed
         )
 
     def test_isis_table_header_without_neighbor_fails(self):

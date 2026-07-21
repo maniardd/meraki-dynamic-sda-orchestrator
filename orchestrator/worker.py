@@ -137,14 +137,10 @@ class TransactionWorker:
 
             artifact_devices = artifact["devices"]
             ordered_phases = [
-                "underlay",
-                "lisp_control_plane",
-                "lisp_edges",
-                "overlay",
-                "multicast",
-                "border_handoff",
-                "shared_services",
-                "policy_plane",
+                str(phase["id"])
+                for phase in plan["phases"]
+                if str(phase["id"])
+                not in {"precheck", "checkpoint", "endpoint_assurance"}
             ]
             for phase_id in ordered_phases:
                 for device_id in sorted(artifact_devices):

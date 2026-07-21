@@ -109,25 +109,6 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
     ]
 
     assurance_dependency = "border_handoff"
-    multicast = intent.get("multicast") or {}
-    if multicast.get("enabled"):
-        phases.insert(
-            -1,
-            {
-                "id": "multicast",
-                "name": "Deploy and verify fabric multicast and rendezvous points",
-                "depends_on": ["overlay"],
-                "targets": all_devices,
-                "gate": "pim_neighbors_rp_reachability_and_multicast_flows_pass",
-                "objects": {
-                    "asm_virtual_networks": len(multicast.get("asm_virtual_networks", [])),
-                    "ssm_virtual_networks": len(multicast.get("ssm_virtual_networks", [])),
-                },
-            },
-        )
-        border_phase = next(item for item in phases if item["id"] == "border_handoff")
-        border_phase["depends_on"] = ["multicast"]
-
     if intent.get("shared_services"):
         phases.append(
             {
@@ -143,6 +124,41 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
             }
         )
         assurance_dependency = "shared_services"
+
+    multicast = intent.get("multicast") or {}
+    if multicast.get("enabled"):
+        multicast_vrfs = {
+            str(policy["vrf"])
+            for policy in multicast.get("overlay_policies", [])
+        }
+        fusion_multicast_targets = {
+            str(peer["fusion_node_id"])
+            for peer in (intent.get("border_handoff") or {}).get("peers", [])
+            if peer.get("fusion_node_id")
+            and str(peer.get("vrf")) in multicast_vrfs
+        }
+        multicast_targets = sorted(
+            {
+                str(loopback["device_id"])
+                for policy in multicast.get("overlay_policies", [])
+                for loopback in policy.get("segment_loopbacks", [])
+            }
+            | fusion_multicast_targets
+        )
+        phases.append(
+            {
+                "id": "multicast",
+                "name": "Deploy and verify fabric multicast and rendezvous points",
+                "depends_on": [assurance_dependency],
+                "targets": multicast_targets,
+                "gate": "pim_interfaces_rp_routes_and_multicast_policy_pass",
+                "objects": {
+                    "asm_virtual_networks": len(multicast.get("asm_virtual_networks", [])),
+                    "ssm_virtual_networks": len(multicast.get("ssm_virtual_networks", [])),
+                },
+            }
+        )
+        assurance_dependency = "multicast"
 
     policy_plane = intent.get("policy_plane") or {}
     if policy_plane.get("mode") not in {None, "none"}:
