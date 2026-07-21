@@ -72,10 +72,14 @@ Implemented foundation:
   bounded Primary-PAN executor, managed-object collision checks, snapshots,
   verify-after-write, reverse rollback, SXP speakers, fabric-edge SGACL
   enforcement, and exact gates; ISE/API and hardware acceptance remain blocked
+- Machine-validated Meraki parent/child workflow build specification with four
+  separated target identities, native approval, fixed relative HTTP actions,
+  bounded polling, evidence export, and a doubly-disabled apply path
 
 Live apply remains disabled. SQLite remains available for local tests, while
-the production runtime uses PostgreSQL. Meraki import packaging and hardware
-failure/rollback acceptance remain release-candidate work.
+the production runtime uses PostgreSQL. The portable Meraki build specification
+is complete; tenant-native Meraki exports and hardware failure/rollback
+acceptance remain release-candidate work.
 
 ## Quick start
 
@@ -85,6 +89,7 @@ Use Python 3.10 or later.
 python -m pip install -r requirements.txt
 python -c "import yaml; from pathlib import Path; from orchestrator.allocator import derive_fabric_intent; print(derive_fabric_intent(yaml.safe_load(Path('examples/fabric-requirements.lab.yaml').read_text()), yaml.safe_load(Path('policy/guardrails.yaml').read_text()))['intent_hash'])"
 python tools\validate_intent.py examples\fabric-intent.lab.yaml
+python tools\validate_meraki_workflow_package.py --compile --matrix
 python -m unittest discover -s tests -v
 ```
 
@@ -130,3 +135,6 @@ and the evidence required before policy apply can be enabled.
 The [ISE ERS executor contract](docs/ise-ers-executor.md) records the runtime
 security boundary, deterministic transaction/rollback behavior, and the exact
 hardware/API acceptance procedure required before its blocker can be cleared.
+The [Meraki workflow build runbook](docs/meraki-workflow-build-runbook.md)
+defines the native workflow assembly, target/account-key mapping, validation,
+export, dry-run, and acceptance sequence.

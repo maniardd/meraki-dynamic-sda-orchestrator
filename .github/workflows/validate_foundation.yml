@@ -54,6 +54,7 @@ jobs:
           python -m json.tool schemas/fabric-requirements.schema.json >/dev/null
           python tools/validate_intent.py examples/fabric-intent.lab.yaml
           python tools/validate_intent.py examples/fabric-intent.production.yaml
+          python tools/validate_meraki_workflow_package.py --compile --matrix >/dev/null
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v

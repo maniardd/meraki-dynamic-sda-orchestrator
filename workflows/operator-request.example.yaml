@@ -1,0 +1,7 @@
+schema_version: "1.0"
+requested_mode: plan_only
+change_reference: CHANGE-EXAMPLE-001
+approval_expires_at: null
+maintenance_start: null
+maintenance_end: null
+requirements_file: examples/fabric-requirements.sjc23-golden.yaml

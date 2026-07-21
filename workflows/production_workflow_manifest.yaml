@@ -1,66 +1,325 @@
-schema_version: "1.0"
+schema_version: "1.1"
+
 package:
+  id: meraki-dynamic-sda
   name: SDA Fabric Production Automation
+  version: 0.1.0
   release_state: development
+  production_ready: false
   exchange_publishable: false
+  operator_ui: meraki_workflows
+  requirements_contract: schemas/fabric-requirements.schema.json
+  intent_contract: schemas/fabric-intent.schema.json
+  serialization_state: build_spec_complete
+  importable_exports_present: false
+  native_exports: []
+
+safety:
+  apply_enabled: false
+  require_distinct_production_approver: true
+  require_approved_plan_hash: true
+  require_matching_dry_run_artifact: true
+  require_active_maintenance_window: true
+  reject_when_blockers_present: true
+  allow_inline_secrets: false
+  allow_absolute_request_urls: false
+  allow_redirects: false
+  allow_sensitive_header_redirects: false
+
+runtime:
+  request_timeout_seconds: 60
+  poll_interval_seconds: 15
+  max_poll_attempts: 16
+  max_parent_runtime_seconds: 1500
+  terminal_statuses:
+    - dry_run_succeeded
+    - apply_succeeded
+    - apply_failed
+    - rollback_succeeded
+    - rollback_failed
+    - quarantined
 
 targets:
   - name: SDA Orchestrator - Planner
+    binding: target://sda-orchestrator/planner
     type: http_endpoint
     role: planner
     account_key_type: http_bearer_authentication
+    trusted_https_required: true
   - name: SDA Orchestrator - Approver
+    binding: target://sda-orchestrator/approver
     type: http_endpoint
     role: approver
     account_key_type: http_bearer_authentication
+    trusted_https_required: true
   - name: SDA Orchestrator - Operator
+    binding: target://sda-orchestrator/operator
     type: http_endpoint
     role: operator
     account_key_type: http_bearer_authentication
+    trusted_https_required: true
   - name: SDA Orchestrator - Auditor
+    binding: target://sda-orchestrator/auditor
     type: http_endpoint
     role: auditor
     account_key_type: http_bearer_authentication
+    trusted_https_required: true
+
+operator_inputs:
+  - name: requirements_json
+    type: string
+    required: true
+    secret: false
+    description: Versioned fabric requirements JSON; allocations are derived by the orchestrator.
+  - name: requested_mode
+    type: enum
+    required: true
+    options: [plan_only, dry_run, apply]
+    default: plan_only
+    description: Apply remains rejected while package and artifact blockers exist.
+  - name: change_reference
+    type: string
+    required: true
+    description: External change or ticket reference bound to approval and evidence.
+  - name: approval_expires_at
+    type: datetime
+    required: false
+    description: Required for dry-run approval and apply approval.
+  - name: maintenance_start
+    type: datetime
+    required: false
+    description: Required only for apply.
+  - name: maintenance_end
+    type: datetime
+    required: false
+    description: Required only for apply.
+
+state_contract:
+  local_variables:
+    - workflow_instance_id
+    - request_id
+    - intent_id
+    - intent_hash
+    - plan_id
+    - plan_hash
+    - artifact_hash
+    - reservation_id
+    - approval_id
+    - approval_decision
+    - run_id
+    - run_status
+    - blocking_requirements_json
+    - validation_errors_json
+    - evidence_summary_json
+  forbidden_outputs:
+    - bearer_token
+    - device_credential
+    - lisp_auth_key
+    - sxp_password
+    - ise_password
+    - raw_running_configuration
 
 workflows:
-  - name: SDA Fabric - Plan, Approve, and Execute
+  - id: parent
+    name: SDA Fabric - Plan, Approve, and Execute
     kind: parent
+    enabled: true
     production_ready: false
-    children:
-      - SDA Fabric - Validate and Plan
-      - SDA Fabric - Bootstrap Owned-State Baseline
-      - SDA Fabric - Request Approval
-      - SDA Fabric - Start Dry Run
-      - SDA Fabric - Start Apply
-      - SDA Fabric - Export Evidence
-  - name: SDA Fabric - Validate and Plan
+    description: Operator entry point for dynamic planning, approval, dry-run, apply, status, and evidence.
+    steps:
+      - {id: collect_request, activity: create_prompt, form: operator_inputs}
+      - {id: validate_mode, activity: condition, rule: apply_requires_window}
+      - {id: plan, activity: child_workflow, workflow: validate_and_plan}
+      - {id: show_plan, activity: result_summary, template: plan_review}
+      - {id: stop_plan_only, activity: condition, rule: requested_mode_is_plan_only}
+      - {id: approval, activity: child_workflow, workflow: request_approval}
+      - {id: reject_branch, activity: condition, rule: approval_is_rejected}
+      - {id: dry_run, activity: child_workflow, workflow: start_dry_run}
+      - {id: stop_dry_run, activity: condition, rule: requested_mode_is_dry_run}
+      - {id: apply, activity: child_workflow, workflow: start_apply, enabled: false}
+      - {id: evidence, activity: child_workflow, workflow: export_evidence}
+
+  - id: validate_and_plan
+    name: SDA Fabric - Validate and Plan
     kind: child
+    enabled: true
     target_role: planner
-  - name: SDA Fabric - Request Approval
+    description: Validates requirements, allocates deterministically, and returns immutable plan and artifact hashes.
+    steps:
+      - id: build_plan_body
+        activity: build_json
+        fields: [requirements, idempotency_key]
+      - id: create_plan
+        activity: http_request
+        operation: plan
+        continue_on_http_error: true
+      - {id: plan_http_error, activity: condition, rule: http_status_not_200}
+      - {id: capture_plan, activity: json_path_extract, output: plan_contract}
+
+  - id: bootstrap_owned_state
+    name: SDA Fabric - Bootstrap Owned-State Baseline
     kind: child
-    target_role: approver
-  - name: SDA Fabric - Bootstrap Owned-State Baseline
-    kind: child
-    target_role: approver
+    enabled: false
     optional: true
-    enabled: false
-  - name: SDA Fabric - Start Dry Run
+    target_role: approver
+    description: One-time brownfield adoption; disabled until discovery evidence is independently approved.
+    steps:
+      - id: adopt_baseline
+        activity: http_request
+        operation: adopt_owned_state_baseline
+        continue_on_http_error: true
+      - {id: baseline_http_error, activity: condition, rule: http_status_not_200}
+
+  - id: request_approval
+    name: SDA Fabric - Request Approval
     kind: child
+    enabled: true
+    target_role: approver
+    description: Requests native Meraki approval for the exact immutable plan and records the decision through the approver identity.
+    steps:
+      - id: request_native_approval
+        activity: request_approval
+        minimum_approvals: 1
+        require_comment: true
+        require_checkbox: I reviewed the plan hash, artifact hash, blockers, and rollback scope.
+        expires_at_input: approval_expires_at
+      - {id: approval_task_rule, activity: approval_task_rule}
+      - id: record_approval
+        activity: http_request
+        operation: approve
+        continue_on_http_error: true
+      - {id: approval_http_error, activity: condition, rule: http_status_not_200}
+      - {id: capture_approval, activity: json_path_extract, output: approval_contract}
+
+  - id: start_dry_run
+    name: SDA Fabric - Start Dry Run
+    kind: child
+    enabled: true
     target_role: operator
-  - name: SDA Fabric - Start Apply
+    description: Creates an idempotent dry run, processes it, and polls with bounded retries.
+    steps:
+      - id: create_dry_run
+        activity: http_request
+        operation: create_run
+        constants: {mode: dry_run}
+        continue_on_http_error: true
+      - {id: create_dry_run_http_error, activity: condition, rule: http_status_not_200}
+      - id: process_dry_run
+        activity: http_request
+        operation: process_dry_run
+        continue_on_http_error: true
+      - {id: process_dry_run_http_error, activity: condition, rule: http_status_not_200}
+      - id: poll_dry_run
+        activity: bounded_poll
+        operation: status
+        interval_seconds: 15
+        max_attempts: 16
+        terminal_statuses: runtime.terminal_statuses
+      - {id: capture_dry_run, activity: json_path_extract, output: run_contract}
+
+  - id: start_apply
+    name: SDA Fabric - Start Apply
     kind: child
-    target_role: operator
     enabled: false
-  - name: SDA Fabric - Export Evidence
+    target_role: operator
+    description: Locked apply path; it cannot be enabled until every package, hardware, reconciliation, and API acceptance gate is cleared.
+    prerequisites:
+      - approved_plan_hash_matches
+      - approved_artifact_hash_matches
+      - dry_run_plan_hash_matches
+      - dry_run_artifact_hash_matches
+      - no_blocking_requirements
+      - active_maintenance_window
+      - production_approver_is_not_requester
+    steps:
+      - {id: verify_apply_prerequisites, activity: condition, rule: all_apply_prerequisites}
+      - id: create_apply_run
+        activity: http_request
+        operation: create_run
+        constants: {mode: apply}
+        continue_on_http_error: true
+        enabled: false
+      - {id: create_apply_http_error, activity: condition, rule: http_status_not_200}
+      - id: poll_apply
+        activity: bounded_poll
+        operation: status
+        interval_seconds: 15
+        max_attempts: 16
+        terminal_statuses: runtime.terminal_statuses
+        enabled: false
+      - {id: capture_apply, activity: json_path_extract, output: run_contract}
+
+  - id: export_evidence
+    name: SDA Fabric - Export Evidence
     kind: child
+    enabled: true
     target_role: auditor
+    description: Retrieves a redacted evidence summary and verifies the append-only audit chain.
+    steps:
+      - id: retrieve_evidence
+        activity: http_request
+        operation: evidence
+        continue_on_http_error: true
+      - {id: evidence_http_error, activity: condition, rule: http_status_not_200}
+      - {id: audit_chain_invalid, activity: condition, rule: chain_valid_is_not_true}
+      - {id: capture_evidence, activity: json_path_extract, output: evidence_contract}
 
 api_operations:
-  - {method: POST, path: "/v1/workflow-actions/plan", role: planner}
-  - {method: POST, path: "/v1/workflow-actions/approve", role: approver}
-  - {method: POST, path: "/v1/workflow-actions/adopt-owned-state-baseline", role: approver}
-  - {method: POST, path: "/v1/workflow-actions/owned-state-baseline", role: planner}
-  - {method: POST, path: "/v1/workflow-actions/run", role: operator}
-  - {method: POST, path: "/v1/workflow-actions/process-dry-run", role: operator}
-  - {method: POST, path: "/v1/workflow-actions/status", role: operator}
-  - {method: POST, path: "/v1/workflow-actions/evidence", role: auditor}
+  plan:
+    method: POST
+    path: /v1/workflow-actions/plan
+    role: planner
+    success_statuses: [200]
+    request_fields: [requirements, idempotency_key]
+  approve:
+    method: POST
+    path: /v1/workflow-actions/approve
+    role: approver
+    success_statuses: [200]
+    request_fields: [plan_id, decision, change_reference, expires_at]
+  adopt_owned_state_baseline:
+    method: POST
+    path: /v1/workflow-actions/adopt-owned-state-baseline
+    role: approver
+    success_statuses: [200]
+    request_fields: [fabric_id, manifest, evidence_hash, change_reference, discovered_by]
+  get_owned_state_baseline:
+    method: POST
+    path: /v1/workflow-actions/owned-state-baseline
+    role: planner
+    success_statuses: [200]
+    request_fields: [fabric_id]
+  create_run:
+    method: POST
+    path: /v1/workflow-actions/run
+    role: operator
+    success_statuses: [200]
+    request_fields: [plan_id, mode, idempotency_key, maintenance_window]
+  process_dry_run:
+    method: POST
+    path: /v1/workflow-actions/process-dry-run
+    role: operator
+    success_statuses: [200]
+    request_fields: [run_id]
+  status:
+    method: POST
+    path: /v1/workflow-actions/status
+    role: operator
+    success_statuses: [200]
+    request_fields: [run_id]
+  evidence:
+    method: POST
+    path: /v1/workflow-actions/evidence
+    role: auditor
+    success_statuses: [200]
+    request_fields: [run_id]
+
+output_contracts:
+  plan_contract:
+    required: [succeeded, status, intent_id, intent_hash, plan_id, plan_hash, artifact_hash, blocking_requirements]
+  approval_contract:
+    required: [succeeded, status, approval_id, plan_id, decision, expires_at]
+  run_contract:
+    required: [succeeded, status, run]
+  evidence_contract:
+    required: [succeeded, status, run_id, chain_valid, evidence, audit]
