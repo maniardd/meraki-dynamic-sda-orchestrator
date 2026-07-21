@@ -292,6 +292,87 @@ class Schema12FakeAdapter:
         }
 
 
+class Schema12FakeIseAdapter:
+    def __init__(self, manifest):
+        self.manifest = manifest
+        self.connected = False
+        self.applied = False
+
+    def connect(self):
+        self.connected = True
+
+    def close(self):
+        self.connected = False
+
+    def prepare(self):
+        return {
+            "verified": True,
+            "prepared_hash": "a" * 64,
+            "action_counts": {"create": 0, "update": 0, "noop": 10, "deferred": 0},
+        }
+
+    def apply(self):
+        self.applied = True
+        return {
+            "verified": True,
+            "prepared_hash": "a" * 64,
+            "changed_count": 0,
+            "noop_count": 10,
+            "operations": [],
+        }
+
+    def rollback(self):
+        return {"verified": True, "operations": []}
+
+    @property
+    def has_changes(self):
+        return False
+
+
+class Schema12ChangingFakeIseAdapter(Schema12FakeIseAdapter):
+    def __init__(self, manifest):
+        super().__init__(manifest)
+        self.changed = False
+        self.rollback_calls = 0
+
+    def apply(self):
+        self.applied = True
+        self.changed = True
+        return {
+            "verified": True,
+            "prepared_hash": "a" * 64,
+            "changed_count": 1,
+            "noop_count": 9,
+            "operations": [
+                {
+                    "operation_id": "ise-sgt-test",
+                    "resource": "sgt",
+                    "action": "update",
+                    "verified": True,
+                }
+            ],
+        }
+
+    def rollback(self):
+        self.rollback_calls += 1
+        self.changed = False
+        return {
+            "verified": True,
+            "operations": [
+                {
+                    "operation_id": "ise-sgt-test",
+                    "resource": "sgt",
+                    "action": "update",
+                    "verified": True,
+                }
+            ],
+        }
+
+    @property
+    def has_changes(self):
+        return self.changed
+
+
 class Schema12WorkerTests(unittest.TestCase):
     def test_shared_service_blocker_refuses_apply_before_device_connection(self):
         requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
@@ -346,7 +427,8 @@ class Schema12WorkerTests(unittest.TestCase):
                 return Schema12FakeAdapter(device, intent)
 
             result = TransactionWorker(
-                store, factory, lambda _reference: "resolved-test-secret"
+                store, factory, lambda _reference: "resolved-test-secret",
+                ise_adapter_factory=Schema12FakeIseAdapter,
             ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
 
             self.assertFalse(result["succeeded"])
@@ -440,7 +522,10 @@ class Schema12WorkerTests(unittest.TestCase):
                 return adapter
 
             result = TransactionWorker(
-                store, factory, lambda _reference: "resolved-test-secret"
+                store,
+                factory,
+                lambda _reference: "resolved-test-secret",
+                ise_adapter_factory=Schema12FakeIseAdapter,
             ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
 
             self.assertFalse(result["succeeded"])
@@ -512,7 +597,8 @@ class Schema12WorkerTests(unittest.TestCase):
                 return adapter
 
             result = TransactionWorker(
-                store, factory, lambda _reference: "resolved-test-secret"
+                store, factory, lambda _reference: "resolved-test-secret",
+                ise_adapter_factory=Schema12FakeIseAdapter,
             ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
 
             self.assertFalse(result["succeeded"])
@@ -580,7 +666,8 @@ class Schema12WorkerTests(unittest.TestCase):
                 return adapter
 
             result = TransactionWorker(
-                store, factory, lambda _reference: "resolved-test-secret"
+                store, factory, lambda _reference: "resolved-test-secret",
+                ise_adapter_factory=Schema12FakeIseAdapter,
             ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
 
             self.assertFalse(result["succeeded"])
@@ -648,7 +735,8 @@ class Schema12WorkerTests(unittest.TestCase):
                 return adapter
 
             result = TransactionWorker(
-                store, factory, lambda _reference: "resolved-test-secret"
+                store, factory, lambda _reference: "resolved-test-secret",
+                ise_adapter_factory=Schema12FakeIseAdapter,
             ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
 
             self.assertFalse(result["succeeded"])
@@ -707,6 +795,7 @@ class Schema12WorkerTests(unittest.TestCase):
             )
 
             adapters = {}
+            ise_adapters = []
 
             def factory(device):
                 adapter = Schema12FakeAdapter(
@@ -717,8 +806,14 @@ class Schema12WorkerTests(unittest.TestCase):
                 adapters[device["id"]] = adapter
                 return adapter
 
+            def ise_factory(manifest):
+                adapter = Schema12ChangingFakeIseAdapter(manifest)
+                ise_adapters.append(adapter)
+                return adapter
+
             result = TransactionWorker(
-                store, factory, lambda _reference: "resolved-test-secret"
+                store, factory, lambda _reference: "resolved-test-secret",
+                ise_adapter_factory=ise_factory,
             ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
 
             self.assertFalse(result["succeeded"])
@@ -726,6 +821,15 @@ class Schema12WorkerTests(unittest.TestCase):
             self.assertEqual("rolled_back", result["run"]["status"])
             self.assertTrue(adapters["border-cp-01"].policy_failure_injected)
             self.assertTrue(adapters["border-cp-01"].rollback_calls)
+            self.assertEqual(1, len(ise_adapters))
+            self.assertTrue(ise_adapters[0].applied)
+            self.assertEqual(1, ise_adapters[0].rollback_calls)
+            evidence_types = {
+                item["evidence_type"] for item in store.run_evidence(run["run_id"])
+            }
+            self.assertIn("ise_ers_preflight", evidence_types)
+            self.assertIn("ise_ers_transaction", evidence_types)
+            self.assertIn("ise_ers_rollback", evidence_types)
             stored = store.get_design_reservation(reservation["reservation_id"])
             self.assertEqual("released", stored["state"])
 
@@ -787,7 +891,8 @@ class Schema12WorkerTests(unittest.TestCase):
                 return adapter
 
             result = TransactionWorker(
-                store, factory, lambda _reference: "resolved-test-secret"
+                store, factory, lambda _reference: "resolved-test-secret",
+                ise_adapter_factory=Schema12FakeIseAdapter,
             ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
 
             self.assertFalse(result["succeeded"])

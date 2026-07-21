@@ -69,8 +69,9 @@ Implemented foundation:
   segment loopbacks/core groups, exact gates, and rollback coverage; platform
   and real traffic-flow acceptance remain blocked
 - Deny-by-default policy-plane rendering with a secret-free ISE ERS manifest,
-  SXP speakers, fabric-edge SGACL enforcement, exact gates, and rollback
-  coverage; ISE/API and hardware acceptance remain blocked
+  bounded Primary-PAN executor, managed-object collision checks, snapshots,
+  verify-after-write, reverse rollback, SXP speakers, fabric-edge SGACL
+  enforcement, and exact gates; ISE/API and hardware acceptance remain blocked
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. Meraki import packaging and hardware
@@ -126,3 +127,6 @@ required before enablement.
 The [policy-plane acceptance boundary](docs/policy-plane-renderer.md) records
 ISE ownership, SXP propagation, edge enforcement, API reconciliation, gates,
 and the evidence required before policy apply can be enabled.
+The [ISE ERS executor contract](docs/ise-ers-executor.md) records the runtime
+security boundary, deterministic transaction/rollback behavior, and the exact
+hardware/API acceptance procedure required before its blocker can be cleared.

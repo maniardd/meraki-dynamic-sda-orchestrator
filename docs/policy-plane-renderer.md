@@ -130,11 +130,25 @@ releases pass all of the following:
 10. Immutable ISE before/after snapshots, device output, traffic evidence,
     approval, and rollback evidence are attached to the change record.
 
-The ISE manifest is intentionally declarative and is not consumed by the
-transaction worker. Production acceptance therefore also requires an ISE
-executor with managed-object collision checks, pre-change snapshots,
-verify-after-write, and an injected-failure test proving that rollback restores
-changed owned resources and deletes only newly-created owned resources.
+The ISE manifest remains declarative and secret-free, but executor contract
+`1.0` is now consumed only by the isolated transaction worker. The worker:
+
+- proves that the configured node is the unique `PrimaryAdmin` and that the
+  enabled `ANY-ANY` policy is deny;
+- resolves credentials and an optional CA-bundle path only at runtime;
+- classifies same-name, same-tag, and same-SGT-pair collisions before mutation;
+- creates SGTs before SGACLs and resolves their real ERS IDs before creating
+  matrix cells;
+- snapshots owned updates, verifies every write, and records only secret-free
+  hashes and operation metadata as evidence; and
+- restores owned updates and deletes only newly-created, still-owned resources
+  in reverse order. Ambiguous HTTP write outcomes are journaled before the
+  request and are either safely reconciled or cause rollback quarantine.
+
+This closes the missing software execution path. It does **not** clear the
+hardware/API blocker: the exact ISE release still has to prove its deployment
+response, `ANY-ANY` identity, ERS response shapes, write behavior, and rollback
+semantics through the acceptance procedure in `ise-ers-executor.md`.
 
 The current SJC23 POC has no ISE deployment and cannot clear this blocker. It
 can validate secret resolution, SXP/SGACL CLI syntax supported by its release,
