@@ -17,7 +17,9 @@ from .parsers import (
     verify_msdp_peers,
     verify_nve_peers,
     verify_pim_interfaces,
+    verify_role_permission,
     verify_route_prefix,
+    verify_sxp_connections,
 )
 
 
@@ -325,6 +327,141 @@ def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
                             "blocking": True,
                         }
                     )
+        policy_plane = intent.get("policy_plane") or {}
+        if policy_plane.get("mode") not in {None, "none"}:
+            if device_id in set(
+                str(item)
+                for item in policy_plane.get("enforcement_device_ids", [])
+            ):
+                vlan_ids = sorted(
+                    set(int(item) for item in policy_plane.get("enforcement_vlan_ids", []))
+                )
+                ranges = []
+                range_index = 0
+                while range_index < len(vlan_ids):
+                    start = vlan_ids[range_index]
+                    end = start
+                    while (
+                        range_index + 1 < len(vlan_ids)
+                        and vlan_ids[range_index + 1] == end + 1
+                    ):
+                        range_index += 1
+                        end = vlan_ids[range_index]
+                    ranges.append(
+                        str(start) if start == end else "{}-{}".format(start, end)
+                    )
+                    range_index += 1
+                gates.append(
+                    {
+                        "gate_id": "policy.enforcement.{}".format(device_id),
+                        "phase_id": "policy_plane",
+                        "device_id": device_id,
+                        "command": "show running-config | include ^cts role-based permissions default|^cts role-based enforcement vlan-list",
+                        "evaluator": "exact_config_lines",
+                        "expected": {
+                            "lines": [
+                                "cts role-based permissions default SDA-SGACL-DEFAULT-DENY",
+                                "cts role-based enforcement vlan-list {}".format(
+                                    ",".join(ranges)
+                                ),
+                            ]
+                        },
+                        "blocking": True,
+                    }
+                )
+                for contract in sorted(
+                    policy_plane.get("contracts", []),
+                    key=lambda item: str(item["name"]),
+                ):
+                    gates.append(
+                        {
+                            "gate_id": "policy.permission.{}.{}".format(
+                                device_id, str(contract["name"])
+                            ),
+                            "phase_id": "policy_plane",
+                            "device_id": device_id,
+                            "command": "show cts role-based permissions from {} to {} details".format(
+                                int(contract["source_tag"]),
+                                int(contract["destination_tag"]),
+                            ),
+                            "evaluator": "role_permission",
+                            "expected": {
+                                "source_tag": int(contract["source_tag"]),
+                                "destination_tag": int(contract["destination_tag"]),
+                                "sgacl_name": str(contract["sgacl_name"]),
+                            },
+                            "blocking": True,
+                        }
+                    )
+            sxp_connections = [
+                item
+                for item in (policy_plane.get("sxp") or {}).get("connections", [])
+                if str(item.get("speaker_id")) == device_id
+            ]
+            if sxp_connections:
+                transport_vrfs = sorted(
+                    set(str(item["transport_vrf"]) for item in sxp_connections)
+                )
+                if len(transport_vrfs) != 1:
+                    raise ValueError(
+                        "One SXP speaker cannot verify multiple transport VRFs"
+                    )
+                transport_vrf = transport_vrfs[0]
+                route_commands = {
+                    str(item["listener_prefix"]): (
+                        "show ip route {}".format(item["listener_prefix"])
+                        if transport_vrf == "global"
+                        else "show ip route vrf {} {}".format(
+                            transport_vrf, item["listener_prefix"]
+                        )
+                    )
+                    for item in sxp_connections
+                }
+                for listener_prefix, route_command in sorted(
+                    route_commands.items()
+                ):
+                    suffix = listener_prefix.replace(".", "_").replace("/", "_")
+                    gates.append(
+                        {
+                            "gate_id": "policy.sxp_route.{}.{}".format(
+                                device_id, suffix
+                            ),
+                            "phase_id": "policy_plane",
+                            "device_id": device_id,
+                            "command": route_command,
+                            "evaluator": "route_prefix",
+                            "expected": {"prefix": listener_prefix},
+                            "blocking": True,
+                        }
+                    )
+                gates.append(
+                    {
+                        "gate_id": "policy.sxp.{}".format(device_id),
+                        "phase_id": "policy_plane",
+                        "device_id": device_id,
+                        "command": (
+                            "show cts sxp connections"
+                            if transport_vrf == "global"
+                            else "show cts sxp connections vrf {}".format(
+                                transport_vrf
+                            )
+                        ),
+                        "evaluator": "sxp_connections",
+                        "expected": {
+                            "connections": [
+                                {
+                                    "peer": str(item["listener_ip"]),
+                                    "source_ip": str(item["source_ip"]),
+                                }
+                                for item in sorted(
+                                    sxp_connections,
+                                    key=lambda entry: str(entry["listener_ip"]),
+                                )
+                            ]
+                        },
+                        "blocking": True,
+                    }
+                )
     for fusion in sorted(intent.get("fusion_nodes", []), key=lambda item: str(item["id"])):
         fusion_id = str(fusion["id"])
         gates.append(
@@ -525,6 +662,15 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
         return verify_pim_interfaces(output, list(expected["interfaces"]))
     if evaluator == "msdp_peers":
         return verify_msdp_peers(output, list(expected["peers"]))
+    if evaluator == "sxp_connections":
+        return verify_sxp_connections(output, list(expected["connections"]))
+    if evaluator == "role_permission":
+        return verify_role_permission(
+            output,
+            int(expected["source_tag"]),
+            int(expected["destination_tag"]),
+            str(expected["sgacl_name"]),
+        )
     if evaluator == "nve_peers":
         return verify_nve_peers(output, int(expected["minimum_up"]))
     if evaluator == "bgp_neighbors":

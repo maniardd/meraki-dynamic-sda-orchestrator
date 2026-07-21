@@ -268,21 +268,29 @@ multicast:
     - {virtual_network: IoT, mode: ssm, group_range: 232.0.0.0/8}
 
 policy_plane:
+  contract_version: "1.0"
   mode: hybrid
+  default_action: deny
   ise:
     credential_ref: secret://acceptance/ise/api
+    ca_bundle_ref: secret://acceptance/ise/ca-bundle
+    write_node_id: ise-01
     nodes:
-      - {id: ise-01, address: 203.0.113.20, roles: [pan, psn, pxgrid]}
-      - {id: ise-02, address: 203.0.113.21, roles: [pan, psn, pxgrid]}
+      - {id: ise-01, address: 203.0.113.20, api_base_url: "https://ise-01.example.test", roles: [pan, psn, pxgrid]}
+      - {id: ise-02, address: 203.0.113.21, api_base_url: "https://ise-02.example.test", roles: [pan, psn, pxgrid]}
   sxp:
     connections:
       - id: border-01-to-ise-01
         speaker_id: border-cp-01
+        transport_vrf: SHARED_VN
         listener_ip: 203.0.113.20
+        listener_prefix: 203.0.113.0/26
         password_ref: secret://acceptance/sxp/border-01-to-ise-01
       - id: border-02-to-ise-02
         speaker_id: border-cp-02
+        transport_vrf: SHARED_VN
         listener_ip: 203.0.113.21
+        listener_prefix: 203.0.113.0/26
         password_ref: secret://acceptance/sxp/border-02-to-ise-02
   security_groups:
     - {name: Employees}

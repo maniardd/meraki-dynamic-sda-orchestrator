@@ -1063,6 +1063,208 @@ def _fusion_shared_service_blocks(
     return blocks
 
 
+def _compress_integer_ranges(values: Sequence[int]) -> str:
+    ordered = sorted(set(int(item) for item in values))
+    ranges: List[str] = []
+    index = 0
+    while index < len(ordered):
+        start = ordered[index]
+        end = start
+        while index + 1 < len(ordered) and ordered[index + 1] == end + 1:
+            index += 1
+            end = ordered[index]
+        ranges.append(str(start) if start == end else "{}-{}".format(start, end))
+        index += 1
+    return ",".join(ranges)
+
+
+def _policy_plane_blocks(
+    intent: Mapping[str, Any], device: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Render enforcement and SXP transport without exposing secret values."""
+
+    policy = intent.get("policy_plane") or {}
+    if policy.get("mode") in {None, "none"}:
+        return []
+    device_id = str(device["id"])
+    blocks: List[Dict[str, Any]] = []
+    if device_id in set(str(item) for item in policy.get("enforcement_device_ids", [])):
+        default_acl = "SDA-SGACL-DEFAULT-DENY"
+        vlan_list = _compress_integer_ranges(policy.get("enforcement_vlan_ids", []))
+        blocks.append(
+            _block(
+                "policy_default_deny",
+                [
+                    "no ip access-list role-based {}".format(default_acl),
+                    "ip access-list role-based {}".format(default_acl),
+                    " 10 deny ip",
+                    "cts role-based permissions default {}".format(default_acl),
+                    "cts role-based enforcement vlan-list {}".format(vlan_list),
+                ],
+            )
+        )
+        if policy.get("mode") == "sxp":
+            for contract in sorted(
+                policy.get("contracts", []), key=lambda item: str(item["name"])
+            ):
+                sgacl_name = _safe(contract["sgacl_name"], "SGACL name")
+                blocks.append(
+                    _block(
+                        "policy_contract_{}".format(sgacl_name),
+                        [
+                            "no ip access-list role-based {}".format(sgacl_name),
+                            "ip access-list role-based {}".format(sgacl_name),
+                            *[
+                                " {} {}".format(index * 10, _safe(ace, "SGACL ACE", True))
+                                for index, ace in enumerate(contract["aces"], start=1)
+                            ],
+                            "cts role-based permissions from {} to {} {}".format(
+                                int(contract["source_tag"]),
+                                int(contract["destination_tag"]),
+                                sgacl_name,
+                            ),
+                        ],
+                    )
+                )
+
+    connections = sorted(
+        (
+            item
+            for item in (policy.get("sxp") or {}).get("connections", [])
+            if str(item.get("speaker_id")) == device_id
+        ),
+        key=lambda item: (str(item["listener_ip"]), str(item["id"])),
+    )
+    if connections:
+        password_refs = sorted(set(str(item["password_ref"]) for item in connections))
+        if len(password_refs) != 1:
+            raise RenderError("One SXP speaker cannot render multiple default passwords")
+        source_ips = sorted(set(str(item["source_ip"]) for item in connections))
+        if len(source_ips) != 1:
+            raise RenderError("One SXP speaker cannot render multiple source addresses")
+        transport_vrfs = sorted(
+            set(str(item["transport_vrf"]) for item in connections)
+        )
+        if len(transport_vrfs) != 1:
+            raise RenderError("One SXP speaker cannot render multiple transport VRFs")
+        password_ref = password_refs[0]
+        transport_vrf = transport_vrfs[0]
+        vrf_suffix = (
+            "" if transport_vrf == "global" else " vrf {}".format(
+                _safe(transport_vrf, "SXP transport VRF")
+            )
+        )
+        blocks.append(
+            _block(
+                "sxp_speaker",
+                [
+                    "cts sxp enable",
+                    "cts sxp default source-ip {}".format(
+                        _safe(source_ips[0], "SXP source address")
+                    ),
+                    "cts sxp default password <secret:{}>".format(password_ref),
+                    *[
+                        "cts sxp connection peer {} password default mode local speaker{}".format(
+                            _safe(item["listener_ip"], "SXP listener address"),
+                            vrf_suffix,
+                        )
+                        for item in connections
+                    ],
+                    "cts sxp log binding-changes",
+                ],
+                [password_ref],
+            )
+        )
+    return blocks
+
+
+def _ise_policy_manifest(intent: Mapping[str, Any]) -> Dict[str, Any]:
+    """Build a secret-free, idempotent ISE ERS reconciliation contract."""
+
+    policy = intent.get("policy_plane") or {}
+    ise = policy.get("ise") or {}
+    if policy.get("mode") not in {"ise", "hybrid"}:
+        return {}
+    nodes = {str(item["id"]): item for item in ise.get("nodes", [])}
+    write_node_id = str(ise["write_node_id"])
+    write_node = nodes[write_node_id]
+    operations: List[Dict[str, Any]] = []
+    for group in sorted(policy.get("security_groups", []), key=lambda item: str(item["name"])):
+        operations.append(
+            {
+                "resource": "sgt",
+                "strategy": "upsert_owned_by_name",
+                "collision_policy": "fail_if_unmanaged",
+                "lookup": {"name": str(group["name"])},
+                "desired": {
+                    "name": str(group["name"]),
+                    "value": int(group["tag"]),
+                    "description": "managed-by:meraki-dynamic-sda",
+                    "propogateToApic": False,
+                },
+            }
+        )
+    for contract in sorted(policy.get("contracts", []), key=lambda item: str(item["name"])):
+        operations.append(
+            {
+                "resource": "sgacl",
+                "strategy": "upsert_owned_by_name",
+                "collision_policy": "fail_if_unmanaged",
+                "lookup": {"name": str(contract["sgacl_name"])},
+                "desired": {
+                    "name": str(contract["sgacl_name"]),
+                    "description": "managed-by:meraki-dynamic-sda contract:{}".format(
+                        str(contract["name"])
+                    ),
+                    "ipVersion": "IPV4",
+                    "aclcontent": "\n".join(str(item) for item in contract["aces"]),
+                },
+            }
+        )
+        operations.append(
+            {
+                "resource": "egressmatrixcell",
+                "strategy": "upsert_owned_by_sgt_pair",
+                "collision_policy": "fail_if_unmanaged",
+                "lookup": {
+                    "source_sgt_name": str(contract["source"]),
+                    "destination_sgt_name": str(contract["destination"]),
+                },
+                "desired": {
+                    "description": "managed-by:meraki-dynamic-sda contract:{}".format(
+                        str(contract["name"])
+                    ),
+                    "matrixCellStatus": "ENABLED",
+                    "defaultRule": "NONE",
+                    "sgacl_name_refs": [str(contract["sgacl_name"])],
+                },
+            }
+        )
+    manifest = {
+        "type": "cisco_ise_ers",
+        "write_node_id": write_node_id,
+        "api_base_url": str(write_node["api_base_url"]),
+        "credential_ref": str(ise["credential_ref"]),
+        "tls_verify": True,
+        "ownership": {
+            "marker": "managed-by:meraki-dynamic-sda",
+            "unmanaged_collision": "fail",
+            "delete_policy": "new_owned_resources_only_during_verified_rollback",
+        },
+        "preconditions": [
+            "ers_read_write_enabled",
+            "write_node_is_primary_pan",
+            "trusted_tls_chain",
+            "default_egress_matrix_is_deny",
+        ],
+        "operations": operations,
+        "rollback": "restore_prechange_snapshots_and_delete_only_new_owned_resources",
+    }
+    if ise.get("ca_bundle_ref"):
+        manifest["ca_bundle_ref"] = str(ise["ca_bundle_ref"])
+    return manifest
+
+
 def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> Dict[str, Any]:
     """Render deterministic per-device phase artifacts for human review."""
     if str(plan["intent_hash"]) != sha256_json(intent):
@@ -1117,8 +1319,8 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
     if (intent.get("policy_plane") or {}).get("mode") not in {None, "none"}:
         blockers.append(
             {
-                "code": "policy_plane.renderer_pending",
-                "message": "ISE/SGT/SXP publishing remains disabled until API and rollback acceptance passes",
+                "code": "policy_plane.hardware_api_acceptance_pending",
+                "message": "ISE reconciliation, SXP transport, SGACL policy, and edge enforcement are rendered but await ISE API and IOS XE hardware acceptance",
             }
         )
 
@@ -1152,6 +1354,11 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
         if multicast_blocks:
             phases.append(
                 {"phase_id": "multicast", "blocks": multicast_blocks}
+            )
+        policy_blocks = _policy_plane_blocks(intent, device)
+        if policy_blocks:
+            phases.append(
+                {"phase_id": "policy_plane", "blocks": policy_blocks}
             )
         if "border" in roles:
             phases.append(
@@ -1200,10 +1407,14 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
         "intent_hash": str(plan["intent_hash"]),
         "fabric_id": str(intent["fabric"]["id"]),
         "devices": artifacts,
+        "external_systems": {},
         "blocking_requirements": blockers,
         "contains_secret_values": False,
         "review_required": True,
         "executable": False,
     }
+    ise_manifest = _ise_policy_manifest(intent)
+    if ise_manifest:
+        body["external_systems"]["ise"] = ise_manifest
     body["artifact_hash"] = sha256_json(body)
     return body

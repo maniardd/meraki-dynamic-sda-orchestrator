@@ -465,11 +465,17 @@
       "required": ["mode", "security_groups", "contracts"],
       "properties": {
         "mode": {"enum": ["none", "ise", "sxp", "hybrid"]},
+        "contract_version": {"const": "1.0"},
+        "default_action": {"const": "deny"},
+        "enforcement_device_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "enforcement_vlan_ids": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 4094}},
         "ise": {
           "type": "object", "additionalProperties": false,
           "required": ["credential_ref", "nodes"],
           "properties": {
             "credential_ref": {"type": "string", "pattern": "^secret://"},
+            "ca_bundle_ref": {"type": "string", "pattern": "^secret://"},
+            "write_node_id": {"type": "string", "minLength": 1},
             "nodes": {
               "type": "array", "minItems": 1,
               "items": {
@@ -478,6 +484,7 @@
                 "properties": {
                   "id": {"type": "string", "minLength": 1},
                   "address": {"type": "string", "format": "ipv4"},
+                  "api_base_url": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"},
                   "roles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["pan", "psn", "pxgrid"]}}
                 }
               }
@@ -496,8 +503,12 @@
                 "properties": {
                   "id": {"type": "string", "minLength": 1},
                   "speaker_id": {"type": "string", "minLength": 1},
+                  "transport_vrf": {"type": "string", "minLength": 1},
+                  "source_ip": {"type": "string", "format": "ipv4"},
                   "listener_ip": {"type": "string", "format": "ipv4"},
-                  "password_ref": {"type": "string", "pattern": "^secret://"}
+                  "listener_prefix": {"type": "string"},
+                  "password_ref": {"type": "string", "pattern": "^secret://"},
+                  "local_mode": {"const": "speaker"}
                 }
               }
             }
@@ -520,14 +531,73 @@
             "type": "object", "additionalProperties": false,
             "required": ["source", "destination", "action", "protocol"],
             "properties": {
+              "name": {"type": "string", "minLength": 1},
               "source": {"type": "string", "minLength": 1},
+              "source_tag": {"type": "integer", "minimum": 2, "maximum": 65519},
               "destination": {"type": "string", "minLength": 1},
+              "destination_tag": {"type": "integer", "minimum": 2, "maximum": 65519},
               "action": {"enum": ["permit", "deny"]},
-              "protocol": {"enum": ["ip", "tcp", "udp", "icmp"]}
+              "protocol": {"enum": ["ip", "tcp", "udp", "icmp"]},
+              "sgacl_name": {"type": "string", "pattern": "^SDA-SGACL-[A-F0-9]{12}$"},
+              "aces": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^(permit|deny) (ip|tcp|udp|icmp)$"}},
+              "default_action": {"const": "deny"}
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"contract_version": {"const": "1.0"}},
+            "required": ["contract_version"]
+          },
+          "then": {
+            "required": ["default_action", "enforcement_device_ids", "enforcement_vlan_ids"],
+            "properties": {
+              "ise": {
+                "required": ["credential_ref", "write_node_id", "nodes"],
+                "properties": {
+                  "nodes": {
+                    "items": {"required": ["id", "address", "api_base_url", "roles"]}
+                  }
+                }
+              },
+              "sxp": {
+                "properties": {
+                  "connections": {
+                    "items": {
+                      "required": ["id", "speaker_id", "transport_vrf", "source_ip", "listener_ip", "listener_prefix", "password_ref", "local_mode"]
+                    }
+                  }
+                }
+              },
+              "contracts": {
+                "items": {
+                  "required": ["name", "source", "source_tag", "destination", "destination_tag", "action", "protocol", "sgacl_name", "aces", "default_action"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"mode": {"const": "ise"}}, "required": ["mode"]},
+          "then": {"required": ["ise"], "not": {"required": ["sxp"]}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "sxp"}}, "required": ["mode"]},
+          "then": {"required": ["sxp"], "not": {"required": ["ise"]}}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "hybrid"}}, "required": ["mode"]},
+          "then": {"required": ["ise", "sxp"]}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "none"}}, "required": ["mode"]},
+          "then": {
+            "not": {"anyOf": [{"required": ["ise"]}, {"required": ["sxp"]}]}
+          }
+        }
+      ]
     },
     "border_handoff": {
       "type": "object",

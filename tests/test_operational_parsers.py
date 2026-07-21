@@ -12,7 +12,9 @@ from orchestrator.parsers import (
     verify_msdp_peers,
     verify_nve_peers,
     verify_pim_interfaces,
+    verify_role_permission,
     verify_route_prefix,
+    verify_sxp_connections,
 )
 
 
@@ -139,6 +141,68 @@ MSDP Peer 10.242.255.3 (?), AS 0, state: inactive
         self.assertTrue(verify_msdp_peers(output, ["10.242.255.2"]).passed)
         self.assertFalse(
             verify_msdp_peers("MSDP Peer State", ["10.242.255.2"]).passed
+        )
+
+    def test_sxp_requires_exact_peer_source_speaker_and_on_state(self):
+        output = """
+SXP                     : Enabled
+----------------------------------------------
+Peer IP                 : 203.0.113.20
+Source IP               : 10.241.0.0
+Conn status             : On
+Connection mode         : SXP Speaker
+"""
+        expected = [{"peer": "203.0.113.20", "source_ip": "10.241.0.0"}]
+        self.assertTrue(verify_sxp_connections(output, expected).passed)
+        self.assertFalse(
+            verify_sxp_connections(
+                output,
+                [{"peer": "203.0.113.21", "source_ip": "10.241.0.0"}],
+            ).passed
+        )
+        self.assertFalse(verify_sxp_connections("Peer IP Conn status", expected).passed)
+        extra = output + """
+----------------------------------------------
+Peer IP                 : 203.0.113.22
+Source IP               : 10.241.0.0
+Conn status             : On
+Connection mode         : SXP Speaker
+"""
+        self.assertFalse(verify_sxp_connections(extra, expected).passed)
+
+    def test_role_permission_requires_exact_pair_and_single_sgacl(self):
+        output = """
+IPv4 Role-based permissions from group 1000:Employees to group 1003:Shared-Services:
+  SDA-SGACL-C6B06C63114D
+"""
+        self.assertTrue(
+            verify_role_permission(
+                output, 1000, 1003, "SDA-SGACL-C6B06C63114D"
+            ).passed
+        )
+        self.assertFalse(
+            verify_role_permission(
+                output, 1001, 1003, "SDA-SGACL-C6B06C63114D"
+            ).passed
+        )
+        self.assertFalse(
+            verify_role_permission(
+                output + "  SDA-SGACL-C6B06C63114D\n",
+                1000,
+                1003,
+                "SDA-SGACL-C6B06C63114D",
+            ).passed
+        )
+        unrelated_block = """
+IPv4 Role-based permissions from group 1000:Employees to group 1003:Shared-Services:
+  OTHER-SGACL
+IPv4 Role-based permissions from group 1001:Guests to group 1003:Shared-Services:
+  SDA-SGACL-C6B06C63114D
+"""
+        self.assertFalse(
+            verify_role_permission(
+                unrelated_block, 1000, 1003, "SDA-SGACL-C6B06C63114D"
+            ).passed
         )
 
     def test_isis_table_header_without_neighbor_fails(self):

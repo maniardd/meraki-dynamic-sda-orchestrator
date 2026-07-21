@@ -79,12 +79,19 @@ Apply remains disabled for the following deliberately visible blockers:
   `multicast.head_end_replication_renderer_pending` for head-end replication
 - `multicast.reconciliation_pending` until prior owned multicast state is
   diffed and stale configuration removal is proven
-- `policy_plane.renderer_pending`
+- `policy_plane.hardware_api_acceptance_pending`
 
 Each blocker is removed only after its release-specific renderer, rollback,
 failure-injection, and hardware or API acceptance tests pass. This prevents a
 valid planning document from being misrepresented as executable production
 configuration.
+
+The policy-plane renderer now derives the complete fabric-edge enforcement
+set, renders SXP speakers and default-deny IOS XE policy, and emits an owned,
+secret-free ISE ERS reconciliation manifest. The blocker remains because the
+ISE executor, API rollback proof, redundant SXP sessions, and real SGACL
+traffic enforcement have not yet passed platform acceptance. See
+[policy-plane-renderer.md](policy-plane-renderer.md).
 
 The shared-services renderer, exact route gates, fusion-worker support, and
 failure-injection rollback test are complete. Its remaining blocker is now

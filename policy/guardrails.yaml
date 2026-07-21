@@ -86,6 +86,9 @@ redundancy:
   min_control_planes_production: 2
   min_uplinks_per_edge_production: 2
   min_fusion_nodes_production: 2
+  min_ise_nodes_production: 2
+  min_sxp_speakers_production: 2
+  min_sxp_listeners_production: 2
 
 approval:
   require_roles: [approver]

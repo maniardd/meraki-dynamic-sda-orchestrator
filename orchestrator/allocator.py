@@ -16,6 +16,7 @@ import math
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -746,6 +747,7 @@ def derive_fabric_intent(
             )
 
     environment = str(requirements["metadata"]["environment"])
+    redundancy = policy.get("redundancy", {})
     vn_by_name = {item["name"]: item for item in virtual_networks}
     vrf_names = {item["vrf"] for item in virtual_networks}
 
@@ -1160,11 +1162,29 @@ def derive_fabric_intent(
     policy_plane = None
     raw_policy_plane = requirements.get("policy_plane")
     if raw_policy_plane is not None:
+        if str(raw_policy_plane.get("contract_version")) != "1.0":
+            raise AllocationError(
+                "Policy-plane contract_version 1.0 is required; migrate stored schema 1.2 requirements before planning"
+            )
         policy_mode = str(raw_policy_plane["mode"])
+        if str(raw_policy_plane.get("default_action")) != "deny":
+            raise AllocationError("Policy-plane default action must be deny")
         if policy_mode in {"ise", "hybrid"} and not raw_policy_plane.get("ise"):
             raise AllocationError("Policy-plane mode {} requires ISE settings".format(policy_mode))
         if policy_mode in {"sxp", "hybrid"} and not raw_policy_plane.get("sxp"):
             raise AllocationError("Policy-plane mode {} requires SXP settings".format(policy_mode))
+        if policy_mode not in {"ise", "hybrid"} and raw_policy_plane.get("ise"):
+            raise AllocationError(
+                "Policy-plane mode {} cannot contain ISE settings".format(
+                    policy_mode
+                )
+            )
+        if policy_mode not in {"sxp", "hybrid"} and raw_policy_plane.get("sxp"):
+            raise AllocationError(
+                "Policy-plane mode {} cannot contain SXP settings".format(
+                    policy_mode
+                )
+            )
         sgt_range = ranges.get("sgt")
         if not isinstance(sgt_range, Mapping):
             raise AllocationError("Guardrail range sgt is missing")
@@ -1185,6 +1205,9 @@ def derive_fabric_intent(
                     "sgt", int(raw_group["tag"]), int(sgt_range["min"]), int(sgt_range["max"])
                 )
             security_groups.append({"name": name, "tag": tag})
+        security_groups_by_name = {
+            item["name"]: item for item in security_groups
+        }
         contracts = []
         contract_keys = set()
         for raw_contract in sorted(
@@ -1211,51 +1234,152 @@ def derive_fabric_intent(
                     "Duplicate policy contract {} to {} for {}".format(*key)
                 )
             contract_keys.add(key)
+            action = str(raw_contract["action"])
+            protocol = str(raw_contract["protocol"])
+            if action == "deny" and protocol != "ip":
+                raise AllocationError(
+                    "Deny policy contracts must use protocol ip because the policy plane is default-deny"
+                )
+            contract_identity = {
+                "source": source,
+                "destination": destination,
+                "action": action,
+                "protocol": protocol,
+            }
             contracts.append(
                 {
+                    "name": "SDA-CONTRACT-{}".format(
+                        sha256_json(contract_identity)[:12].upper()
+                    ),
                     "source": source,
+                    "source_tag": int(security_groups_by_name[source]["tag"]),
                     "destination": destination,
-                    "action": str(raw_contract["action"]),
-                    "protocol": str(raw_contract["protocol"]),
+                    "destination_tag": int(
+                        security_groups_by_name[destination]["tag"]
+                    ),
+                    "action": action,
+                    "protocol": protocol,
+                    "sgacl_name": "SDA-SGACL-{}".format(
+                        sha256_json(contract_identity)[:12].upper()
+                    ),
+                    "aces": ["{} {}".format(action, protocol)],
+                    "default_action": "deny",
                 }
             )
         policy_plane = {
             "mode": policy_mode,
+            "contract_version": "1.0",
+            "default_action": "deny",
+            "enforcement_device_ids": sorted(
+                str(item["id"])
+                for item in devices
+                if "fabric_edge" in set(item.get("roles", []))
+            ),
+            "enforcement_vlan_ids": sorted(
+                int(item["vlan_id"]) for item in endpoint_pools
+            ),
             "security_groups": security_groups,
             "contracts": contracts,
         }
         ise_addresses = set()
         if raw_policy_plane.get("ise"):
             raw_ise = raw_policy_plane["ise"]
-            ise_addresses = {str(item["address"]) for item in raw_ise["nodes"]}
+            node_ids = set()
+            ise_addresses = set()
+            ise_nodes = []
+            for item in sorted(raw_ise["nodes"], key=lambda node: str(node["id"])):
+                node_id = str(item["id"])
+                address = str(item["address"])
+                if node_id in node_ids:
+                    raise AllocationError("Duplicate ISE node {}".format(node_id))
+                if address in ise_addresses:
+                    raise AllocationError("Duplicate ISE node address {}".format(address))
+                node_ids.add(node_id)
+                ise_addresses.add(address)
+                api_base_url = str(item["api_base_url"]).rstrip("/")
+                parsed_url = urlparse(api_base_url)
+                try:
+                    api_port = parsed_url.port
+                except ValueError:
+                    api_port = -1
+                if (
+                    parsed_url.scheme != "https"
+                    or not parsed_url.hostname
+                    or api_port == -1
+                    or (api_port is not None and not 1 <= api_port <= 65535)
+                    or parsed_url.path not in {"", "/"}
+                    or parsed_url.query
+                    or parsed_url.fragment
+                ):
+                    raise AllocationError(
+                        "ISE node {} api_base_url must be an HTTPS origin".format(
+                            node_id
+                        )
+                    )
+                ise_nodes.append(
+                    {
+                        "id": node_id,
+                        "address": address,
+                        "api_base_url": api_base_url,
+                        "roles": sorted(str(role) for role in item["roles"]),
+                    }
+                )
+            write_node_id = str(raw_ise["write_node_id"])
+            write_node = next(
+                (item for item in ise_nodes if item["id"] == write_node_id), None
+            )
+            if write_node is None:
+                raise AllocationError("ISE write_node_id references an unknown node")
+            if "pan" not in set(write_node["roles"]):
+                raise AllocationError("ISE write node must have the PAN role")
+            if environment == "production":
+                minimum_ise_nodes = int(
+                    redundancy.get("min_ise_nodes_production", 2)
+                )
+                if len(ise_nodes) < minimum_ise_nodes:
+                    raise AllocationError(
+                        "Production policy plane requires at least {} ISE nodes".format(
+                            minimum_ise_nodes
+                        )
+                    )
+                if sum("pan" in set(item["roles"]) for item in ise_nodes) < 2:
+                    raise AllocationError(
+                        "Production policy plane requires redundant ISE PAN nodes"
+                    )
             policy_plane["ise"] = {
                 "credential_ref": str(raw_ise["credential_ref"]),
-                "nodes": sorted(
-                    (
-                        {
-                            "id": str(item["id"]),
-                            "address": str(item["address"]),
-                            "roles": sorted(str(role) for role in item["roles"]),
-                        }
-                        for item in raw_ise["nodes"]
-                    ),
-                    key=lambda item: item["id"],
-                ),
+                "write_node_id": write_node_id,
+                "nodes": ise_nodes,
             }
+            if raw_ise.get("ca_bundle_ref"):
+                policy_plane["ise"]["ca_bundle_ref"] = str(
+                    raw_ise["ca_bundle_ref"]
+                )
         if raw_policy_plane.get("sxp"):
             raw_sxp = raw_policy_plane["sxp"]
-            known_speakers = device_ids | fusion_ids
+            devices_by_id = {str(item["id"]): item for item in devices}
             connections = []
             connection_ids = set()
+            speaker_password_refs: Dict[str, str] = {}
+            speaker_transport_vrfs: Dict[str, str] = {}
+            connection_peers = set()
             for item in sorted(raw_sxp["connections"], key=lambda entry: str(entry["id"])):
                 connection_id = str(item["id"])
                 if connection_id in connection_ids:
                     raise AllocationError("Duplicate SXP connection {}".format(connection_id))
                 connection_ids.add(connection_id)
-                if str(item["speaker_id"]) not in known_speakers:
+                speaker_id = str(item["speaker_id"])
+                speaker = devices_by_id.get(speaker_id)
+                if speaker is None:
                     raise AllocationError(
-                        "SXP connection {} references unknown speaker {}".format(
-                            connection_id, item["speaker_id"]
+                        "SXP connection {} speaker must be a fabric device".format(
+                            connection_id
+                        )
+                    )
+                if not set(speaker.get("roles", [])) & {"border", "fabric_edge"}:
+                    raise AllocationError(
+                        "SXP connection {} speaker must be a border or fabric edge".format(
+                            connection_id
                         )
                     )
                 if policy_mode in {"ise", "hybrid"} and str(item["listener_ip"]) not in ise_addresses:
@@ -1264,20 +1388,98 @@ def derive_fabric_intent(
                             connection_id, item["listener_ip"]
                         )
                     )
+                transport_vrf = str(item["transport_vrf"])
+                if transport_vrf != "global" and transport_vrf not in vrf_names:
+                    raise AllocationError(
+                        "SXP connection {} references unknown transport VRF {}".format(
+                            connection_id, transport_vrf
+                        )
+                    )
+                previous_transport_vrf = speaker_transport_vrfs.get(speaker_id)
+                if previous_transport_vrf and previous_transport_vrf != transport_vrf:
+                    raise AllocationError(
+                        "SXP speaker {} cannot use multiple transport VRFs".format(
+                            speaker_id
+                        )
+                    )
+                speaker_transport_vrfs[speaker_id] = transport_vrf
+                listener_ip = ipaddress.ip_address(str(item["listener_ip"]))
+                listener_prefix = _network(str(item["listener_prefix"]))
+                if listener_ip not in listener_prefix:
+                    raise AllocationError(
+                        "SXP connection {} listener must be inside listener_prefix".format(
+                            connection_id
+                        )
+                    )
+                if policy_mode in {"ise", "hybrid"}:
+                    service_prefixes = {
+                        str(prefix)
+                        for service in (shared_services or {}).get("services", [])
+                        if str(service.get("type")) == "ise"
+                        for prefix in service.get("prefixes", [])
+                    }
+                    if str(listener_prefix) not in service_prefixes:
+                        raise AllocationError(
+                            "SXP connection {} listener_prefix is not an approved ISE service prefix".format(
+                                connection_id
+                            )
+                        )
+                    if transport_vrf != str((shared_services or {}).get("vrf", "")):
+                        raise AllocationError(
+                            "SXP connection {} must use the shared-services VRF for an ISE listener".format(
+                                connection_id
+                            )
+                        )
+                connection_peer = (speaker_id, str(listener_ip), transport_vrf)
+                if connection_peer in connection_peers:
+                    raise AllocationError(
+                        "Duplicate SXP speaker/listener/VRF connection"
+                    )
+                connection_peers.add(connection_peer)
+                password_ref = str(item["password_ref"])
+                previous_password_ref = speaker_password_refs.get(speaker_id)
+                if previous_password_ref and previous_password_ref != password_ref:
+                    raise AllocationError(
+                        "SXP speaker {} cannot use multiple default password references".format(
+                            speaker_id
+                        )
+                    )
+                speaker_password_refs[speaker_id] = password_ref
                 connections.append(
                     {
                         "id": connection_id,
-                        "speaker_id": str(item["speaker_id"]),
-                        "listener_ip": str(item["listener_ip"]),
-                        "password_ref": str(item["password_ref"]),
+                        "speaker_id": speaker_id,
+                        "transport_vrf": transport_vrf,
+                        "listener_ip": str(listener_ip),
+                        "listener_prefix": str(listener_prefix),
+                        "password_ref": password_ref,
+                        "local_mode": "speaker",
                     }
                 )
+            if environment == "production":
+                minimum_speakers = int(
+                    redundancy.get("min_sxp_speakers_production", 2)
+                )
+                minimum_listeners = int(
+                    redundancy.get("min_sxp_listeners_production", 2)
+                )
+                if len({item["speaker_id"] for item in connections}) < minimum_speakers:
+                    raise AllocationError(
+                        "Production SXP requires at least {} speakers".format(
+                            minimum_speakers
+                        )
+                    )
+                if len({item["listener_ip"] for item in connections}) < minimum_listeners:
+                    raise AllocationError(
+                        "Production SXP requires at least {} listeners".format(
+                            minimum_listeners
+                        )
+                    )
             policy_plane["sxp"] = {"connections": connections}
 
     control_planes = [item["id"] for item in devices if "control_plane" in item["roles"]]
     if not control_planes:
         raise AllocationError("At least one control-plane device is required")
-    redundancy = policy.get("redundancy", {})
     if environment == "production":
         border_count = sum("border" in item["roles"] for item in devices)
         if border_count < int(redundancy.get("min_borders_production", 2)):
@@ -1567,6 +1769,34 @@ def derive_fabric_intent(
         }
     else:
         intent["border_handoff"] = {"enabled": False, "mode": "isolated"}
+
+    if policy_plane and policy_plane.get("sxp"):
+        devices_by_id = {str(item["id"]): item for item in devices}
+        handoff_peers = list((intent.get("border_handoff") or {}).get("peers", []))
+        for connection in policy_plane["sxp"]["connections"]:
+            speaker_id = str(connection["speaker_id"])
+            transport_vrf = str(connection["transport_vrf"])
+            if transport_vrf == "global":
+                connection["source_ip"] = str(
+                    devices_by_id[speaker_id]["loopback0_ip"]
+                )
+                continue
+            source_candidates = sorted(
+                {
+                    str(peer["local_ip"])
+                    for peer in handoff_peers
+                    if str(peer.get("device_id")) == speaker_id
+                    and str(peer.get("vrf")) == transport_vrf
+                },
+                key=ipaddress.ip_address,
+            )
+            if not source_candidates:
+                raise AllocationError(
+                    "SXP speaker {} has no routed source in transport VRF {}".format(
+                        speaker_id, transport_vrf
+                    )
+                )
+            connection["source_ip"] = source_candidates[0]
 
     reservation_body = {
         "allocation_domain": domain,
