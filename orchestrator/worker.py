@@ -8,7 +8,7 @@ flag. Unit tests use fake adapters only.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Dict, List, Mapping
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from .gates import build_gate_plan, evaluate_gate
 from .store import ConflictError, StateStore, sha256_json
@@ -44,11 +44,13 @@ class TransactionWorker:
         adapter_factory: Callable[[Mapping[str, Any]], Any],
         secret_resolver: Callable[[str], str],
         actor: str = "sda-worker",
+        ise_adapter_factory: Optional[Callable[[Mapping[str, Any]], Any]] = None,
     ):
         self.store = store
         self.adapter_factory = adapter_factory
         self.secret_resolver = secret_resolver
         self.actor = actor
+        self.ise_adapter_factory = ise_adapter_factory
 
     def _record_gate(
         self,
@@ -127,12 +129,32 @@ class TransactionWorker:
         checkpoints: Dict[str, str] = {}
         gate_plan = build_gate_plan(intent, artifact)
         changed_devices: List[str] = []
+        ise_manifest = (artifact.get("external_systems") or {}).get("ise")
+        ise_adapter = None
+        ise_applied = False
         self.store.transition_run(run_id, "apply_running", self.actor)
         try:
             for device_id in sorted(devices):
                 adapter = self.adapter_factory(devices[device_id])
                 adapter.connect()
                 adapters[device_id] = adapter
+
+            if ise_manifest:
+                if self.ise_adapter_factory is None:
+                    raise WorkerError("ISE manifest requires an enabled ISE executor")
+                ise_adapter = self.ise_adapter_factory(ise_manifest)
+                ise_adapter.connect()
+                preflight = ise_adapter.prepare()
+                if not preflight.get("verified"):
+                    raise WorkerError("ISE preflight did not return verified evidence")
+                self.store.add_evidence(
+                    run_id=run_id,
+                    phase_id="precheck",
+                    device_id=str(ise_manifest["write_node_id"]),
+                    evidence_type="ise_ers_preflight",
+                    payload=preflight,
+                    actor=self.actor,
+                )
 
             prechecks = [gate for gate in gate_plan if gate["phase_id"] == "precheck"]
             for gate in prechecks:
@@ -167,6 +189,21 @@ class TransactionWorker:
                 not in {"precheck", "checkpoint", "endpoint_assurance"}
             ]
             for phase_id in ordered_phases:
+                if phase_id == "policy_plane" and ise_adapter is not None:
+                    # ISE policy objects must be verified before the devices
+                    # are asked to consume or enforce the new policy.
+                    ise_result = ise_adapter.apply()
+                    if not ise_result.get("verified"):
+                        raise WorkerError("ISE apply did not return verified evidence")
+                    ise_applied = True
+                    self.store.add_evidence(
+                        run_id=run_id,
+                        phase_id=phase_id,
+                        device_id=str(ise_manifest["write_node_id"]),
+                        evidence_type="ise_ers_transaction",
+                        payload=ise_result,
+                        actor=self.actor,
+                    )
                 for device_id in sorted(artifact_devices):
                     phase = next(
                         (
@@ -206,12 +243,20 @@ class TransactionWorker:
                     if not self._record_gate(run_id, gate, adapters[str(gate["device_id"])]):
                         raise WorkerError("Operational gate failed")
 
+            if ise_adapter is not None and not ise_applied:
+                raise WorkerError("ISE manifest was not bound to the policy_plane phase")
+
             updated = self.store.complete_apply(
                 run_id,
                 str(artifact["artifact_hash"]),
                 artifact["owned_state"],
                 self.actor,
-                {"changed_devices": sorted(changed_devices)},
+                {
+                    "changed_devices": sorted(changed_devices),
+                    "changed_external_systems": ["ise"]
+                    if ise_adapter is not None and ise_adapter.has_changes
+                    else [],
+                },
             )
             plan_record = self.store.get_plan(str(run["plan_id"]))
             if plan_record.get("reservation_id"):
@@ -222,7 +267,10 @@ class TransactionWorker:
                 )
             return {"succeeded": True, "run": updated, "rolled_back": False}
         except Exception as exc:
-            if checkpoints:
+            ise_has_changes = bool(
+                ise_adapter is not None and getattr(ise_adapter, "has_changes", False)
+            )
+            if checkpoints or ise_has_changes:
                 self.store.transition_run(
                     run_id,
                     "rollback_running",
@@ -246,6 +294,26 @@ class TransactionWorker:
                     except Exception as rollback_error:
                         rollback_failures.append(
                             {"device_id": device_id, "error_type": type(rollback_error).__name__}
+                        )
+                if ise_has_changes:
+                    try:
+                        result = ise_adapter.rollback()
+                        if not result.get("verified"):
+                            raise WorkerError("ISE rollback did not return verified evidence")
+                        self.store.add_evidence(
+                            run_id=run_id,
+                            phase_id="rollback",
+                            device_id=str(ise_manifest["write_node_id"]),
+                            evidence_type="ise_ers_rollback",
+                            payload=result,
+                            actor=self.actor,
+                        )
+                    except Exception as rollback_error:
+                        rollback_failures.append(
+                            {
+                                "external_system": "ise",
+                                "error_type": type(rollback_error).__name__,
+                            }
                         )
                 final = "rollback_failed" if rollback_failures else "rolled_back"
                 updated = self.store.transition_run(
@@ -283,3 +351,5 @@ class TransactionWorker:
         finally:
             for adapter in adapters.values():
                 adapter.close()
+            if ise_adapter is not None:
+                ise_adapter.close()

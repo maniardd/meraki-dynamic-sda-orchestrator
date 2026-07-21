@@ -1194,8 +1194,12 @@ def _ise_policy_manifest(intent: Mapping[str, Any]) -> Dict[str, Any]:
     write_node = nodes[write_node_id]
     operations: List[Dict[str, Any]] = []
     for group in sorted(policy.get("security_groups", []), key=lambda item: str(item["name"])):
+        operation_id = "ise-sgt-{}".format(
+            sha256_json({"resource": "sgt", "name": str(group["name"])})[:16]
+        )
         operations.append(
             {
+                "operation_id": operation_id,
                 "resource": "sgt",
                 "strategy": "upsert_owned_by_name",
                 "collision_policy": "fail_if_unmanaged",
@@ -1209,8 +1213,14 @@ def _ise_policy_manifest(intent: Mapping[str, Any]) -> Dict[str, Any]:
             }
         )
     for contract in sorted(policy.get("contracts", []), key=lambda item: str(item["name"])):
+        sgacl_operation_id = "ise-sgacl-{}".format(
+            sha256_json(
+                {"resource": "sgacl", "name": str(contract["sgacl_name"])}
+            )[:16]
+        )
         operations.append(
             {
+                "operation_id": sgacl_operation_id,
                 "resource": "sgacl",
                 "strategy": "upsert_owned_by_name",
                 "collision_policy": "fail_if_unmanaged",
@@ -1227,6 +1237,15 @@ def _ise_policy_manifest(intent: Mapping[str, Any]) -> Dict[str, Any]:
         )
         operations.append(
             {
+                "operation_id": "ise-cell-{}".format(
+                    sha256_json(
+                        {
+                            "resource": "egressmatrixcell",
+                            "source": str(contract["source"]),
+                            "destination": str(contract["destination"]),
+                        }
+                    )[:16]
+                ),
                 "resource": "egressmatrixcell",
                 "strategy": "upsert_owned_by_sgt_pair",
                 "collision_policy": "fail_if_unmanaged",
@@ -1246,10 +1265,14 @@ def _ise_policy_manifest(intent: Mapping[str, Any]) -> Dict[str, Any]:
         )
     manifest = {
         "type": "cisco_ise_ers",
+        "executor_contract_version": "1.0",
+        "contains_secret_values": False,
         "write_node_id": write_node_id,
+        "write_node_address": str(write_node["address"]),
         "api_base_url": str(write_node["api_base_url"]),
         "credential_ref": str(ise["credential_ref"]),
         "tls_verify": True,
+        "csrf_mode": "auto",
         "ownership": {
             "marker": "managed-by:meraki-dynamic-sda",
             "unmanaged_collision": "fail",

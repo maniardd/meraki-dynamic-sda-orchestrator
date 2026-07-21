@@ -8,6 +8,7 @@ import os
 from typing import Any, Mapping
 
 from .adapters import IosXeSshAdapter
+from .ise import IseErsAdapter
 from .renderer import render_configuration
 from .secrets import build_secret_provider
 from .store import create_state_store
@@ -50,11 +51,19 @@ def process_run(run_id: str, environment: Mapping[str, str]) -> Mapping[str, Any
     def adapter_factory(device):
         return IosXeSshAdapter(device, secrets.resolve_credentials)
 
+    def ise_adapter_factory(manifest):
+        return IseErsAdapter(
+            manifest,
+            secrets.resolve_credentials,
+            secrets.resolve_value,
+        )
+
     worker = TransactionWorker(
         store=store,
         adapter_factory=adapter_factory,
         secret_resolver=secrets.resolve_value,
         actor=str(environment.get("ORCHESTRATOR_WORKER_IDENTITY", "sda-worker")),
+        ise_adapter_factory=ise_adapter_factory,
     )
     return worker.process_apply(
         run_id,
