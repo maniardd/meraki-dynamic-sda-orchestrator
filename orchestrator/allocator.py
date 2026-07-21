@@ -1162,6 +1162,10 @@ def derive_fabric_intent(
     policy_plane = None
     raw_policy_plane = requirements.get("policy_plane")
     if raw_policy_plane is not None:
+        if str(raw_policy_plane.get("contract_version")) != "1.0":
+            raise AllocationError(
+                "Policy-plane contract_version 1.0 is required; migrate stored schema 1.2 requirements before planning"
+            )
         policy_mode = str(raw_policy_plane["mode"])
         if str(raw_policy_plane.get("default_action")) != "deny":
             raise AllocationError("Policy-plane default action must be deny")
@@ -1264,6 +1268,7 @@ def derive_fabric_intent(
             )
         policy_plane = {
             "mode": policy_mode,
+            "contract_version": "1.0",
             "default_action": "deny",
             "enforcement_device_ids": sorted(
                 str(item["id"])
@@ -1293,9 +1298,15 @@ def derive_fabric_intent(
                 ise_addresses.add(address)
                 api_base_url = str(item["api_base_url"]).rstrip("/")
                 parsed_url = urlparse(api_base_url)
+                try:
+                    api_port = parsed_url.port
+                except ValueError:
+                    api_port = -1
                 if (
                     parsed_url.scheme != "https"
                     or not parsed_url.hostname
+                    or api_port == -1
+                    or (api_port is not None and not 1 <= api_port <= 65535)
                     or parsed_url.path not in {"", "/"}
                     or parsed_url.query
                     or parsed_url.fragment

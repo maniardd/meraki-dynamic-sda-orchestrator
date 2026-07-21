@@ -22,6 +22,13 @@ and [SGACL enforcement guide](https://www.cisco.com/c/en/us/td/docs/switches/lan
 
 ## Dynamic planning contract
 
+The executable policy-plane shape is explicitly identified by
+`policy_plane.contract_version: "1.0"`. Earlier schema 1.2 documents without
+this nested discriminator are rejected with one migration-required error;
+they are never reinterpreted as the stronger deny-by-default contract. This
+keeps the immutable top-level intent version while making the policy
+sub-contract evolution unambiguous.
+
 The user supplies policy mode, a mandatory deny default, ISE deployment
 identity, optional SXP connections, security-group names or requested SGTs,
 and directional contracts. The allocator derives:
@@ -76,6 +83,12 @@ Each selected SXP speaker receives:
 The renderer rejects multiple source addresses or password references on one
 speaker because IOS XE exposes one device-wide default for each.
 
+The exact interaction between that device-global default source/password and
+a VRF-scoped SXP connection is release-dependent. The workflow therefore does
+not treat rendered CLI as acceptance evidence: the target IOS XE release must
+prove the effective in-VRF source through captured operational output before
+the blocker can be cleared.
+
 ## Verification and rollback
 
 Blocking device gates require:
@@ -116,6 +129,12 @@ releases pass all of the following:
    permit-any state.
 10. Immutable ISE before/after snapshots, device output, traffic evidence,
     approval, and rollback evidence are attached to the change record.
+
+The ISE manifest is intentionally declarative and is not consumed by the
+transaction worker. Production acceptance therefore also requires an ISE
+executor with managed-object collision checks, pre-change snapshots,
+verify-after-write, and an injected-failure test proving that rollback restores
+changed owned resources and deletes only newly-created owned resources.
 
 The current SJC23 POC has no ISE deployment and cannot clear this blocker. It
 can validate secret resolution, SXP/SGACL CLI syntax supported by its release,

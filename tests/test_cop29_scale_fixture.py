@@ -271,6 +271,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
 
         policy = intent["policy_plane"]
         self.assertEqual("hybrid", policy["mode"])
+        self.assertEqual("1.0", policy["contract_version"])
         self.assertEqual("deny", policy["default_action"])
         self.assertEqual(
             ["edge-01", "edge-02", "edge-03", "edge-04"],
@@ -658,6 +659,93 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         self.assertIn("policy.sxp.source_ip", codes)
         self.assertIn("policy.sxp.transport_vrf", codes)
         self.assertIn("policy.sxp.listener_service_prefix", codes)
+
+    def test_pre_contract_policy_plane_is_rejected_with_one_migration_issue(self):
+        old_requirements = copy.deepcopy(self.requirements)
+        requirements_policy = old_requirements["policy_plane"]
+        requirements_policy.pop("contract_version")
+        requirements_policy.pop("default_action")
+        requirements_policy["ise"].pop("write_node_id")
+        for node in requirements_policy["ise"]["nodes"]:
+            node.pop("api_base_url")
+        for connection in requirements_policy["sxp"]["connections"]:
+            connection.pop("transport_vrf")
+            connection.pop("listener_prefix")
+        with self.assertRaisesRegex(
+            AllocationError, "Policy-plane contract_version 1.0 is required"
+        ):
+            derive_fabric_intent(old_requirements, self.policy)
+
+        old_intent = copy.deepcopy(self.derive()["intent"])
+        intent_policy = old_intent["policy_plane"]
+        for field in (
+            "contract_version",
+            "default_action",
+            "enforcement_device_ids",
+            "enforcement_vlan_ids",
+        ):
+            intent_policy.pop(field)
+        intent_policy["ise"].pop("write_node_id")
+        for node in intent_policy["ise"]["nodes"]:
+            node.pop("api_base_url")
+        for connection in intent_policy["sxp"]["connections"]:
+            for field in (
+                "transport_vrf",
+                "source_ip",
+                "listener_prefix",
+                "local_mode",
+            ):
+                connection.pop(field)
+        for contract in intent_policy["contracts"]:
+            for field in (
+                "name",
+                "source_tag",
+                "destination_tag",
+                "sgacl_name",
+                "aces",
+                "default_action",
+            ):
+                contract.pop(field)
+        result = validate_intent(old_intent)
+        self.assertFalse(result.is_valid)
+        self.assertEqual(
+            ["policy.contract_version.migration_required"],
+            [item.code for item in result.issues],
+        )
+
+    def test_ise_api_base_url_rejects_out_of_range_port(self):
+        for port in (0, 65536, 99999):
+            with self.subTest(port=port, boundary="requirements"):
+                candidate = copy.deepcopy(self.requirements)
+                candidate["policy_plane"]["ise"]["nodes"][0][
+                    "api_base_url"
+                ] = "https://ise-01.example.test:{}".format(port)
+                with self.assertRaisesRegex(
+                    AllocationError, "Requirements schema error"
+                ):
+                    derive_fabric_intent(candidate, self.policy)
+
+            with self.subTest(port=port, boundary="intent"):
+                candidate = copy.deepcopy(self.derive()["intent"])
+                candidate["policy_plane"]["ise"]["nodes"][0][
+                    "api_base_url"
+                ] = "https://ise-01.example.test:{}".format(port)
+                result = validate_intent(candidate)
+                self.assertFalse(result.is_valid)
+                self.assertIn(
+                    "policy.ise.https", {item.code for item in result.issues}
+                )
+
+        valid = copy.deepcopy(self.requirements)
+        valid["policy_plane"]["ise"]["nodes"][0][
+            "api_base_url"
+        ] = "https://ise-01.example.test:65535"
+        self.assertEqual(
+            "https://ise-01.example.test:65535",
+            derive_fabric_intent(valid, self.policy)["intent"]["policy_plane"][
+                "ise"
+            ]["nodes"][0]["api_base_url"],
+        )
 
     def test_intent_validation_rejects_missing_fusion_and_border_vrf_peers(self):
         candidate = copy.deepcopy(self.derive()["intent"])

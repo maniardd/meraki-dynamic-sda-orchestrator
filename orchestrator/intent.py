@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, ip_address, ip_network
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableSequence, Optional, Tuple, Union
+from urllib.parse import urlparse
 
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
@@ -1744,6 +1745,14 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
             )
 
         policy_plane = _mapping(root.get("policy_plane"), "$.policy_plane", issues)
+        if policy_plane.get("contract_version") != "1.0":
+            _add(
+                issues,
+                "policy.contract_version.migration_required",
+                "$.policy_plane.contract_version",
+                "Policy-plane contract_version 1.0 is required; migrate stored schema 1.2 intent before planning or replay",
+            )
+            return ValidationResult(issues)
         policy_mode = policy_plane.get("mode")
         if policy_plane.get("default_action") != "deny":
             _add(
@@ -1943,8 +1952,19 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
                 if "pan" in set(node.get("roles", [])):
                     pan_node_ids.add(node_id)
                 api_base_url = str(node.get("api_base_url", ""))
-                if not re.fullmatch(
-                    r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?", api_base_url
+                parsed_url = urlparse(api_base_url)
+                try:
+                    api_port = parsed_url.port
+                except ValueError:
+                    api_port = -1
+                if (
+                    not re.fullmatch(
+                        r"https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?",
+                        api_base_url,
+                    )
+                    or not parsed_url.hostname
+                    or api_port == -1
+                    or (api_port is not None and not 1 <= api_port <= 65535)
                 ):
                     _add(
                         issues,

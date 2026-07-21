@@ -352,14 +352,15 @@
     "policy_plane": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "default_action", "security_groups", "contracts"],
+      "required": ["mode", "security_groups", "contracts"],
       "properties": {
         "mode": {"enum": ["none", "ise", "sxp", "hybrid"]},
+        "contract_version": {"const": "1.0"},
         "default_action": {"const": "deny"},
         "ise": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["credential_ref", "write_node_id", "nodes"],
+          "required": ["credential_ref", "nodes"],
           "properties": {
             "credential_ref": {"type": "string", "pattern": "^secret://"},
             "ca_bundle_ref": {"type": "string", "pattern": "^secret://"},
@@ -368,11 +369,11 @@
               "type": "array", "minItems": 1, "maxItems": 32,
               "items": {
                 "type": "object", "additionalProperties": false,
-                "required": ["id", "address", "api_base_url", "roles"],
+                "required": ["id", "address", "roles"],
                 "properties": {
                   "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
                   "address": {"type": "string", "format": "ipv4"},
-                  "api_base_url": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$"},
+                  "api_base_url": {"type": "string", "pattern": "^https://[A-Za-z0-9.-]+(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$"},
                   "roles": {
                     "type": "array", "minItems": 1, "uniqueItems": true,
                     "items": {"enum": ["pan", "psn", "pxgrid"]}
@@ -391,7 +392,7 @@
               "type": "array", "minItems": 1, "maxItems": 1024,
               "items": {
                 "type": "object", "additionalProperties": false,
-                "required": ["id", "speaker_id", "transport_vrf", "listener_ip", "listener_prefix", "password_ref"],
+                "required": ["id", "speaker_id", "listener_ip", "password_ref"],
                 "properties": {
                   "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
                   "speaker_id": {"type": "string", "minLength": 1, "maxLength": 64},
@@ -430,6 +431,34 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {"contract_version": {"const": "1.0"}},
+            "required": ["contract_version"]
+          },
+          "then": {
+            "required": ["default_action"],
+            "properties": {
+              "ise": {
+                "required": ["credential_ref", "write_node_id", "nodes"],
+                "properties": {
+                  "nodes": {
+                    "items": {"required": ["id", "address", "api_base_url", "roles"]}
+                  }
+                }
+              },
+              "sxp": {
+                "properties": {
+                  "connections": {
+                    "items": {
+                      "required": ["id", "speaker_id", "transport_vrf", "listener_ip", "listener_prefix", "password_ref"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         {
           "if": {"properties": {"mode": {"const": "ise"}}, "required": ["mode"]},
           "then": {"required": ["ise"], "not": {"required": ["sxp"]}}
