@@ -28,6 +28,7 @@ workflows:
     production_ready: false
     children:
       - SDA Fabric - Validate and Plan
+      - SDA Fabric - Bootstrap Owned-State Baseline
       - SDA Fabric - Request Approval
       - SDA Fabric - Start Dry Run
       - SDA Fabric - Start Apply
@@ -38,6 +39,11 @@ workflows:
   - name: SDA Fabric - Request Approval
     kind: child
     target_role: approver
+  - name: SDA Fabric - Bootstrap Owned-State Baseline
+    kind: child
+    target_role: approver
+    optional: true
+    enabled: false
   - name: SDA Fabric - Start Dry Run
     kind: child
     target_role: operator
@@ -52,6 +58,8 @@ workflows:
 api_operations:
   - {method: POST, path: "/v1/workflow-actions/plan", role: planner}
   - {method: POST, path: "/v1/workflow-actions/approve", role: approver}
+  - {method: POST, path: "/v1/workflow-actions/adopt-owned-state-baseline", role: approver}
+  - {method: POST, path: "/v1/workflow-actions/owned-state-baseline", role: planner}
   - {method: POST, path: "/v1/workflow-actions/run", role: operator}
   - {method: POST, path: "/v1/workflow-actions/process-dry-run", role: operator}
   - {method: POST, path: "/v1/workflow-actions/status", role: operator}

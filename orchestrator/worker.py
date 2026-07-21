@@ -11,7 +11,7 @@ import re
 from typing import Any, Callable, Dict, List, Mapping
 
 from .gates import build_gate_plan, evaluate_gate
-from .store import ConflictError, StateStore
+from .store import ConflictError, StateStore, sha256_json
 
 
 SECRET_PLACEHOLDER = re.compile(r"<secret:(secret://[^>]+)>")
@@ -85,6 +85,19 @@ class TransactionWorker:
         run = self.store.get_run(run_id)
         if run["mode"] != "apply" or run["status"] != "apply_queued":
             raise ConflictError("Run is not queued for apply")
+        artifact_body = dict(artifact)
+        supplied_artifact_hash = str(artifact_body.pop("artifact_hash", ""))
+        if (
+            len(supplied_artifact_hash) != 64
+            or sha256_json(artifact_body) != supplied_artifact_hash
+            or supplied_artifact_hash != str(run["artifact_hash"])
+        ):
+            raise ConflictError("Artifact integrity or run binding check failed")
+        if (
+            str(artifact.get("plan_hash")) != str(run["plan_hash"])
+            or str(plan.get("plan_hash")) != str(run["plan_hash"])
+        ):
+            raise ConflictError("Plan integrity or run binding check failed")
         if artifact.get("blocking_requirements"):
             updated = self.store.transition_run(
                 run_id,
@@ -99,9 +112,20 @@ class TransactionWorker:
             fusion_device = dict(fusion)
             fusion_device["roles"] = ["fusion"]
             devices[str(fusion_device["id"])] = fusion_device
+        for device_id, artifact_device in artifact.get("devices", {}).items():
+            if device_id in devices:
+                continue
+            if not artifact_device.get("retired_target"):
+                raise WorkerError("Artifact contains an unknown active device")
+            descriptor = artifact_device.get("device_descriptor")
+            if not isinstance(descriptor, dict) or str(descriptor.get("id")) != str(
+                device_id
+            ):
+                raise WorkerError("Retired reconciliation target is invalid")
+            devices[str(device_id)] = dict(descriptor)
         adapters: Dict[str, Any] = {}
         checkpoints: Dict[str, str] = {}
-        gate_plan = build_gate_plan(intent)
+        gate_plan = build_gate_plan(intent, artifact)
         changed_devices: List[str] = []
         self.store.transition_run(run_id, "apply_running", self.actor)
         try:
@@ -182,9 +206,10 @@ class TransactionWorker:
                     if not self._record_gate(run_id, gate, adapters[str(gate["device_id"])]):
                         raise WorkerError("Operational gate failed")
 
-            updated = self.store.transition_run(
+            updated = self.store.complete_apply(
                 run_id,
-                "apply_succeeded",
+                str(artifact["artifact_hash"]),
+                artifact["owned_state"],
                 self.actor,
                 {"changed_devices": sorted(changed_devices)},
             )

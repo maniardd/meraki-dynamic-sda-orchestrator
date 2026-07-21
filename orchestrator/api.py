@@ -30,7 +30,7 @@ from .store import (
 )
 
 
-API_VERSION = "0.5.0"
+API_VERSION = "0.6.0"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
 
 
@@ -86,6 +86,10 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 raise StoreError("Guardrail policy must be a YAML object")
             policy_holder["policy"] = document
         return policy_holder["policy"]
+
+    def create_state_bound_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
+        fabric_id = str(intent["fabric"]["id"])
+        return create_plan(intent, store().latest_owned_state(fabric_id))
 
     @app.before_request
     def authorize_v1_requests():
@@ -247,7 +251,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if error:
             return error
         try:
-            generated = create_plan(document)
+            generated = create_state_bound_plan(document)
         except PlanValidationError as exc:
             return jsonify(exc.result.as_dict()), 422
         return jsonify(generated), 201
@@ -305,7 +309,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 }
             ), 422
         intent_record, _ = store().save_intent(intent_document, g.principal["actor"])
-        generated = create_plan(intent_document)
+        generated = create_state_bound_plan(intent_document)
         artifact = render_configuration(intent_document, generated)
         plan_record, _ = store().save_plan(
             intent_record["intent_id"],
@@ -352,7 +356,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @require_roles("planner")
     def persist_plan(intent_id: str):
         intent_record = store().get_intent(intent_id)
-        generated = create_plan(intent_record["document"])
+        generated = create_state_bound_plan(intent_record["document"])
         artifact = render_configuration(intent_record["document"], generated)
         record, created = store().save_plan(
             intent_id,
@@ -367,6 +371,36 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @require_roles("viewer", "planner", "approver", "operator")
     def get_plan(plan_id: str):
         return jsonify(store().get_plan(plan_id))
+
+    @app.get("/v1/fabrics/<fabric_id>/owned-state-baseline")
+    @require_roles("viewer", "planner", "approver", "operator", "auditor")
+    def get_owned_state_baseline(fabric_id: str):
+        baseline = store().latest_owned_state(fabric_id)
+        if baseline is None:
+            raise NotFoundError("Owned-state baseline not found")
+        return jsonify(baseline), 200
+
+    @app.post("/v1/fabrics/<fabric_id>/owned-state-baselines")
+    @require_roles("approver")
+    def adopt_owned_state_baseline(fabric_id: str):
+        document, error = json_object()
+        if error:
+            return error
+        manifest = document.get("manifest")
+        if not isinstance(manifest, dict):
+            return jsonify({"error": "invalid_manifest"}), 422
+        try:
+            baseline = store().record_adopted_owned_state(
+                fabric_id=fabric_id,
+                manifest=manifest,
+                evidence_hash=str(document.get("evidence_hash", "")),
+                change_reference=str(document.get("change_reference", "")),
+                discovered_by=str(document.get("discovered_by", "")),
+                approver=g.principal["actor"],
+            )
+        except ValueError as exc:
+            return jsonify({"error": "invalid_baseline", "message": str(exc)}), 422
+        return jsonify(baseline), 201
 
     @app.post("/v1/plans/<plan_id>/render")
     @require_roles("viewer", "planner", "approver", "operator")
@@ -414,6 +448,39 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         except ValueError as exc:
             return jsonify({"error": "invalid_approval", "message": str(exc)}), 422
         return jsonify({"succeeded": True, "status": approval["decision"], **approval}), 200
+
+    @app.post("/v1/workflow-actions/adopt-owned-state-baseline")
+    @require_roles("approver")
+    def workflow_action_adopt_owned_state_baseline():
+        document, error = json_object()
+        if error:
+            return error
+        manifest = document.get("manifest")
+        if not isinstance(manifest, dict):
+            return jsonify({"error": "invalid_manifest"}), 422
+        try:
+            baseline = store().record_adopted_owned_state(
+                fabric_id=str(document.get("fabric_id", "")),
+                manifest=manifest,
+                evidence_hash=str(document.get("evidence_hash", "")),
+                change_reference=str(document.get("change_reference", "")),
+                discovered_by=str(document.get("discovered_by", "")),
+                approver=g.principal["actor"],
+            )
+        except ValueError as exc:
+            return jsonify({"error": "invalid_baseline", "message": str(exc)}), 422
+        return jsonify({"succeeded": True, "status": "adopted", **baseline}), 200
+
+    @app.post("/v1/workflow-actions/owned-state-baseline")
+    @require_roles("viewer", "planner", "approver", "operator", "auditor")
+    def workflow_action_owned_state_baseline():
+        document, error = json_object()
+        if error:
+            return error
+        baseline = store().latest_owned_state(str(document.get("fabric_id", "")))
+        if baseline is None:
+            raise NotFoundError("Owned-state baseline not found")
+        return jsonify({"succeeded": True, "status": "available", **baseline}), 200
 
     @app.post("/v1/runs")
     @require_roles("operator")

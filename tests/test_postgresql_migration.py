@@ -31,6 +31,16 @@ class PostgreSqlMigrationContractTests(unittest.TestCase):
         self.assertIn("intent_version text not null", approval)
         self.assertIn("approver text not null", approval)
 
+    def test_owned_state_ledger_is_durable_and_source_bound(self):
+        rendered = MIGRATION.read_text(encoding="utf-8").lower()
+        ledger = rendered.split(
+            "create table if not exists owned_state_manifests", 1
+        )[1]
+        self.assertIn("manifest_hash text not null", ledger)
+        self.assertIn("source_reference text not null unique", ledger)
+        self.assertIn("source_artifact_hash text", ledger)
+        self.assertIn("manifest_json jsonb not null", ledger)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from orchestrator.planner import create_plan
+from orchestrator.reconciliation import build_multicast_owned_state
 from orchestrator.renderer import render_configuration
 from orchestrator.store import StateStore, sha256_json
 from orchestrator.worker import TransactionWorker
@@ -31,6 +32,7 @@ class Schema12FakeAdapter:
         fail_multicast=False,
         fail_fusion_multicast=False,
         fail_policy=False,
+        fail_reconciliation=False,
     ):
         self.device = device
         self.intent = intent
@@ -39,10 +41,12 @@ class Schema12FakeAdapter:
         self.fail_multicast = fail_multicast
         self.fail_fusion_multicast = fail_fusion_multicast
         self.fail_policy = fail_policy
+        self.fail_reconciliation = fail_reconciliation
         self.pubsub_failure_injected = False
         self.multicast_failure_injected = False
         self.fusion_multicast_failure_injected = False
         self.policy_failure_injected = False
+        self.reconciliation_failure_injected = False
         self.rollback_calls = []
 
     def connect(self):
@@ -231,6 +235,12 @@ class Schema12FakeAdapter:
         return {"checkpoint": "flash:sda-{}.cfg".format(run_id), "verified": True}
 
     def apply_block(self, commands):
+        if self.fail_reconciliation and any(
+            command.lstrip().startswith("no ") for command in commands
+        ):
+            self.fail_reconciliation = False
+            self.reconciliation_failure_injected = True
+            raise RuntimeError("simulated owned-state reconciliation failure")
         if self.fail_policy and any(
             command.strip().startswith("cts sxp connection peer ")
             for command in commands
@@ -346,6 +356,104 @@ class Schema12WorkerTests(unittest.TestCase):
             self.assertEqual([], store.run_evidence(run["run_id"]))
             stored = store.get_design_reservation(reservation["reservation_id"])
             self.assertEqual("reserved", stored["state"])
+
+    def test_owned_state_prune_failure_rolls_back_and_preserves_prior_baseline(self):
+        requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))
+        policy = yaml.safe_load(GUARDRAILS.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = StateStore(str(Path(temp_dir) / "schema12-reconcile.sqlite3"))
+            reservation, _ = store.reserve_design(
+                requirements, policy, "schema12-reconcile-design", "planner"
+            )
+            previous_intent = reservation["intent"]
+            previous_manifest = build_multicast_owned_state(previous_intent)
+            prior_baseline = store.record_adopted_owned_state(
+                fabric_id=previous_intent["fabric"]["id"],
+                manifest=previous_manifest,
+                evidence_hash="c" * 64,
+                change_reference="CHG-SCHEMA12-BASELINE",
+                discovered_by="discovery-operator",
+                approver="baseline-approver",
+            )
+            intent = copy.deepcopy(previous_intent)
+            intent["fabric"]["multicast"].update(
+                {"enabled": False, "transport": "native"}
+            )
+            intent["fabric"]["multicast"].pop("rp_address", None)
+            intent["fabric"]["multicast"].pop("rp_device_ids", None)
+            intent["multicast"] = {
+                "enabled": False,
+                "transport": "native",
+                "rp_mode": "none",
+                "asm_virtual_networks": [],
+                "ssm_virtual_networks": [],
+                "ssm_range": "232.0.0.0/8",
+                "overlay_policies": [],
+                "l2_bum_groups": [],
+            }
+            intent_record, _ = store.save_intent(intent, "planner")
+            plan = create_plan(intent, prior_baseline)
+            artifact = copy.deepcopy(render_configuration(intent, plan))
+            self.assertGreater(
+                artifact["reconciliation"]["stale_resource_count"], 0
+            )
+
+            # Bypass platform-acceptance blockers only inside this rollback
+            # harness. Production rendering remains fail-closed.
+            artifact["blocking_requirements"] = []
+            artifact_without_hash = dict(artifact)
+            artifact_without_hash.pop("artifact_hash", None)
+            artifact["artifact_hash"] = sha256_json(artifact_without_hash)
+            plan_record, _ = store.save_plan(
+                intent_record["intent_id"],
+                plan,
+                "planner",
+                artifact_hash=artifact["artifact_hash"],
+                intent_version=str(intent["schema_version"]),
+            )
+            store.record_approval(
+                plan_record["plan_id"],
+                "approved",
+                "approver",
+                "CHG-SCHEMA12-RECONCILE",
+                (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            )
+            now = datetime.now(timezone.utc)
+            run, _ = store.create_run(
+                plan_id=plan_record["plan_id"],
+                mode="apply",
+                idempotency_key="schema12-reconcile-rollback",
+                requested_by="operator",
+                execution_enabled=True,
+                maintenance_start=(now - timedelta(minutes=1)).isoformat(),
+                maintenance_end=(now + timedelta(minutes=30)).isoformat(),
+            )
+            adapters = {}
+
+            def factory(device):
+                adapter = Schema12FakeAdapter(
+                    device,
+                    intent,
+                    fail_reconciliation=(device["id"] == "border-cp-01"),
+                )
+                adapters[device["id"]] = adapter
+                return adapter
+
+            result = TransactionWorker(
+                store, factory, lambda _reference: "resolved-test-secret"
+            ).process_apply(run["run_id"], intent, plan_record["document"], artifact)
+
+            self.assertFalse(result["succeeded"])
+            self.assertTrue(result["rolled_back"], result)
+            self.assertEqual("rolled_back", result["run"]["status"])
+            self.assertTrue(
+                adapters["border-cp-01"].reconciliation_failure_injected
+            )
+            self.assertTrue(adapters["border-cp-01"].rollback_calls)
+            self.assertEqual(
+                prior_baseline["baseline_hash"],
+                store.latest_owned_state(intent["fabric"]["id"])["baseline_hash"],
+            )
 
     def test_pubsub_failure_rolls_back_subscriber_node(self):
         requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))

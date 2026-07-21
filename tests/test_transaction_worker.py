@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import tempfile
 import unittest
@@ -223,6 +224,33 @@ class TransactionWorkerTests(unittest.TestCase):
         self.assertEqual("apply_succeeded", result["run"]["status"])
         self.assertTrue(self.store.verify_audit_chain())
         self.assertTrue(self.store.run_evidence(run["run_id"]))
+        baseline = self.store.latest_owned_state(self.intent["fabric"]["id"])
+        self.assertIsNotNone(baseline)
+        self.assertEqual("successful_apply", baseline["source_type"])
+        self.assertEqual(run["run_id"], baseline["source_reference"])
+        self.assertEqual(
+            self.artifact["owned_state"]["manifest_hash"],
+            baseline["manifest_hash"],
+        )
+
+    def test_worker_rejects_tampered_owned_state_before_device_connection(self):
+        run = self.create_apply_run("tampered-owned-state")
+        artifact = copy.deepcopy(self.artifact)
+        artifact["owned_state"]["scope"] = "arbitrary"
+        connected = []
+
+        def factory(device):
+            connected.append(device["id"])
+            return FakeAdapter(device)
+
+        with self.assertRaisesRegex(ConflictError, "Artifact integrity"):
+            TransactionWorker(
+                self.store, factory, lambda _ref: "resolved-test-secret"
+            ).process_apply(
+                run["run_id"], self.intent, self.plan_record["document"], artifact
+            )
+        self.assertEqual([], connected)
+        self.assertEqual("apply_queued", self.store.get_run(run["run_id"])["status"])
 
     def test_failure_after_checkpoint_rolls_back_changed_device(self):
         adapters = {}

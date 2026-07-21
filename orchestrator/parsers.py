@@ -202,6 +202,29 @@ def verify_exact_config_lines(output: str, expected_lines: List[str]) -> GateRes
     )
 
 
+def verify_config_lines_absent(output: str, forbidden_lines: List[str]) -> GateResult:
+    """Require every exact workflow-owned configuration line to be absent."""
+
+    observed = [line.strip() for line in output.splitlines() if line.strip()]
+    forbidden = [str(line).strip() for line in forbidden_lines]
+    present = [line for line in forbidden if observed.count(line) != 0]
+    passed = not present
+    reason = (
+        "Every stale workflow-owned configuration line is absent"
+        if passed
+        else "One or more stale workflow-owned configuration lines remain"
+    )
+    return GateResult(
+        passed,
+        reason,
+        {
+            "forbidden_lines": forbidden,
+            "observed_lines": observed,
+            "present_lines": present,
+        },
+    )
+
+
 def verify_pim_interfaces(output: str, expected_interfaces: List[str]) -> GateResult:
     """Require an explicit sparse-mode PIM row for every intended interface."""
 

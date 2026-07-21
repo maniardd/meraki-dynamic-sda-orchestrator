@@ -6,9 +6,13 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional
 
 from .intent import ValidationResult, validate_intent
+from .reconciliation import (
+    build_multicast_owned_state,
+    build_multicast_reconciliation,
+)
 
 
 class PlanValidationError(ValueError):
@@ -33,7 +37,10 @@ def _targets_by_role(devices: List[Mapping[str, Any]], role: str) -> List[str]:
     )
 
 
-def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
+def create_plan(
+    intent: Mapping[str, Any],
+    reconciliation_baseline: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
     """Create a deterministic, non-executable deployment plan.
 
     Execution is intentionally absent in this foundation milestone. The plan
@@ -52,6 +59,15 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
     borders = _targets_by_role(devices, "border")
     edges = _targets_by_role(devices, "fabric_edge")
 
+    current_owned_state = build_multicast_owned_state(intent)
+    reconciliation = build_multicast_reconciliation(
+        reconciliation_baseline, current_owned_state
+    )
+    reconciliation_ready = reconciliation["status"] == "ready"
+    reconciliation_targets = sorted(reconciliation.get("devices", {}))
+    all_targets = sorted(set(all_targets + reconciliation_targets))
+    underlay_dependency = "checkpoint"
+
     phases: List[Dict[str, Any]] = [
         {
             "id": "precheck",
@@ -67,10 +83,29 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
             "targets": all_targets,
             "gate": "checkpoint_exists_and_is_restorable",
         },
+    ]
+    if reconciliation_ready and reconciliation_targets:
+        phases.append(
+            {
+                "id": "multicast_reconciliation",
+                "name": "Remove stale workflow-owned multicast state",
+                "depends_on": ["checkpoint"],
+                "targets": reconciliation_targets,
+                "gate": "every_stale_owned_configuration_line_is_absent",
+                "objects": {
+                    "stale_resources": int(
+                        reconciliation["stale_resource_count"]
+                    )
+                },
+            }
+        )
+        underlay_dependency = "multicast_reconciliation"
+    phases.extend(
+        [
         {
             "id": "underlay",
             "name": "Deploy and verify IS-IS underlay",
-            "depends_on": ["checkpoint"],
+            "depends_on": [underlay_dependency],
             "targets": all_devices,
             "gate": "expected_isis_bfd_routes_and_mtu_pass",
         },
@@ -106,7 +141,8 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
             "targets": sorted(set(borders + fusion)),
             "gate": "expected_bgp_neighbors_and_routes_established",
         },
-    ]
+        ]
+    )
 
     assurance_dependency = "border_handoff"
     if intent.get("shared_services"):
@@ -213,6 +249,14 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
         "environment": intent["metadata"]["environment"],
         "targets": all_targets,
         "phases": phases,
+        "reconciliation": {
+            "status": str(reconciliation["status"]),
+            "baseline_hash": reconciliation.get("baseline_hash"),
+            "reconciliation_hash": reconciliation.get("reconciliation_hash"),
+            "stale_resource_count": int(
+                reconciliation.get("stale_resource_count", 0)
+            ),
+        },
         "safety": {
             "executable": False,
             "requires_approval": True,
@@ -221,6 +265,8 @@ def create_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
             "requires_verified_rollback": True,
         },
     }
+    if reconciliation_baseline is not None:
+        plan_body["reconciliation_baseline"] = dict(reconciliation_baseline)
     plan_hash = _sha256(plan_body)
 
     return {

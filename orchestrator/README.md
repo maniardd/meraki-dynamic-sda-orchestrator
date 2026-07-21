@@ -98,6 +98,8 @@ API endpoints:
 - `GET /v1/intents/<intent_id>`
 - `POST /v1/intents/<intent_id>/plans`
 - `GET /v1/plans/<plan_id>`
+- `GET /v1/fabrics/<fabric_id>/owned-state-baseline`
+- `POST /v1/fabrics/<fabric_id>/owned-state-baselines`
 - `POST /v1/plans/<plan_id>/render`
 - `POST /v1/plans/<plan_id>/approvals`
 - `POST /v1/runs`
@@ -107,6 +109,8 @@ API endpoints:
 - `GET /v1/audit/<aggregate_type>/<aggregate_id>`
 - `POST /v1/workflow-actions/plan`
 - `POST /v1/workflow-actions/approve`
+- `POST /v1/workflow-actions/adopt-owned-state-baseline`
+- `POST /v1/workflow-actions/owned-state-baseline`
 - `POST /v1/workflow-actions/run`
 - `POST /v1/workflow-actions/process-dry-run`
 - `POST /v1/workflow-actions/status`

@@ -81,20 +81,21 @@ failure-injection tests reject configuration inside both a fabric-edge
 multicast LISP block and a fusion multicast policy block, verify checkpoint
 rollback, and release IPAM state only after rollback is verified.
 
-The renderer also emits `multicast.reconciliation_pending` for every schema
-1.2 multicast lifecycle. This blocker is independent of platform acceptance:
-it cannot be removed until the last committed owned-state manifest is diffed
-against the candidate and deterministic negations remove stale ACL, RP/SSM,
-loopback, LISP, MSDP, and BUM configuration. It remains present even when the
-candidate disables multicast, so policy removal cannot silently leave device
-state behind.
+The owned-state implementation now binds the last successful or independently
+adopted discovery manifest into the approved plan and deterministically removes
+stale ACL, RP/SSM, loopback, LISP, MSDP, interface, and BUM configuration. A
+missing baseline emits `multicast.reconciliation_baseline_missing`; a non-empty
+delta emits `multicast.reconciliation_hardware_acceptance_pending`. See
+`docs/owned-state-reconciliation.md` for the ledger, bootstrap, rollback, and
+acceptance contracts.
 
 ## Platform acceptance still required
 
-Native multicast emits `multicast.hardware_acceptance_pending`, and every 1.2
-multicast lifecycle emits `multicast.reconciliation_pending`, so production
-apply remains impossible. Remove each blocker only after its distinct
-acceptance contract has passed. Hardware acceptance requires the exact target
+Native multicast emits `multicast.hardware_acceptance_pending`, while a
+non-empty removal delta emits
+`multicast.reconciliation_hardware_acceptance_pending`, so production apply
+remains impossible until each applicable acceptance contract passes. Hardware
+acceptance requires the exact target
 platform and IOS XE release to pass all of the following:
 
 1. Every generated CLI block is accepted on border, edge, and fusion roles.
@@ -105,9 +106,8 @@ platform and IOS XE release to pass all of the following:
    border/fusion path.
 6. Border, link, and RP failure tests converge without unauthorized flooding.
 7. A rejected multicast block restores the verified checkpoint.
-8. The state-reconciliation implementation has separately cleared
-   `multicast.reconciliation_pending` by proving removal and ASM/SSM mode-change
-   negations against the last committed artifact.
+8. State reconciliation proves removal and ASM/SSM mode-change negations
+   against the approval-bound prior manifest and exact absence gates.
 9. Evidence is attached to the immutable plan, artifact, approval, and change
    record.
 
