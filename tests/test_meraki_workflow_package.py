@@ -119,6 +119,36 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         self.assertFalse(result["safe_to_build"])
         self.assertIn("release.native_export_inventory", codes)
 
+    def test_runtime_budget_is_required_and_must_be_positive_integer(self):
+        cases = (
+            ("request_timeout_seconds", "runtime.request_timeout"),
+            ("max_parent_runtime_seconds", "runtime.parent_budget"),
+        )
+        for field, expected_code in cases:
+            for invalid_value in (None, 0, -1, True, "60"):
+                with self.subTest(field=field, value=invalid_value):
+                    candidate = copy.deepcopy(self.document)
+                    if invalid_value is None:
+                        candidate["runtime"].pop(field)
+                    else:
+                        candidate["runtime"][field] = invalid_value
+                    result = validate_workflow_package(candidate)
+                    codes = {issue["code"] for issue in result["issues"]}
+                    self.assertFalse(result["safe_to_build"])
+                    self.assertIn(expected_code, codes)
+
+    def test_zero_runtime_budget_cannot_bypass_poll_duration_guard(self):
+        candidate = copy.deepcopy(self.document)
+        candidate["runtime"]["max_parent_runtime_seconds"] = 0
+        dry_run = next(item for item in candidate["workflows"] if item["id"] == "start_dry_run")
+        poll = next(item for item in dry_run["steps"] if item["activity"] == "bounded_poll")
+        poll["max_attempts"] = 100
+        poll["interval_seconds"] = 60
+        result = validate_workflow_package(candidate)
+        codes = {issue["code"] for issue in result["issues"]}
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn("runtime.parent_budget", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

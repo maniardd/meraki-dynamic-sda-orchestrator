@@ -248,8 +248,35 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             ),
         )
 
-    request_timeout = int(runtime.get("request_timeout_seconds", 0) or 0)
-    max_parent_runtime = int(runtime.get("max_parent_runtime_seconds", 0) or 0)
+    request_timeout_value = runtime.get("request_timeout_seconds")
+    request_timeout_valid = (
+        isinstance(request_timeout_value, int)
+        and not isinstance(request_timeout_value, bool)
+        and request_timeout_value > 0
+    )
+    if not request_timeout_valid:
+        _issue(
+            issues,
+            "runtime.request_timeout",
+            "$.runtime.request_timeout_seconds",
+            "Request timeout must be a positive integer",
+        )
+    request_timeout = request_timeout_value if request_timeout_valid else 0
+
+    max_parent_runtime_value = runtime.get("max_parent_runtime_seconds")
+    max_parent_runtime_valid = (
+        isinstance(max_parent_runtime_value, int)
+        and not isinstance(max_parent_runtime_value, bool)
+        and max_parent_runtime_value > 0
+    )
+    if not max_parent_runtime_valid:
+        _issue(
+            issues,
+            "runtime.parent_budget",
+            "$.runtime.max_parent_runtime_seconds",
+            "Parent runtime budget must be a positive integer",
+        )
+    max_parent_runtime = max_parent_runtime_value if max_parent_runtime_valid else 0
     for workflow_id, workflow in workflows.items():
         workflow_path = "$.workflows[{}]".format(workflow_id)
         if not str(workflow.get("description", "")).strip():
@@ -342,7 +369,11 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
                         step_path,
                         "Polling must use 1-100 attempts and a 5-60 second interval",
                     )
-                if max_parent_runtime and attempts * (interval + request_timeout) > max_parent_runtime:
+                if (
+                    request_timeout_valid
+                    and max_parent_runtime_valid
+                    and attempts * (interval + request_timeout) > max_parent_runtime
+                ):
                     _issue(
                         issues,
                         "poll.runtime",
