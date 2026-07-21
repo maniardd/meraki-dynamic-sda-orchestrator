@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Mapping
 
 from .parsers import (
     GateResult,
+    verify_config_lines_absent,
     verify_bgp_neighbors,
     verify_exact_config_lines,
     verify_isis_neighbors,
@@ -23,8 +24,39 @@ from .parsers import (
 )
 
 
-def build_gate_plan(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
+def build_gate_plan(
+    intent: Mapping[str, Any], artifact: Mapping[str, Any] | None = None
+) -> List[Dict[str, Any]]:
     gates: List[Dict[str, Any]] = []
+    if artifact is not None:
+        reconciliation = artifact.get("reconciliation") or {}
+        active_device_ids = {
+            str(item["id"])
+            for item in list(intent.get("devices", []))
+            + list(intent.get("fusion_nodes", []))
+        }
+        for device_id, device in sorted(
+            reconciliation.get("devices", {}).items()
+        ):
+            if str(device_id) not in active_device_ids:
+                descriptor = device.get("device") or {}
+                gates.append(
+                    {
+                        "gate_id": "precheck.version.{}".format(device_id),
+                        "phase_id": "precheck",
+                        "device_id": str(device_id),
+                        "command": "show version",
+                        "evaluator": "ios_xe_version",
+                        "expected": {
+                            "version": str(descriptor["software_version"])
+                        },
+                        "blocking": True,
+                    }
+                )
+            for gate in device.get("gates", []):
+                if str(gate.get("device_id")) != str(device_id):
+                    raise ValueError("Reconciliation gate device identity mismatch")
+                gates.append(dict(gate))
     incident_links: Dict[str, int] = {str(device["id"]): 0 for device in intent["devices"]}
     for link in intent.get("links", []):
         for endpoint in link["endpoints"]:
@@ -658,6 +690,8 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
         )
     if evaluator == "exact_config_lines":
         return verify_exact_config_lines(output, list(expected["lines"]))
+    if evaluator == "config_lines_absent":
+        return verify_config_lines_absent(output, list(expected["lines"]))
     if evaluator == "pim_interfaces":
         return verify_pim_interfaces(output, list(expected["interfaces"]))
     if evaluator == "msdp_peers":

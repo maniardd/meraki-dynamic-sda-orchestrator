@@ -904,7 +904,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
                 "lisp_pubsub.hardware_acceptance_pending",
                 "shared_services.hardware_acceptance_pending",
                 "multicast.hardware_acceptance_pending",
-                "multicast.reconciliation_pending",
+                "multicast.reconciliation_baseline_missing",
                 "policy_plane.hardware_api_acceptance_pending",
             },
             blocker_codes,
@@ -1210,7 +1210,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         native_codes = {
             item["code"] for item in native_artifact["blocking_requirements"]
         }
-        self.assertIn("multicast.reconciliation_pending", native_codes)
+        self.assertIn("multicast.reconciliation_baseline_missing", native_codes)
 
         disabled = copy.deepcopy(intent)
         disabled["fabric"]["multicast"].update(
@@ -1234,7 +1234,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
         disabled_codes = {
             item["code"] for item in disabled_artifact["blocking_requirements"]
         }
-        self.assertIn("multicast.reconciliation_pending", disabled_codes)
+        self.assertIn("multicast.reconciliation_baseline_missing", disabled_codes)
         self.assertNotIn("multicast.hardware_acceptance_pending", disabled_codes)
 
         flipped_requirements = copy.deepcopy(self.requirements)
@@ -1271,7 +1271,7 @@ class COP29ScaleAcceptanceTests(unittest.TestCase):
             flipped_intent, create_plan(flipped_intent)
         )
         self.assertIn(
-            "multicast.reconciliation_pending",
+            "multicast.reconciliation_baseline_missing",
             {
                 item["code"]
                 for item in flipped_artifact["blocking_requirements"]

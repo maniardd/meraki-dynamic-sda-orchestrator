@@ -10,6 +10,10 @@ import re
 from ipaddress import ip_address, ip_network
 from typing import Any, Dict, List, Mapping, Sequence
 
+from .reconciliation import (
+    build_multicast_owned_state,
+    build_multicast_reconciliation,
+)
 from .store import sha256_json
 
 
@@ -1270,6 +1274,20 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
     if str(plan["intent_hash"]) != sha256_json(intent):
         raise RenderError("Plan intent hash does not match the supplied intent")
 
+    current_owned_state = build_multicast_owned_state(intent)
+    reconciliation = build_multicast_reconciliation(
+        plan.get("reconciliation_baseline"), current_owned_state
+    )
+    planned_reconciliation = plan.get("reconciliation") or {}
+    if str(planned_reconciliation.get("status")) != str(reconciliation["status"]):
+        raise RenderError("Plan reconciliation status does not match the supplied baseline")
+    if planned_reconciliation.get("baseline_hash") != reconciliation.get("baseline_hash"):
+        raise RenderError("Plan reconciliation baseline hash does not match")
+    if planned_reconciliation.get("reconciliation_hash") != reconciliation.get(
+        "reconciliation_hash"
+    ):
+        raise RenderError("Plan reconciliation delta hash does not match")
+
     artifacts: Dict[str, Any] = {}
     blockers: List[Dict[str, str]] = []
     handoff = intent.get("border_handoff") or {}
@@ -1295,11 +1313,22 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
             }
         )
     multicast = intent.get("multicast") or {}
-    if str(intent.get("schema_version")) == "1.2" and "multicast" in intent:
+    if (
+        str(intent.get("schema_version")) == "1.2"
+        and "multicast" in intent
+        and reconciliation["status"] != "ready"
+    ):
         blockers.append(
             {
-                "code": "multicast.reconciliation_pending",
-                "message": "Multicast apply remains disabled until the last committed owned-state manifest is diffed and stale ACL, RP/SSM, loopback, LISP, MSDP, and BUM configuration is deterministically removed",
+                "code": "multicast.reconciliation_baseline_missing",
+                "message": "Multicast apply remains disabled until a last-successful-apply or independently approved discovery baseline is bound to the plan",
+            }
+        )
+    if reconciliation.get("stale_resource_count", 0):
+        blockers.append(
+            {
+                "code": "multicast.reconciliation_hardware_acceptance_pending",
+                "message": "Owned-state pruning is deterministic and rollback-bound but its removal commands and absence gates await compatible IOS XE hardware acceptance",
             }
         )
     if multicast.get("enabled") and multicast.get("transport") == "native":
@@ -1326,9 +1355,20 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
 
     for device in sorted(intent["devices"], key=lambda item: str(item["id"])):
         roles = set(device.get("roles", []))
-        phases: List[Dict[str, Any]] = [
+        phases: List[Dict[str, Any]] = []
+        reconciliation_device = reconciliation.get("devices", {}).get(
+            str(device["id"])
+        )
+        if reconciliation_device:
+            phases.append(
+                {
+                    "phase_id": "multicast_reconciliation",
+                    "blocks": list(reconciliation_device["blocks"]),
+                }
+            )
+        phases.append(
             {"phase_id": "underlay", "blocks": _underlay_blocks(intent, device)}
-        ]
+        )
         if "control_plane" in roles:
             phases.append(
                 {
@@ -1377,7 +1417,18 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
 
     for fusion in sorted(intent.get("fusion_nodes", []), key=lambda item: str(item["id"])):
         fusion_multicast_blocks = _fusion_multicast_blocks(intent, fusion)
-        fusion_phases = [
+        fusion_phases = []
+        reconciliation_device = reconciliation.get("devices", {}).get(
+            str(fusion["id"])
+        )
+        if reconciliation_device:
+            fusion_phases.append(
+                {
+                    "phase_id": "multicast_reconciliation",
+                    "blocks": list(reconciliation_device["blocks"]),
+                }
+            )
+        fusion_phases.extend([
             {
                 "phase_id": "border_handoff",
                 "blocks": _fusion_handoff_blocks(intent, fusion),
@@ -1386,7 +1437,7 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
                 "phase_id": "shared_services",
                 "blocks": _fusion_shared_service_blocks(intent, fusion),
             },
-        ]
+        ])
         if fusion_multicast_blocks:
             fusion_phases.append(
                 {"phase_id": "multicast", "blocks": fusion_multicast_blocks}
@@ -1399,6 +1450,28 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
             "phases": fusion_phases,
         }
 
+    current_device_ids = set(artifacts)
+    for device_id, reconcile_device in sorted(
+        reconciliation.get("devices", {}).items()
+    ):
+        if device_id in current_device_ids:
+            continue
+        descriptor = reconcile_device["device"]
+        artifacts[device_id] = {
+            "hostname": str(descriptor["hostname"]),
+            "platform": str(descriptor["platform"]),
+            "software_version": str(descriptor["software_version"]),
+            "roles": sorted(set(descriptor.get("roles", []))),
+            "retired_target": True,
+            "device_descriptor": dict(descriptor),
+            "phases": [
+                {
+                    "phase_id": "multicast_reconciliation",
+                    "blocks": list(reconcile_device["blocks"]),
+                }
+            ],
+        }
+
     body = {
         "artifact_schema_version": "1.0",
         "intent_schema_version": str(intent["schema_version"]),
@@ -1407,6 +1480,8 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
         "intent_hash": str(plan["intent_hash"]),
         "fabric_id": str(intent["fabric"]["id"]),
         "devices": artifacts,
+        "owned_state": current_owned_state,
+        "reconciliation": reconciliation,
         "external_systems": {},
         "blocking_requirements": blockers,
         "contains_secret_values": False,

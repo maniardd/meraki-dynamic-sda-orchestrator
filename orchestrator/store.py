@@ -229,6 +229,22 @@ CREATE TABLE IF NOT EXISTS scalar_allocations (
 
 CREATE INDEX IF NOT EXISTS scalar_allocations_active_idx
     ON scalar_allocations(allocation_domain, resource_type, state, value);
+
+CREATE TABLE IF NOT EXISTS owned_state_manifests (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    fabric_id TEXT NOT NULL,
+    manifest_hash TEXT NOT NULL,
+    source_type TEXT NOT NULL CHECK(source_type IN ('successful_apply','adopted_discovery')),
+    source_reference TEXT NOT NULL UNIQUE,
+    source_artifact_hash TEXT,
+    evidence_hash TEXT,
+    manifest_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS owned_state_fabric_idx
+    ON owned_state_manifests(fabric_id, sequence DESC);
 """
 
 
@@ -1000,6 +1016,189 @@ class StateStore:
                     "from": current,
                     "to": new_status,
                     "detail": dict(detail or {}),
+                },
+            )
+            updated = connection.execute(
+                "SELECT * FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            return dict(updated)
+
+    def latest_owned_state(self, fabric_id: str) -> Optional[Dict[str, Any]]:
+        """Return the immutable baseline from the newest committed ownership ledger."""
+
+        with self.connection() as connection:
+            row = connection.execute(
+                """SELECT * FROM owned_state_manifests
+                   WHERE fabric_id = ? ORDER BY sequence DESC LIMIT 1""",
+                (fabric_id,),
+            ).fetchone()
+        if not row:
+            return None
+        from .reconciliation import make_baseline
+
+        manifest = decode_json(row["manifest_json"])
+        return make_baseline(
+            manifest=manifest,
+            source_type=str(row["source_type"]),
+            source_reference=str(row["source_reference"]),
+            source_artifact_hash=(
+                str(row["source_artifact_hash"])
+                if row["source_artifact_hash"]
+                else None
+            ),
+            evidence_hash=str(row["evidence_hash"]) if row["evidence_hash"] else None,
+        )
+
+    def record_adopted_owned_state(
+        self,
+        fabric_id: str,
+        manifest: Mapping[str, Any],
+        evidence_hash: str,
+        change_reference: str,
+        discovered_by: str,
+        approver: str,
+    ) -> Dict[str, Any]:
+        """Seed a baseline after independent discovery and dual-control approval."""
+
+        from .reconciliation import validate_owned_state
+
+        validate_owned_state(manifest, fabric_id)
+        if (
+            not isinstance(evidence_hash, str)
+            or len(evidence_hash) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in evidence_hash)
+        ):
+            raise ValueError("evidence_hash must be a SHA-256 hex digest")
+        if not change_reference.strip():
+            raise ValueError("change_reference is required")
+        if not discovered_by.strip() or not approver.strip():
+            raise ValueError("discovered_by and approver are required")
+        if discovered_by.strip() == approver.strip():
+            raise ConflictError("Baseline discovery and approval require different actors")
+        source_reference = "adoption:{}:{}".format(
+            change_reference.strip(), str(manifest["manifest_hash"])
+        )
+        with self.transaction() as connection:
+            existing = connection.execute(
+                "SELECT * FROM owned_state_manifests WHERE source_reference = ?",
+                (source_reference,),
+            ).fetchone()
+            if existing:
+                if str(existing["manifest_hash"]) != str(manifest["manifest_hash"]):
+                    raise ConflictError("Adoption reference is bound to another manifest")
+            else:
+                created_at = isoformat()
+                connection.execute(
+                    """INSERT INTO owned_state_manifests
+                       (fabric_id, manifest_hash, source_type, source_reference,
+                        source_artifact_hash, evidence_hash, manifest_json,
+                        created_at, created_by)
+                       VALUES (?, ?, 'adopted_discovery', ?, NULL, ?, ?, ?, ?)""",
+                    (
+                        fabric_id,
+                        str(manifest["manifest_hash"]),
+                        source_reference,
+                        evidence_hash,
+                        canonical_json(manifest),
+                        created_at,
+                        approver.strip(),
+                    ),
+                )
+                self._append_audit(
+                    connection,
+                    "fabric",
+                    fabric_id,
+                    "owned_state.adopted",
+                    approver.strip(),
+                    {
+                        "manifest_hash": str(manifest["manifest_hash"]),
+                        "evidence_hash": evidence_hash,
+                        "change_reference": change_reference.strip(),
+                        "discovered_by": discovered_by.strip(),
+                    },
+                )
+        baseline = self.latest_owned_state(fabric_id)
+        if baseline is None:
+            raise StoreError("Adopted owned-state baseline was not persisted")
+        return baseline
+
+    def complete_apply(
+        self,
+        run_id: str,
+        artifact_hash: str,
+        owned_state: Mapping[str, Any],
+        actor: str,
+        detail: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Atomically commit apply success and its resulting owned-state manifest."""
+
+        from .reconciliation import validate_owned_state
+
+        validate_owned_state(owned_state)
+        if not isinstance(artifact_hash, str) or len(artifact_hash) != 64:
+            raise ValueError("artifact_hash must be a SHA-256 hex digest")
+        with self.transaction() as connection:
+            run = connection.execute(
+                "SELECT * FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if not run:
+                raise NotFoundError("Run not found")
+            if str(run["status"]) != "apply_running":
+                raise ConflictError("Run is not active for apply completion")
+            if str(run["artifact_hash"]) != artifact_hash:
+                raise ConflictError("Owned-state commit artifact hash does not match run")
+            if str(run["fabric_id"]) != str(owned_state["fabric_id"]):
+                raise ConflictError("Owned-state manifest belongs to another fabric")
+            existing = connection.execute(
+                "SELECT * FROM owned_state_manifests WHERE source_reference = ?",
+                (run_id,),
+            ).fetchone()
+            if existing:
+                raise ConflictError("Run already committed an owned-state manifest")
+            updated_at = isoformat()
+            connection.execute(
+                """INSERT INTO owned_state_manifests
+                   (fabric_id, manifest_hash, source_type, source_reference,
+                    source_artifact_hash, evidence_hash, manifest_json,
+                    created_at, created_by)
+                   VALUES (?, ?, 'successful_apply', ?, ?, NULL, ?, ?, ?)""",
+                (
+                    str(run["fabric_id"]),
+                    str(owned_state["manifest_hash"]),
+                    run_id,
+                    artifact_hash,
+                    canonical_json(owned_state),
+                    updated_at,
+                    actor,
+                ),
+            )
+            connection.execute(
+                "UPDATE runs SET status = 'apply_succeeded', updated_at = ? WHERE run_id = ?",
+                (updated_at, run_id),
+            )
+            connection.execute("DELETE FROM fabric_locks WHERE run_id = ?", (run_id,))
+            self._append_audit(
+                connection,
+                "run",
+                run_id,
+                "run.status_changed",
+                actor,
+                {
+                    "from": "apply_running",
+                    "to": "apply_succeeded",
+                    "detail": dict(detail or {}),
+                },
+            )
+            self._append_audit(
+                connection,
+                "fabric",
+                str(run["fabric_id"]),
+                "owned_state.committed",
+                actor,
+                {
+                    "run_id": run_id,
+                    "artifact_hash": artifact_hash,
+                    "manifest_hash": str(owned_state["manifest_hash"]),
                 },
             )
             updated = connection.execute(

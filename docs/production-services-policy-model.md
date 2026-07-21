@@ -77,8 +77,10 @@ Apply remains disabled for the following deliberately visible blockers:
 - `shared_services.hardware_acceptance_pending`
 - `multicast.hardware_acceptance_pending` for native transport, or
   `multicast.head_end_replication_renderer_pending` for head-end replication
-- `multicast.reconciliation_pending` until prior owned multicast state is
-  diffed and stale configuration removal is proven
+- `multicast.reconciliation_baseline_missing` until a prior owned multicast
+  state is approval-bound, or
+  `multicast.reconciliation_hardware_acceptance_pending` when a rendered stale
+  removal delta still awaits hardware proof
 - `policy_plane.hardware_api_acceptance_pending`
 
 Each blocker is removed only after its release-specific renderer, rollback,

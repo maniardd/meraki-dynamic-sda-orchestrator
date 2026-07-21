@@ -150,3 +150,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS scalar_allocations_active_unique
 
 CREATE INDEX IF NOT EXISTS scalar_allocations_active_idx
     ON scalar_allocations(allocation_domain, resource_type, state, value);
+
+CREATE TABLE IF NOT EXISTS owned_state_manifests (
+    sequence BIGSERIAL PRIMARY KEY,
+    fabric_id TEXT NOT NULL,
+    manifest_hash TEXT NOT NULL,
+    source_type TEXT NOT NULL CHECK (
+        source_type IN ('successful_apply','adopted_discovery')
+    ),
+    source_reference TEXT NOT NULL UNIQUE,
+    source_artifact_hash TEXT,
+    evidence_hash TEXT,
+    manifest_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    created_by TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS owned_state_fabric_idx
+    ON owned_state_manifests(fabric_id, sequence DESC);

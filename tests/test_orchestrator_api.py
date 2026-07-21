@@ -7,6 +7,7 @@ from pathlib import Path
 from orchestrator.api import create_app
 from orchestrator.auth import token_sha256
 from orchestrator.intent import load_intent
+from orchestrator.reconciliation import build_multicast_owned_state
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,64 @@ class OrchestratorApiTests(unittest.TestCase):
         self.assertEqual(first_plan["plan_hash"], second_plan["plan_hash"])
         self.assertFalse(first_plan["safety"]["executable"])
         self.assertTrue(first_plan["safety"]["requires_approval"])
+
+    def test_approver_can_adopt_a_dual_control_owned_state_baseline(self):
+        token = "owned-state-approver-token-value-0001"
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(token): {
+                        "actor": "baseline-approver",
+                        "roles": ["approver", "planner", "viewer"],
+                    }
+                },
+                "ORCHESTRATOR_DATABASE_PATH": ":memory:",
+            }
+        )
+        client = app.test_client()
+        headers = {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        }
+        manifest = build_multicast_owned_state(self.intent)
+        response = client.post(
+            "/v1/fabrics/{}/owned-state-baselines".format(
+                self.intent["fabric"]["id"]
+            ),
+            headers=headers,
+            json={
+                "manifest": manifest,
+                "evidence_hash": "d" * 64,
+                "change_reference": "CHG-BASELINE-API",
+                "discovered_by": "discovery-operator",
+            },
+        )
+        self.assertEqual(201, response.status_code, response.get_json())
+        self.assertEqual("adopted_discovery", response.get_json()["source_type"])
+        fetched = client.get(
+            "/v1/fabrics/{}/owned-state-baseline".format(
+                self.intent["fabric"]["id"]
+            ),
+            headers=headers,
+        )
+        self.assertEqual(200, fetched.status_code, fetched.get_json())
+        self.assertEqual(
+            manifest["manifest_hash"], fetched.get_json()["manifest_hash"]
+        )
+        workflow_fetched = client.post(
+            "/v1/workflow-actions/owned-state-baseline",
+            headers=headers,
+            json={"fabric_id": self.intent["fabric"]["id"]},
+        )
+        self.assertEqual(200, workflow_fetched.status_code)
+        self.assertEqual("available", workflow_fetched.get_json()["status"])
+        planned = client.post("/v1/plans", headers=headers, json=self.intent)
+        self.assertEqual(201, planned.status_code, planned.get_json())
+        self.assertEqual(
+            response.get_json()["baseline_hash"],
+            planned.get_json()["reconciliation_baseline"]["baseline_hash"],
+        )
 
 
 if __name__ == "__main__":
