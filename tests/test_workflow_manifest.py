@@ -26,7 +26,10 @@ class WorkflowManifestTests(unittest.TestCase):
 
     def test_operations_use_versioned_api_and_known_roles(self):
         roles = {item["role"] for item in self.manifest["targets"]}
-        for operation in self.manifest["api_operations"]:
+        operations = self.manifest["api_operations"]
+        if isinstance(operations, dict):
+            operations = operations.values()
+        for operation in operations:
             self.assertTrue(operation["path"].startswith("/v1/"))
             self.assertIn(operation["role"], roles)
 

@@ -1,0 +1,26 @@
+schema_version: "1.0"
+environment: lab
+
+# Names only. Create the four HTTP Endpoint targets and account keys directly
+# in Meraki Dashboard; never commit their URL, token, or certificate material.
+target_bindings:
+  target://sda-orchestrator/planner:
+    meraki_target_name: SDA Orchestrator - Planner
+    account_key_name: SDA Orchestrator - Planner Key
+  target://sda-orchestrator/approver:
+    meraki_target_name: SDA Orchestrator - Approver
+    account_key_name: SDA Orchestrator - Approver Key
+  target://sda-orchestrator/operator:
+    meraki_target_name: SDA Orchestrator - Operator
+    account_key_name: SDA Orchestrator - Operator Key
+  target://sda-orchestrator/auditor:
+    meraki_target_name: SDA Orchestrator - Auditor
+    account_key_name: SDA Orchestrator - Auditor Key
+
+approval_assignment:
+  strategy: meraki_role
+  role: organization_administrator
+
+notifications:
+  enabled: false
+  recipients: []
