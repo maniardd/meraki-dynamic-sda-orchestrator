@@ -508,6 +508,15 @@ _DEVICE_DESCRIPTOR_FIELDS = {
     "credential_ref",
     "bgp_asn",
 }
+_REQUIRED_DEVICE_DESCRIPTOR_FIELDS = {
+    "id",
+    "hostname",
+    "platform",
+    "software_version",
+    "management_ip",
+    "roles",
+    "credential_ref",
+}
 _SAFE_SHOW_COMMAND = re.compile(r"^[A-Za-z0-9 ._:/|^$-]+$")
 
 
@@ -551,8 +560,34 @@ def validate_owned_state(manifest: Mapping[str, Any], fabric_id: Optional[str] =
         unexpected_descriptor_fields = set(descriptor) - _DEVICE_DESCRIPTOR_FIELDS
         if unexpected_descriptor_fields:
             raise ReconciliationError("Owned-state device descriptor has unsupported fields")
+        missing_descriptor_fields = _REQUIRED_DEVICE_DESCRIPTOR_FIELDS - set(descriptor)
+        if missing_descriptor_fields:
+            raise ReconciliationError(
+                "Owned-state device descriptor is missing required fields: {}".format(
+                    ", ".join(sorted(missing_descriptor_fields))
+                )
+            )
+        for field in (
+            "id",
+            "hostname",
+            "platform",
+            "software_version",
+            "management_ip",
+        ):
+            value = descriptor[field]
+            if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
+                raise ReconciliationError(
+                    "Owned-state device descriptor field {} is invalid".format(field)
+                )
+        roles = descriptor["roles"]
+        if (
+            not isinstance(roles, list)
+            or not roles
+            or any(not isinstance(role, str) or not role for role in roles)
+        ):
+            raise ReconciliationError("Owned-state device roles are invalid")
         credential_ref = str(descriptor.get("credential_ref", ""))
-        if credential_ref and not credential_ref.startswith("secret://"):
+        if not credential_ref.startswith("secret://"):
             raise ReconciliationError("Owned-state device credential must be a secret reference")
         keys = []
         for item in device["resources"]:

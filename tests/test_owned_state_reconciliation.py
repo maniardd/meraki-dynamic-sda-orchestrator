@@ -207,6 +207,37 @@ class OwnedStateReconciliationTests(unittest.TestCase):
                 baseline, build_multicast_owned_state(self.intent)
             )
 
+    def test_retired_device_baseline_requires_every_consumed_descriptor_field(self):
+        current = build_multicast_owned_state(self.disabled_intent())
+        for missing_field in (
+            "hostname",
+            "platform",
+            "software_version",
+            "management_ip",
+            "credential_ref",
+        ):
+            with self.subTest(missing_field=missing_field):
+                baseline = copy.deepcopy(self.baseline())
+                first_device = next(
+                    iter(baseline["manifest"]["devices"].values())
+                )
+                first_device["device"].pop(missing_field)
+                manifest_body = dict(baseline["manifest"])
+                manifest_body.pop("manifest_hash")
+                baseline["manifest"]["manifest_hash"] = sha256_json(
+                    manifest_body
+                )
+                baseline["manifest_hash"] = baseline["manifest"][
+                    "manifest_hash"
+                ]
+                baseline_body = dict(baseline)
+                baseline_body.pop("baseline_hash")
+                baseline["baseline_hash"] = sha256_json(baseline_body)
+                with self.assertRaisesRegex(
+                    ReconciliationError, "missing required fields"
+                ):
+                    build_multicast_reconciliation(baseline, current)
+
     def test_absence_parser_fails_on_exact_stale_line_only(self):
         forbidden = ["ip pim vrf MEDIA_VN ssm range SDA-MCAST-OLD"]
         self.assertTrue(verify_config_lines_absent("ip routing", forbidden).passed)
