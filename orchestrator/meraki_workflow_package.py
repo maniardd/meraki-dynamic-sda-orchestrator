@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
@@ -244,6 +245,94 @@ EXPECTED_NATIVE_SERIALIZATION_TOPOLOGY = {
         "unique_name_prefix": "variable_workflow_",
         "wrapper_keys": sorted(EXPECTED_NATIVE_VARIABLE_KEYS),
         "property_keys": sorted(EXPECTED_NATIVE_VARIABLE_PROPERTY_KEYS),
+    },
+}
+EXPECTED_NATIVE_ASSEMBLY_CONTRACT = {
+    "contract_version": "1.0",
+    "tenant_identifier_policy": "tenant_generated_only",
+    "compiler_emits_importable_json": False,
+    "portable_activity_recipes": {
+        "approval_task_rule": {
+            "kind": "composite",
+            "native_sequence": ["condition"],
+            "supporting_activities": ["condition_branch", "completed"],
+            "invariants": [
+                "approval_decision_exact_match",
+                "rejected_expired_or_cancelled_terminates",
+            ],
+        },
+        "bounded_poll": {
+            "kind": "composite",
+            "native_sequence": ["set_variables", "while_loop"],
+            "loop_body_sequence": [
+                "http_request",
+                "condition",
+                "sleep",
+                "set_variables",
+            ],
+            "supporting_activities": ["condition_branch", "completed"],
+            "invariants": [
+                "attempt_counter_bounded",
+                "terminal_status_exact_match",
+                "http_error_branch_immediate",
+                "sleep_only_after_non_terminal_status",
+            ],
+        },
+        "build_json": {
+            "kind": "composite",
+            "native_sequence": ["parse_json", "set_variables"],
+            "invariants": [
+                "input_json_parsed_before_use",
+                "fixed_request_body_template",
+                "no_quoted_user_controlled_interpolation",
+                "payload_substitution_acceptance_required",
+            ],
+        },
+        "child_workflow": {
+            "kind": "direct",
+            "native_sequence": ["child_workflow"],
+        },
+        "condition": {
+            "kind": "composite",
+            "native_sequence": ["condition"],
+            "supporting_activities": ["condition_branch", "completed"],
+            "invariants": ["exact_rule_match", "explicit_terminal_branch"],
+        },
+        "create_prompt": {
+            "kind": "direct",
+            "native_sequence": ["create_prompt"],
+        },
+        "http_request": {
+            "kind": "direct",
+            "native_sequence": ["http_request"],
+            "invariants": [
+                "fixed_relative_v1_path",
+                "redirects_disabled",
+                "immediate_http_status_branch",
+            ],
+        },
+        "json_path_extract": {
+            "kind": "alias",
+            "native_sequence": ["json_path_query"],
+            "invariants": ["declared_output_contract_only"],
+        },
+        "request_approval": {
+            "kind": "direct",
+            "native_sequence": ["request_approval"],
+            "invariants": [
+                "minimum_one_approval",
+                "comment_and_acknowledgement_required",
+                "expiry_required_for_execution_modes",
+            ],
+        },
+        "result_summary": {
+            "kind": "alias",
+            "native_sequence": ["create_prompt"],
+            "invariants": [
+                "wait_for_prompt_response_false",
+                "secret_and_raw_configuration_outputs_forbidden",
+            ],
+        },
     },
 }
 
@@ -531,6 +620,38 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.native_serialization.serialization_topology",
             "Native condition nesting and child-workflow dependency serialization must match the capture",
         )
+
+    native_assembly = document.get("native_assembly") or {}
+    if native_assembly != EXPECTED_NATIVE_ASSEMBLY_CONTRACT:
+        _issue(
+            issues,
+            "native.assembly_contract",
+            "$.native_assembly",
+            "Portable-to-native assembly recipes must match the reviewed contract",
+        )
+    else:
+        recipes = native_assembly["portable_activity_recipes"]
+        if set(recipes) != ALLOWED_ACTIVITIES:
+            _issue(
+                issues,
+                "native.assembly_coverage",
+                "$.native_assembly.portable_activity_recipes",
+                "Every portable workflow activity requires exactly one native recipe",
+            )
+        captured_primitives = set(EXPECTED_NATIVE_ACTIVITY_TYPES)
+        for portable_name, recipe in recipes.items():
+            referenced = set(recipe.get("native_sequence") or [])
+            referenced.update(recipe.get("loop_body_sequence") or [])
+            referenced.update(recipe.get("supporting_activities") or [])
+            if not referenced or not referenced.issubset(captured_primitives):
+                _issue(
+                    issues,
+                    "native.assembly_primitive",
+                    "$.native_assembly.portable_activity_recipes.{}".format(
+                        portable_name
+                    ),
+                    "Native recipe references an uncaptured or empty primitive set",
+                )
 
     targets = document.get("targets") or []
     role_to_target: Dict[str, Mapping[str, Any]] = {}
@@ -894,11 +1015,16 @@ def compile_workflow_build_plan(document: Mapping[str, Any]) -> Dict[str, Any]:
         raise ValueError("Invalid Meraki workflow package")
     operations = document["api_operations"]
     targets = {item["role"]: item for item in document["targets"]}
+    native_assembly = document["native_assembly"]
+    native_recipes = native_assembly["portable_activity_recipes"]
     compiled: List[Dict[str, Any]] = []
     for workflow in document["workflows"]:
         steps: List[Dict[str, Any]] = []
         for source in workflow.get("steps", []):
             step = dict(source)
+            step["native_implementation"] = deepcopy(
+                native_recipes[step["activity"]]
+            )
             if step.get("activity") in {"http_request", "bounded_poll"}:
                 operation = dict(operations[step["operation"]])
                 role = operation["role"]
@@ -932,6 +1058,7 @@ def compile_workflow_build_plan(document: Mapping[str, Any]) -> Dict[str, Any]:
         "manifest_hash": validation["manifest_hash"],
         "native_export_required": True,
         "credentials_included": False,
+        "native_assembly": deepcopy(native_assembly),
         "native_serialization": {
             "capture_export_sha256": document["native_serialization"]["capture_export_sha256"],
             "configured_properties_complete": document["native_serialization"].get(
