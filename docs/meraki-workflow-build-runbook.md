@@ -45,16 +45,18 @@ invented.
 capture. The root-only export was generated without running or validating the
 workflow, with every activity marked `skip_execution`, no workflow target, and
 no Account Key. Its canonical export hash is
-`0550cc91613a5d8d91b1e81d0e9c9670c1dea5b259de2d7592f49d35054bf4aa`.
-The secret-safe auditor reports one workflow, nine native actions, zero errors,
+`efb6d7806a1ad26447cafbfeb5c3cabd85f2c01ae9ec5b06547eaa3743ba1187`.
+The secret-safe auditor reports one workflow, fifteen native actions, zero errors,
 no Python activity, and no embedded child-workflow internals.
 
 The capture pins the configured property-key shapes for
 `web-service.http_request`, `task.prompt_request`,
 `task.request_approval`, `logic.if_else`, `logic.condition_block`,
-`logic.completed`, and `workflow.sub_workflow`. It also pins the native
-`blocks`/`actions` condition nesting and the root `dependent_workflows`
-reference used by a child-workflow invocation. Only the secret-free structural
+`logic.completed`, `workflow.sub_workflow`, `logic.while`,
+`core.set_multiple_variables`, `core.sleep`, `core.parsejson`, and
+`corejava.jsonpathquery`. It also pins the native workflow-variable envelope,
+`blocks`/`actions` condition and loop nesting, and the root
+`dependent_workflows` reference used by a child-workflow invocation. Only the secret-free structural
 fingerprint is committed at
 `workflows/native/capture/activity-fingerprint.v1.json`; the tenant-specific
 raw export and all property values remain outside the repository.
@@ -91,6 +93,19 @@ Audit a newly exported native workflow without requiring the whole package:
 ```powershell
 python tools/audit_meraki_native_export.py --inventory-only path\to\export.json
 ```
+
+Verify the exact configured capture against the committed structural
+fingerprint before changing the compiler contract:
+
+```powershell
+python tools/audit_meraki_native_export.py `
+  --fingerprint workflows\native\capture\activity-fingerprint.v1.json `
+  path\to\SDA-Native-Activity-Capture.json
+```
+
+This binds the provenance hash, workflow/variable wrappers, native activity
+types, property-key sets, identifier prefixes, and root topology while still
+returning no property values.
 
 After all parent and child workflows are exported, validate the set against
 the portable manifest:

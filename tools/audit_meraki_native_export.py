@@ -18,6 +18,7 @@ from orchestrator.meraki_native_export import (
     audit_native_export,
     audit_native_export_set,
     load_native_export,
+    verify_capture_fingerprint,
 )
 from orchestrator.meraki_workflow_package import load_workflow_package
 
@@ -34,6 +35,11 @@ def main() -> int:
     parser.add_argument("exports", nargs="+", type=Path)
     parser.add_argument("--manifest", type=Path)
     parser.add_argument(
+        "--fingerprint",
+        type=Path,
+        help="Verify one raw schema capture against a structural-only fingerprint",
+    )
+    parser.add_argument(
         "--inventory-only",
         action="store_true",
         help="Inventory one or more exports without requiring the full workflow set",
@@ -41,7 +47,15 @@ def main() -> int:
     args = parser.parse_args()
 
     documents = [load_native_export(path) for path in args.exports]
-    if args.manifest and not args.inventory_only:
+    if args.fingerprint:
+        if len(documents) != 1:
+            parser.error("--fingerprint requires exactly one raw export")
+        fingerprint = json.loads(args.fingerprint.read_text(encoding="utf-8"))
+        if not isinstance(fingerprint, dict):
+            parser.error("fingerprint must be a JSON object")
+        result = verify_capture_fingerprint(documents[0], fingerprint)
+        valid = result["capture_fingerprint_valid"]
+    elif args.manifest and not args.inventory_only:
         manifest = load_workflow_package(args.manifest)
         expected_names = [item["name"] for item in manifest.get("workflows", [])]
         result = audit_native_export_set(

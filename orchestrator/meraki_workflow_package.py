@@ -45,15 +45,49 @@ EXPECTED_NATIVE_ACTIVITY_TYPES = {
     "completed": "logic.completed",
     "request_approval": "task.request_approval",
     "child_workflow": "workflow.sub_workflow",
+    "while_loop": "logic.while",
+    "set_variables": "core.set_multiple_variables",
+    "sleep": "core.sleep",
+    "parse_json": "core.parsejson",
+    "json_path_query": "corejava.jsonpathquery",
+}
+EXPECTED_NATIVE_EXPORT_TOP_LEVEL_KEYS = {"dependent_workflows", "workflow"}
+EXPECTED_NATIVE_WORKFLOW_TOP_LEVEL_KEYS = {
+    "actions",
+    "base_type",
+    "categories",
+    "name",
+    "object_type",
+    "properties",
+    "title",
+    "type",
+    "unique_name",
+    "variables",
 }
 EXPECTED_NATIVE_WORKFLOW_PROPERTY_KEYS = {
     "atomic",
     "delete_workflow_instance",
     "description",
     "display_name",
-    "owner",
     "runtime_user",
     "target",
+}
+EXPECTED_NATIVE_VARIABLE_KEYS = {
+    "object_type",
+    "properties",
+    "schema_id",
+    "unique_name",
+}
+EXPECTED_NATIVE_VARIABLE_PROPERTY_KEYS = {
+    "description",
+    "display_on_wizard",
+    "is_invisible",
+    "is_required",
+    "name",
+    "scope",
+    "type",
+    "value",
+    "variable_string_format",
 }
 EXPECTED_NATIVE_PROPERTY_KEYS = {
     "http_request": {
@@ -137,6 +171,45 @@ EXPECTED_NATIVE_PROPERTY_KEYS = {
         "workflow_id",
         "workflow_name",
     },
+    "while_loop": {
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution",
+    },
+    "set_variables": {
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution",
+        "variables_to_update",
+    },
+    "sleep": {
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution",
+        "sleep_interval",
+    },
+    "parse_json": {
+        "action_timeout",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "example_json",
+        "input_json",
+        "set_default_value",
+        "skip_execution",
+    },
+    "json_path_query": {
+        "action_timeout",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "input_json",
+        "jsonpath_queries",
+        "skip_execution",
+    },
 }
 EXPECTED_NATIVE_SERIALIZATION_TOPOLOGY = {
     "root_action_sequence": [
@@ -145,6 +218,11 @@ EXPECTED_NATIVE_SERIALIZATION_TOPOLOGY = {
         "condition",
         "request_approval",
         "child_workflow",
+        "while_loop",
+        "set_variables",
+        "sleep",
+        "parse_json",
+        "json_path_query",
     ],
     "condition": {
         "children_key": "blocks",
@@ -155,6 +233,17 @@ EXPECTED_NATIVE_SERIALIZATION_TOPOLOGY = {
     "child_workflow": {
         "dependency_key": "dependent_workflows",
         "embedded_workflows": False,
+    },
+    "while_loop": {
+        "children_key": "blocks",
+        "branch_activity": "condition_branch",
+    },
+    "workflow_variables": {
+        "collection_key": "variables",
+        "object_type": "variable_workflow",
+        "unique_name_prefix": "variable_workflow_",
+        "wrapper_keys": sorted(EXPECTED_NATIVE_VARIABLE_KEYS),
+        "property_keys": sorted(EXPECTED_NATIVE_VARIABLE_PROPERTY_KEYS),
     },
 }
 
@@ -296,6 +385,18 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.native_serialization.capture_export_sha256",
             "Native capture requires a lowercase SHA-256 provenance hash",
         )
+    export_top_level_keys = native_serialization.get("observed_export_top_level_keys")
+    if (
+        not isinstance(export_top_level_keys, list)
+        or any(not isinstance(key, str) or not key for key in export_top_level_keys)
+        or set(export_top_level_keys) != EXPECTED_NATIVE_EXPORT_TOP_LEVEL_KEYS
+    ):
+        _issue(
+            issues,
+            "native.export_top_level_keys",
+            "$.native_serialization.observed_export_top_level_keys",
+            "Native export top-level keys do not match the configured capture",
+        )
     native_workflow = native_serialization.get("workflow") or {}
     if not isinstance(native_workflow, Mapping):
         native_workflow = {}
@@ -319,6 +420,18 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.native_serialization.workflow.unique_name_prefix",
             "Native workflow identifier prefix must be definition_workflow_",
         )
+    workflow_top_level_keys = native_workflow.get("observed_top_level_keys")
+    if (
+        not isinstance(workflow_top_level_keys, list)
+        or any(not isinstance(key, str) or not key for key in workflow_top_level_keys)
+        or set(workflow_top_level_keys) != EXPECTED_NATIVE_WORKFLOW_TOP_LEVEL_KEYS
+    ):
+        _issue(
+            issues,
+            "native.workflow_top_level_keys",
+            "$.native_serialization.workflow.observed_top_level_keys",
+            "Native workflow top-level keys do not match the configured capture",
+        )
     workflow_property_keys = native_workflow.get("observed_property_keys")
     if (
         not isinstance(workflow_property_keys, list)
@@ -331,6 +444,45 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.native_serialization.workflow.observed_property_keys",
             "Configured native workflow property-key inventory does not match the captured schema",
         )
+    native_variable = native_workflow.get("variable") or {}
+    if not isinstance(native_variable, Mapping):
+        native_variable = {}
+    if native_variable.get("object_type") != "variable_workflow":
+        _issue(
+            issues,
+            "native.variable_object_type",
+            "$.native_serialization.workflow.variable.object_type",
+            "Workflow variables must use the captured variable_workflow object type",
+        )
+    if native_variable.get("unique_name_prefix") != "variable_workflow_":
+        _issue(
+            issues,
+            "native.variable_identifier",
+            "$.native_serialization.workflow.variable.unique_name_prefix",
+            "Workflow variable identifier prefix must be variable_workflow_",
+        )
+    for field, expected_keys, code in (
+        ("wrapper_keys", EXPECTED_NATIVE_VARIABLE_KEYS, "native.variable_wrapper_keys"),
+        (
+            "observed_property_keys",
+            EXPECTED_NATIVE_VARIABLE_PROPERTY_KEYS,
+            "native.variable_property_keys",
+        ),
+    ):
+        observed_variable_keys = native_variable.get(field)
+        if (
+            not isinstance(observed_variable_keys, list)
+            or any(
+                not isinstance(key, str) or not key for key in observed_variable_keys
+            )
+            or set(observed_variable_keys) != expected_keys
+        ):
+            _issue(
+                issues,
+                code,
+                "$.native_serialization.workflow.variable.{}".format(field),
+                "Workflow variable key inventory does not match the configured capture",
+            )
     native_activities = native_serialization.get("activities") or {}
     if not isinstance(native_activities, Mapping):
         native_activities = {}
@@ -785,10 +937,34 @@ def compile_workflow_build_plan(document: Mapping[str, Any]) -> Dict[str, Any]:
             "configured_properties_complete": document["native_serialization"].get(
                 "configured_properties_complete", False
             ),
+            "export_top_level_keys": sorted(
+                document["native_serialization"]["observed_export_top_level_keys"]
+            ),
             "workflow_type": document["native_serialization"]["workflow"]["type"],
+            "workflow_top_level_keys": sorted(
+                document["native_serialization"]["workflow"]["observed_top_level_keys"]
+            ),
             "workflow_property_keys": sorted(
                 document["native_serialization"]["workflow"]["observed_property_keys"]
             ),
+            "workflow_variable": {
+                "object_type": document["native_serialization"]["workflow"]["variable"][
+                    "object_type"
+                ],
+                "unique_name_prefix": document["native_serialization"]["workflow"][
+                    "variable"
+                ]["unique_name_prefix"],
+                "wrapper_keys": sorted(
+                    document["native_serialization"]["workflow"]["variable"][
+                        "wrapper_keys"
+                    ]
+                ),
+                "property_keys": sorted(
+                    document["native_serialization"]["workflow"]["variable"][
+                        "observed_property_keys"
+                    ]
+                ),
+            },
             "activity_types": {
                 name: item["type"]
                 for name, item in sorted(
