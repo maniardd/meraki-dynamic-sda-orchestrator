@@ -57,16 +57,27 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
     def test_genuine_native_activity_types_are_pinned_without_property_values(self):
         fingerprint = json.loads(NATIVE_FINGERPRINT.read_text(encoding="utf-8"))
         self.assertEqual(
-            "d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee",
+            "0550cc91613a5d8d91b1e81d0e9c9670c1dea5b259de2d7592f49d35054bf4aa",
             fingerprint["source"]["export_sha256"],
         )
         self.assertFalse(fingerprint["safety"]["contains_property_values"])
         self.assertFalse(fingerprint["safety"]["contains_credentials"])
         self.assertFalse(fingerprint["source"]["raw_export_committed"])
+        self.assertFalse(fingerprint["source"]["child_workflows_embedded"])
+        self.assertTrue(fingerprint["safety"]["configured_properties_complete"])
+        rendered_fingerprint = json.dumps(fingerprint)
+        self.assertNotIn("CAPTURE_ONLY", rendered_fingerprint)
+        self.assertNotIn("@cisco.com", rendered_fingerprint)
+        self.assertNotIn("/v1/workflow-actions/plan", rendered_fingerprint)
+        self.assertNotIn("started_by", rendered_fingerprint)
         expected = {
             "http_request": "web-service.http_request",
             "create_prompt": "task.prompt_request",
+            "condition": "logic.if_else",
+            "condition_branch": "logic.condition_block",
+            "completed": "logic.completed",
             "request_approval": "task.request_approval",
+            "child_workflow": "workflow.sub_workflow",
         }
         self.assertEqual(
             expected,
@@ -77,7 +88,22 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         )
         compiled = compile_workflow_build_plan(self.document)
         self.assertEqual(expected, compiled["native_serialization"]["activity_types"])
-        self.assertFalse(compiled["native_serialization"]["configured_properties_complete"])
+        self.assertTrue(compiled["native_serialization"]["configured_properties_complete"])
+        self.assertEqual(
+            fingerprint["serialization_topology"],
+            compiled["native_serialization"]["serialization_topology"],
+        )
+        self.assertEqual(
+            sorted(fingerprint["workflow"]["property_keys"]),
+            compiled["native_serialization"]["workflow_property_keys"],
+        )
+        self.assertEqual(
+            {
+                name: sorted(activity["property_keys"])
+                for name, activity in fingerprint["activities"].items()
+            },
+            compiled["native_serialization"]["activity_property_keys"],
+        )
 
     def test_native_serialization_metadata_fails_closed_when_tampered(self):
         cases = (
@@ -97,6 +123,34 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         result = validate_workflow_package(candidate)
         self.assertFalse(result["safe_to_build"])
         self.assertIn("native.activity_type", {item["code"] for item in result["issues"]})
+
+        candidate = copy.deepcopy(self.document)
+        candidate["native_serialization"]["configured_properties_complete"] = False
+        result = validate_workflow_package(candidate)
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn(
+            "native.configured_properties_incomplete",
+            {item["code"] for item in result["issues"]},
+        )
+
+        candidate = copy.deepcopy(self.document)
+        candidate["native_serialization"]["activities"]["create_prompt"][
+            "observed_property_keys"
+        ].remove("form_elements")
+        result = validate_workflow_package(candidate)
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn("native.property_keys", {item["code"] for item in result["issues"]})
+
+        candidate = copy.deepcopy(self.document)
+        candidate["native_serialization"]["serialization_topology"]["condition"][
+            "children_key"
+        ] = "invented"
+        result = validate_workflow_package(candidate)
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn(
+            "native.serialization_topology",
+            {item["code"] for item in result["issues"]},
+        )
 
     def test_apply_workflow_and_executable_steps_are_disabled(self):
         workflows = {item["id"]: item for item in self.document["workflows"]}

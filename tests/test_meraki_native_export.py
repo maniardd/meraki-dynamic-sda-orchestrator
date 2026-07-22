@@ -67,6 +67,55 @@ class MerakiNativeExportTests(unittest.TestCase):
         self.assertNotIn("secret://ref", rendered)
         self.assertFalse(inventory["contains_property_values"])
 
+    def test_inventory_captures_nested_logic_and_child_workflow_structure(self):
+        completed = native_action(
+            "Completed",
+            "logic.completed",
+            {"completion_type": "succeeded", "skip_execution": True},
+        )
+        branch = native_action(
+            "Condition Branch",
+            "logic.condition_block",
+            {"condition": {"operator": "eq"}, "skip_execution": False},
+        )
+        branch["actions"] = [completed]
+        condition = native_action(
+            "Condition Block",
+            "logic.if_else",
+            {"conditions": [], "skip_execution": True},
+        )
+        condition["blocks"] = [branch]
+        child = native_action(
+            "Read-only Child",
+            "workflow.sub_workflow",
+            {
+                "input": {"synthetic": "CAPTURE_ONLY"},
+                "skip_execution": True,
+                "workflow_id": "definition_workflow_02SYNTHETICCHILD",
+                "workflow_name": "Read-only Child",
+            },
+        )
+        child["base_type"] = "subworkflow"
+        document = native_workflow(actions=[condition, child])
+
+        result = audit_native_export(document)
+        self.assertTrue(result["native_export_valid"], result["issues"])
+        actions = result["inventory"]["workflows"][0]["actions"]
+        self.assertEqual(
+            [
+                "logic.if_else",
+                "logic.condition_block",
+                "logic.completed",
+                "workflow.sub_workflow",
+            ],
+            [item["type"] for item in actions],
+        )
+        rendered = str(result["inventory"])
+        self.assertIn("completion_type", rendered)
+        self.assertIn("workflow_id", rendered)
+        self.assertNotIn("CAPTURE_ONLY", rendered)
+        self.assertFalse(result["inventory"]["contains_property_values"])
+
     def test_valid_native_http_export_passes(self):
         document = native_workflow(
             actions=[native_action("HTTP Request", "web_service.http_request")]

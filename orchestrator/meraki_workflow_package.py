@@ -40,7 +40,122 @@ ALLOWED_ACTIVITIES = {
 EXPECTED_NATIVE_ACTIVITY_TYPES = {
     "http_request": "web-service.http_request",
     "create_prompt": "task.prompt_request",
+    "condition": "logic.if_else",
+    "condition_branch": "logic.condition_block",
+    "completed": "logic.completed",
     "request_approval": "task.request_approval",
+    "child_workflow": "workflow.sub_workflow",
+}
+EXPECTED_NATIVE_WORKFLOW_PROPERTY_KEYS = {
+    "atomic",
+    "delete_workflow_instance",
+    "description",
+    "display_name",
+    "owner",
+    "runtime_user",
+    "target",
+}
+EXPECTED_NATIVE_PROPERTY_KEYS = {
+    "http_request": {
+        "accept",
+        "action_timeout",
+        "allow_auto_redirect",
+        "allow_headers_redirect",
+        "body",
+        "continue_on_error_status_code",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "method",
+        "relative_url",
+        "runtime_user",
+        "skip_execution",
+        "target",
+    },
+    "create_prompt": {
+        "assignee_roles",
+        "assignees",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "expiration_date",
+        "form_elements",
+        "prompt_body",
+        "prompt_title",
+        "skip_execution",
+        "task_owner",
+        "task_requestor",
+        "wait_for_prompt_response",
+    },
+    "condition": {
+        "conditions",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution",
+    },
+    "condition_branch": {
+        "condition",
+        "continue_on_failure",
+        "display_name",
+        "skip_execution",
+    },
+    "completed": {
+        "completion_type",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution",
+    },
+    "request_approval": {
+        "approval_choices_holder",
+        "approval_title",
+        "assignee_roles",
+        "body_text",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "due_date",
+        "expiration_date",
+        "expiration_status",
+        "minimum_approvals",
+        "priority",
+        "skip_execution",
+        "task_owner",
+        "task_requestor",
+        "wait_for_request_approval_response",
+    },
+    "child_workflow": {
+        "atomic",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "input",
+        "runtime_user",
+        "skip_execution",
+        "target",
+        "workflow_id",
+        "workflow_name",
+    },
+}
+EXPECTED_NATIVE_SERIALIZATION_TOPOLOGY = {
+    "root_action_sequence": [
+        "http_request",
+        "create_prompt",
+        "condition",
+        "request_approval",
+        "child_workflow",
+    ],
+    "condition": {
+        "children_key": "blocks",
+        "branch_activity": "condition_branch",
+        "branch_actions_key": "actions",
+        "terminal_activity": "completed",
+    },
+    "child_workflow": {
+        "dependency_key": "dependent_workflows",
+        "embedded_workflows": False,
+    },
 }
 
 
@@ -166,6 +281,13 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.native_serialization.contains_property_values",
             "The committed native fingerprint must never contain property values",
         )
+    if native_serialization.get("configured_properties_complete") is not True:
+        _issue(
+            issues,
+            "native.configured_properties_incomplete",
+            "$.native_serialization.configured_properties_complete",
+            "Configured native activity, logic, and child-workflow schemas must be pinned",
+        )
     capture_hash = native_serialization.get("capture_export_sha256")
     if not isinstance(capture_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", capture_hash):
         _issue(
@@ -175,16 +297,50 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "Native capture requires a lowercase SHA-256 provenance hash",
         )
     native_workflow = native_serialization.get("workflow") or {}
-    if not isinstance(native_workflow, Mapping) or native_workflow.get("type") != "generic.workflow":
+    if not isinstance(native_workflow, Mapping):
+        native_workflow = {}
+        _issue(
+            issues,
+            "native.workflow_type",
+            "$.native_serialization.workflow",
+            "Native workflow serialization metadata must be an object",
+        )
+    elif native_workflow.get("type") != "generic.workflow":
         _issue(
             issues,
             "native.workflow_type",
             "$.native_serialization.workflow.type",
             "Native workflow type must come from a genuine generic.workflow export",
         )
+    if native_workflow.get("unique_name_prefix") != "definition_workflow_":
+        _issue(
+            issues,
+            "native.workflow_identifier",
+            "$.native_serialization.workflow.unique_name_prefix",
+            "Native workflow identifier prefix must be definition_workflow_",
+        )
+    workflow_property_keys = native_workflow.get("observed_property_keys")
+    if (
+        not isinstance(workflow_property_keys, list)
+        or any(not isinstance(key, str) or not key for key in workflow_property_keys)
+        or set(workflow_property_keys) != EXPECTED_NATIVE_WORKFLOW_PROPERTY_KEYS
+    ):
+        _issue(
+            issues,
+            "native.workflow_property_keys",
+            "$.native_serialization.workflow.observed_property_keys",
+            "Configured native workflow property-key inventory does not match the captured schema",
+        )
     native_activities = native_serialization.get("activities") or {}
     if not isinstance(native_activities, Mapping):
         native_activities = {}
+    if set(native_activities) != set(EXPECTED_NATIVE_ACTIVITY_TYPES):
+        _issue(
+            issues,
+            "native.activity_inventory",
+            "$.native_serialization.activities",
+            "Configured native activity inventory must match the pinned capture",
+        )
     for portable_type, expected_type in EXPECTED_NATIVE_ACTIVITY_TYPES.items():
         path = "$.native_serialization.activities.{}".format(portable_type)
         activity = native_activities.get(portable_type) or {}
@@ -204,15 +360,25 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
                 "Native activity identifier prefix must be definition_activity_",
             )
         observed_keys = activity.get("observed_property_keys")
-        if not isinstance(observed_keys, list) or not observed_keys or any(
-            not isinstance(key, str) or not key for key in observed_keys
+        if (
+            not isinstance(observed_keys, list)
+            or any(not isinstance(key, str) or not key for key in observed_keys)
+            or set(observed_keys) != EXPECTED_NATIVE_PROPERTY_KEYS[portable_type]
         ):
             _issue(
                 issues,
                 "native.property_keys",
                 path + ".observed_property_keys",
-                "Captured native activity requires a non-empty property-key inventory",
+                "Configured native activity property-key inventory does not match the captured schema",
             )
+
+    if native_serialization.get("serialization_topology") != EXPECTED_NATIVE_SERIALIZATION_TOPOLOGY:
+        _issue(
+            issues,
+            "native.serialization_topology",
+            "$.native_serialization.serialization_topology",
+            "Native condition nesting and child-workflow dependency serialization must match the capture",
+        )
 
     targets = document.get("targets") or []
     role_to_target: Dict[str, Mapping[str, Any]] = {}
@@ -620,12 +786,24 @@ def compile_workflow_build_plan(document: Mapping[str, Any]) -> Dict[str, Any]:
                 "configured_properties_complete", False
             ),
             "workflow_type": document["native_serialization"]["workflow"]["type"],
+            "workflow_property_keys": sorted(
+                document["native_serialization"]["workflow"]["observed_property_keys"]
+            ),
             "activity_types": {
                 name: item["type"]
                 for name, item in sorted(
                     document["native_serialization"]["activities"].items()
                 )
             },
+            "activity_property_keys": {
+                name: sorted(item["observed_property_keys"])
+                for name, item in sorted(
+                    document["native_serialization"]["activities"].items()
+                )
+            },
+            "serialization_topology": document["native_serialization"][
+                "serialization_topology"
+            ],
         },
         "workflows": compiled,
     }

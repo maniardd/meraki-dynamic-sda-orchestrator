@@ -1,24 +1,34 @@
 {
-  "capture_schema_version": "1.0",
+  "capture_schema_version": "1.1",
   "source": {
-    "export_sha256": "d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee",
+    "export_sha256": "0550cc91613a5d8d91b1e81d0e9c9670c1dea5b259de2d7592f49d35054bf4aa",
     "workflow_name": "SDA Native Activity Capture v1",
     "captured_at": "2026-07-22",
     "environment": "development_tenant",
-    "raw_export_committed": false
+    "raw_export_committed": false,
+    "child_workflows_embedded": false
   },
   "safety": {
     "contains_property_values": false,
     "contains_credentials": false,
     "contains_target_bindings": false,
-    "configured_properties_complete": false,
+    "configured_properties_complete": true,
     "workflow_executed": false
   },
   "workflow": {
     "type": "generic.workflow",
     "base_type": "workflow",
     "object_type": "definition_workflow",
-    "unique_name_prefix": "definition_workflow_"
+    "unique_name_prefix": "definition_workflow_",
+    "property_keys": [
+      "atomic",
+      "delete_workflow_instance",
+      "description",
+      "display_name",
+      "owner",
+      "runtime_user",
+      "target"
+    ]
   },
   "activities": {
     "http_request": {
@@ -28,14 +38,17 @@
       "object_type": "definition_activity",
       "unique_name_prefix": "definition_activity_",
       "property_keys": [
+        "accept",
         "action_timeout",
         "allow_auto_redirect",
         "allow_headers_redirect",
+        "body",
         "continue_on_error_status_code",
         "continue_on_failure",
         "description",
         "display_name",
         "method",
+        "relative_url",
         "runtime_user",
         "skip_execution",
         "target"
@@ -48,15 +61,60 @@
       "object_type": "definition_activity",
       "unique_name_prefix": "definition_activity_",
       "property_keys": [
+        "assignee_roles",
         "assignees",
         "continue_on_failure",
         "description",
         "display_name",
         "expiration_date",
+        "form_elements",
+        "prompt_body",
+        "prompt_title",
         "skip_execution",
         "task_owner",
         "task_requestor",
         "wait_for_prompt_response"
+      ]
+    },
+    "condition": {
+      "display_name": "Condition Block",
+      "type": "logic.if_else",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "conditions",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution"
+      ]
+    },
+    "condition_branch": {
+      "display_name": "Condition Branch",
+      "type": "logic.condition_block",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "condition",
+        "continue_on_failure",
+        "display_name",
+        "skip_execution"
+      ]
+    },
+    "completed": {
+      "display_name": "Completed",
+      "type": "logic.completed",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "completion_type",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution"
       ]
     },
     "request_approval": {
@@ -67,7 +125,9 @@
       "unique_name_prefix": "definition_activity_",
       "property_keys": [
         "approval_choices_holder",
+        "approval_title",
         "assignee_roles",
+        "body_text",
         "continue_on_failure",
         "description",
         "display_name",
@@ -81,6 +141,44 @@
         "task_requestor",
         "wait_for_request_approval_response"
       ]
+    },
+    "child_workflow": {
+      "display_name": "Meraki - Get Organization By Name or ID",
+      "type": "workflow.sub_workflow",
+      "base_type": "subworkflow",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "atomic",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "input",
+        "runtime_user",
+        "skip_execution",
+        "target",
+        "workflow_id",
+        "workflow_name"
+      ]
+    }
+  },
+  "serialization_topology": {
+    "root_action_sequence": [
+      "http_request",
+      "create_prompt",
+      "condition",
+      "request_approval",
+      "child_workflow"
+    ],
+    "condition": {
+      "children_key": "blocks",
+      "branch_activity": "condition_branch",
+      "branch_actions_key": "actions",
+      "terminal_activity": "completed"
+    },
+    "child_workflow": {
+      "dependency_key": "dependent_workflows",
+      "embedded_workflows": false
     }
   }
 }

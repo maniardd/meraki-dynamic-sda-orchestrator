@@ -75,11 +75,14 @@ Implemented foundation:
 - Machine-validated Meraki parent/child workflow build specification with four
   separated target identities, native approval, fixed relative HTTP actions,
   bounded polling, evidence export, and a doubly-disabled apply path
+- Genuine configured Meraki serialization fingerprint for HTTP, prompt,
+  approval, condition blocks/branches, completion, and child-workflow
+  invocation; only structural metadata is committed
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. The portable Meraki build specification
-is complete; tenant-native Meraki exports and hardware failure/rollback
-acceptance remain release-candidate work.
+and native serialization schema are complete; assembled tenant-native package
+exports and hardware failure/rollback acceptance remain release-candidate work.
 
 ## Quick start
 
