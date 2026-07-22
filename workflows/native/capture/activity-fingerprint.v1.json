@@ -1,0 +1,86 @@
+{
+  "capture_schema_version": "1.0",
+  "source": {
+    "export_sha256": "d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee",
+    "workflow_name": "SDA Native Activity Capture v1",
+    "captured_at": "2026-07-22",
+    "environment": "development_tenant",
+    "raw_export_committed": false
+  },
+  "safety": {
+    "contains_property_values": false,
+    "contains_credentials": false,
+    "contains_target_bindings": false,
+    "configured_properties_complete": false,
+    "workflow_executed": false
+  },
+  "workflow": {
+    "type": "generic.workflow",
+    "base_type": "workflow",
+    "object_type": "definition_workflow",
+    "unique_name_prefix": "definition_workflow_"
+  },
+  "activities": {
+    "http_request": {
+      "display_name": "HTTP Request",
+      "type": "web-service.http_request",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "action_timeout",
+        "allow_auto_redirect",
+        "allow_headers_redirect",
+        "continue_on_error_status_code",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "method",
+        "runtime_user",
+        "skip_execution",
+        "target"
+      ]
+    },
+    "create_prompt": {
+      "display_name": "Create Prompt",
+      "type": "task.prompt_request",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "assignees",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "expiration_date",
+        "skip_execution",
+        "task_owner",
+        "task_requestor",
+        "wait_for_prompt_response"
+      ]
+    },
+    "request_approval": {
+      "display_name": "Request Approval",
+      "type": "task.request_approval",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "approval_choices_holder",
+        "assignee_roles",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "due_date",
+        "expiration_date",
+        "expiration_status",
+        "minimum_approvals",
+        "priority",
+        "skip_execution",
+        "task_owner",
+        "task_requestor",
+        "wait_for_request_approval_response"
+      ]
+    }
+  }
+}

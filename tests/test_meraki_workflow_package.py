@@ -15,6 +15,7 @@ from orchestrator.meraki_workflow_package import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "workflows" / "production_workflow_manifest.yaml"
+NATIVE_FINGERPRINT = ROOT / "workflows" / "native" / "capture" / "activity-fingerprint.v1.json"
 
 
 class MerakiWorkflowPackageTests(unittest.TestCase):
@@ -52,6 +53,50 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
                 if request:
                     self.assertFalse(request["allow_auto_redirect"])
                     self.assertFalse(request["allow_sensitive_headers_redirect"])
+
+    def test_genuine_native_activity_types_are_pinned_without_property_values(self):
+        fingerprint = json.loads(NATIVE_FINGERPRINT.read_text(encoding="utf-8"))
+        self.assertEqual(
+            "d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee",
+            fingerprint["source"]["export_sha256"],
+        )
+        self.assertFalse(fingerprint["safety"]["contains_property_values"])
+        self.assertFalse(fingerprint["safety"]["contains_credentials"])
+        self.assertFalse(fingerprint["source"]["raw_export_committed"])
+        expected = {
+            "http_request": "web-service.http_request",
+            "create_prompt": "task.prompt_request",
+            "request_approval": "task.request_approval",
+        }
+        self.assertEqual(
+            expected,
+            {
+                name: activity["type"]
+                for name, activity in fingerprint["activities"].items()
+            },
+        )
+        compiled = compile_workflow_build_plan(self.document)
+        self.assertEqual(expected, compiled["native_serialization"]["activity_types"])
+        self.assertFalse(compiled["native_serialization"]["configured_properties_complete"])
+
+    def test_native_serialization_metadata_fails_closed_when_tampered(self):
+        cases = (
+            ("contains_property_values", True, "native.property_values"),
+            ("capture_export_sha256", "invented", "native.capture_hash"),
+        )
+        for field, value, expected_code in cases:
+            with self.subTest(field=field):
+                candidate = copy.deepcopy(self.document)
+                candidate["native_serialization"][field] = value
+                result = validate_workflow_package(candidate)
+                self.assertFalse(result["safe_to_build"])
+                self.assertIn(expected_code, {item["code"] for item in result["issues"]})
+
+        candidate = copy.deepcopy(self.document)
+        candidate["native_serialization"]["activities"]["http_request"]["type"] = "invented"
+        result = validate_workflow_package(candidate)
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn("native.activity_type", {item["code"] for item in result["issues"]})
 
     def test_apply_workflow_and_executable_steps_are_disabled(self):
         workflows = {item["id"]: item for item in self.document["workflows"]}

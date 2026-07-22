@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
@@ -35,6 +36,11 @@ ALLOWED_ACTIVITIES = {
     "json_path_extract",
     "request_approval",
     "result_summary",
+}
+EXPECTED_NATIVE_ACTIVITY_TYPES = {
+    "http_request": "web-service.http_request",
+    "create_prompt": "task.prompt_request",
+    "request_approval": "task.request_approval",
 }
 
 
@@ -143,6 +149,70 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.package.exchange_publishable",
             "Exchange publication requires production readiness",
         )
+
+    native_serialization = document.get("native_serialization") or {}
+    if not isinstance(native_serialization, Mapping):
+        native_serialization = {}
+        _issue(
+            issues,
+            "native.serialization_type",
+            "$.native_serialization",
+            "Native serialization metadata must be an object",
+        )
+    if native_serialization.get("contains_property_values") is not False:
+        _issue(
+            issues,
+            "native.property_values",
+            "$.native_serialization.contains_property_values",
+            "The committed native fingerprint must never contain property values",
+        )
+    capture_hash = native_serialization.get("capture_export_sha256")
+    if not isinstance(capture_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", capture_hash):
+        _issue(
+            issues,
+            "native.capture_hash",
+            "$.native_serialization.capture_export_sha256",
+            "Native capture requires a lowercase SHA-256 provenance hash",
+        )
+    native_workflow = native_serialization.get("workflow") or {}
+    if not isinstance(native_workflow, Mapping) or native_workflow.get("type") != "generic.workflow":
+        _issue(
+            issues,
+            "native.workflow_type",
+            "$.native_serialization.workflow.type",
+            "Native workflow type must come from a genuine generic.workflow export",
+        )
+    native_activities = native_serialization.get("activities") or {}
+    if not isinstance(native_activities, Mapping):
+        native_activities = {}
+    for portable_type, expected_type in EXPECTED_NATIVE_ACTIVITY_TYPES.items():
+        path = "$.native_serialization.activities.{}".format(portable_type)
+        activity = native_activities.get(portable_type) or {}
+        if not isinstance(activity, Mapping) or activity.get("type") != expected_type:
+            _issue(
+                issues,
+                "native.activity_type",
+                path + ".type",
+                "Expected captured tenant-native type {!r}".format(expected_type),
+            )
+            continue
+        if activity.get("unique_name_prefix") != "definition_activity_":
+            _issue(
+                issues,
+                "native.activity_identifier",
+                path + ".unique_name_prefix",
+                "Native activity identifier prefix must be definition_activity_",
+            )
+        observed_keys = activity.get("observed_property_keys")
+        if not isinstance(observed_keys, list) or not observed_keys or any(
+            not isinstance(key, str) or not key for key in observed_keys
+        ):
+            _issue(
+                issues,
+                "native.property_keys",
+                path + ".observed_property_keys",
+                "Captured native activity requires a non-empty property-key inventory",
+            )
 
     targets = document.get("targets") or []
     role_to_target: Dict[str, Mapping[str, Any]] = {}
@@ -544,6 +614,19 @@ def compile_workflow_build_plan(document: Mapping[str, Any]) -> Dict[str, Any]:
         "manifest_hash": validation["manifest_hash"],
         "native_export_required": True,
         "credentials_included": False,
+        "native_serialization": {
+            "capture_export_sha256": document["native_serialization"]["capture_export_sha256"],
+            "configured_properties_complete": document["native_serialization"].get(
+                "configured_properties_complete", False
+            ),
+            "workflow_type": document["native_serialization"]["workflow"]["type"],
+            "activity_types": {
+                name: item["type"]
+                for name, item in sorted(
+                    document["native_serialization"]["activities"].items()
+                )
+            },
+        },
         "workflows": compiled,
     }
     result["build_plan_hash"] = _canonical_hash(result)

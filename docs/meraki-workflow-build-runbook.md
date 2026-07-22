@@ -21,15 +21,17 @@ legacy V2 API, one static fabric, and no separated service identities.
 
 ## Development-tenant observation (2026-07-22)
 
-The SJC23-SDA development tenant was inspected without running or modifying a
-workflow. The native activity catalog contains the required building blocks:
+The SJC23-SDA development tenant was inspected without running a workflow. A
+non-executable, no-target capture workflow was created solely to export the
+native activity envelope. The catalog and export contain the required building
+blocks:
 
 - `HTTP Request` under Web Service (including the separate Swagger variant),
 - `Create Prompt` under Task,
 - `Request Approval` under Task, and
 - reusable workflows through the Workflows tab.
 
-The workspace currently contains four workflows. `SDA Fabric Full Deployment`
+The workspace originally contained four workflows. `SDA Fabric Full Deployment`
 is the original static POC and must remain a reference only. The genuine
 `Test Import - Minimal_Meraki_Exported.json` export proves the native envelope:
 `generic.workflow`, tenant-generated `definition_workflow_*` IDs, and
@@ -37,6 +39,17 @@ tenant-generated `definition_activity_*` IDs. It does not provide the native
 HTTP, prompt, approval, or child-workflow property schema, so those activity
 definitions must still be captured from a tenant-created workflow rather than
 invented.
+
+`SDA Native Activity Capture v1` supplied that first activity capture. Its raw
+export hashes to
+`d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee` and
+proves these installed types: `web-service.http_request`,
+`task.prompt_request`, and `task.request_approval`. Only the secret-free
+structural fingerprint is committed at
+`workflows/native/capture/activity-fingerprint.v1.json`; the tenant-specific raw
+export is not committed. Because the actions were intentionally unconfigured,
+configured request/prompt/approval property serialization and child-workflow
+invocation serialization remain pending.
 
 ## Source-of-truth files
 
