@@ -3,7 +3,7 @@ schema_version: "1.1"
 package:
   id: meraki-dynamic-sda
   name: SDA Fabric Production Automation
-  version: 0.1.0
+  version: 0.2.0
   release_state: development
   production_ready: false
   exchange_publishable: false
@@ -15,25 +15,36 @@ package:
   native_exports: []
 
 native_serialization:
-  capture_export_sha256: d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee
+  capture_export_sha256: 0550cc91613a5d8d91b1e81d0e9c9670c1dea5b259de2d7592f49d35054bf4aa
   contains_property_values: false
-  configured_properties_complete: false
+  configured_properties_complete: true
   workflow:
     type: generic.workflow
     unique_name_prefix: definition_workflow_
+    observed_property_keys:
+      - atomic
+      - delete_workflow_instance
+      - description
+      - display_name
+      - owner
+      - runtime_user
+      - target
   activities:
     http_request:
       type: web-service.http_request
       unique_name_prefix: definition_activity_
       observed_property_keys:
+        - accept
         - action_timeout
         - allow_auto_redirect
         - allow_headers_redirect
+        - body
         - continue_on_error_status_code
         - continue_on_failure
         - description
         - display_name
         - method
+        - relative_url
         - runtime_user
         - skip_execution
         - target
@@ -41,21 +52,53 @@ native_serialization:
       type: task.prompt_request
       unique_name_prefix: definition_activity_
       observed_property_keys:
+        - assignee_roles
         - assignees
         - continue_on_failure
         - description
         - display_name
         - expiration_date
+        - form_elements
+        - prompt_body
+        - prompt_title
         - skip_execution
         - task_owner
         - task_requestor
         - wait_for_prompt_response
+    condition:
+      type: logic.if_else
+      unique_name_prefix: definition_activity_
+      observed_property_keys:
+        - conditions
+        - continue_on_failure
+        - description
+        - display_name
+        - skip_execution
+    condition_branch:
+      type: logic.condition_block
+      unique_name_prefix: definition_activity_
+      observed_property_keys:
+        - condition
+        - continue_on_failure
+        - display_name
+        - skip_execution
+    completed:
+      type: logic.completed
+      unique_name_prefix: definition_activity_
+      observed_property_keys:
+        - completion_type
+        - continue_on_failure
+        - description
+        - display_name
+        - skip_execution
     request_approval:
       type: task.request_approval
       unique_name_prefix: definition_activity_
       observed_property_keys:
         - approval_choices_holder
+        - approval_title
         - assignee_roles
+        - body_text
         - continue_on_failure
         - description
         - display_name
@@ -68,6 +111,35 @@ native_serialization:
         - task_owner
         - task_requestor
         - wait_for_request_approval_response
+    child_workflow:
+      type: workflow.sub_workflow
+      unique_name_prefix: definition_activity_
+      observed_property_keys:
+        - atomic
+        - continue_on_failure
+        - description
+        - display_name
+        - input
+        - runtime_user
+        - skip_execution
+        - target
+        - workflow_id
+        - workflow_name
+  serialization_topology:
+    root_action_sequence:
+      - http_request
+      - create_prompt
+      - condition
+      - request_approval
+      - child_workflow
+    condition:
+      children_key: blocks
+      branch_activity: condition_branch
+      branch_actions_key: actions
+      terminal_activity: completed
+    child_workflow:
+      dependency_key: dependent_workflows
+      embedded_workflows: false
 
 safety:
   apply_enabled: false

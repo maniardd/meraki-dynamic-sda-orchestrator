@@ -10,7 +10,8 @@ These are separate gates:
 |---|---|---|
 | Dynamic planner/API | Complete | Requirements produce deterministic allocations, intent, plan, and rendered artifacts. |
 | Portable Meraki build specification | Complete | Workflows, roles, paths, inputs, outputs, bounds, and failure branches are machine validated. |
-| Native Meraki exports | Pending | Workflows must be assembled once in the target tenant and exported so Meraki-generated action identifiers are genuine. |
+| Native Meraki serialization schema | Complete | Configured activity, logic, and child-workflow shapes were captured from the development tenant without execution. |
+| Native Meraki package exports | Pending | Production parent and child workflows must still be assembled and exported with genuine tenant-generated identifiers. |
 | Dry-run workflow | Software complete | It can be assembled and tested without touching switches. |
 | Apply workflow | Disabled | Native export validation plus SJC23 hardware/API/reconciliation acceptance are required first. |
 | Exchange publication | Disabled | Pilot evidence and publishing review are required first. |
@@ -40,16 +41,23 @@ HTTP, prompt, approval, or child-workflow property schema, so those activity
 definitions must still be captured from a tenant-created workflow rather than
 invented.
 
-`SDA Native Activity Capture v1` supplied that first activity capture. Its raw
-export hashes to
-`d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee` and
-proves these installed types: `web-service.http_request`,
-`task.prompt_request`, and `task.request_approval`. Only the secret-free
-structural fingerprint is committed at
-`workflows/native/capture/activity-fingerprint.v1.json`; the tenant-specific raw
-export is not committed. Because the actions were intentionally unconfigured,
-configured request/prompt/approval property serialization and child-workflow
-invocation serialization remain pending.
+`SDA Native Activity Capture v1` now supplies the complete configured schema
+capture. The root-only export was generated without running or validating the
+workflow, with every activity marked `skip_execution`, no workflow target, and
+no Account Key. Its canonical export hash is
+`0550cc91613a5d8d91b1e81d0e9c9670c1dea5b259de2d7592f49d35054bf4aa`.
+The secret-safe auditor reports one workflow, nine native actions, zero errors,
+no Python activity, and no embedded child-workflow internals.
+
+The capture pins the configured property-key shapes for
+`web-service.http_request`, `task.prompt_request`,
+`task.request_approval`, `logic.if_else`, `logic.condition_block`,
+`logic.completed`, and `workflow.sub_workflow`. It also pins the native
+`blocks`/`actions` condition nesting and the root `dependent_workflows`
+reference used by a child-workflow invocation. Only the secret-free structural
+fingerprint is committed at
+`workflows/native/capture/activity-fingerprint.v1.json`; the tenant-specific
+raw export and all property values remain outside the repository.
 
 ## Source-of-truth files
 
