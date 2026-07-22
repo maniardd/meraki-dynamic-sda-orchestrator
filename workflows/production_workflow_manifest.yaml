@@ -14,6 +14,61 @@ package:
   importable_exports_present: false
   native_exports: []
 
+native_serialization:
+  capture_export_sha256: d88dcb829e1f7a076ba82ba8cdd6d32e5c8b1852ed6dc93c1f95721a324724ee
+  contains_property_values: false
+  configured_properties_complete: false
+  workflow:
+    type: generic.workflow
+    unique_name_prefix: definition_workflow_
+  activities:
+    http_request:
+      type: web-service.http_request
+      unique_name_prefix: definition_activity_
+      observed_property_keys:
+        - action_timeout
+        - allow_auto_redirect
+        - allow_headers_redirect
+        - continue_on_error_status_code
+        - continue_on_failure
+        - description
+        - display_name
+        - method
+        - runtime_user
+        - skip_execution
+        - target
+    create_prompt:
+      type: task.prompt_request
+      unique_name_prefix: definition_activity_
+      observed_property_keys:
+        - assignees
+        - continue_on_failure
+        - description
+        - display_name
+        - expiration_date
+        - skip_execution
+        - task_owner
+        - task_requestor
+        - wait_for_prompt_response
+    request_approval:
+      type: task.request_approval
+      unique_name_prefix: definition_activity_
+      observed_property_keys:
+        - approval_choices_holder
+        - assignee_roles
+        - continue_on_failure
+        - description
+        - display_name
+        - due_date
+        - expiration_date
+        - expiration_status
+        - minimum_approvals
+        - priority
+        - skip_execution
+        - task_owner
+        - task_requestor
+        - wait_for_request_approval_response
+
 safety:
   apply_enabled: false
   require_distinct_production_approver: true
