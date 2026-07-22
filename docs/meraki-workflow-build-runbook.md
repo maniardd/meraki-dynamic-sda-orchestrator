@@ -19,6 +19,25 @@ Do not relabel the old `SDA Fabric Full Deployment` export as production. It
 uses an inline relay URL, Python HTTP calls, disabled TLS verification, the
 legacy V2 API, one static fabric, and no separated service identities.
 
+## Development-tenant observation (2026-07-22)
+
+The SJC23-SDA development tenant was inspected without running or modifying a
+workflow. The native activity catalog contains the required building blocks:
+
+- `HTTP Request` under Web Service (including the separate Swagger variant),
+- `Create Prompt` under Task,
+- `Request Approval` under Task, and
+- reusable workflows through the Workflows tab.
+
+The workspace currently contains four workflows. `SDA Fabric Full Deployment`
+is the original static POC and must remain a reference only. The genuine
+`Test Import - Minimal_Meraki_Exported.json` export proves the native envelope:
+`generic.workflow`, tenant-generated `definition_workflow_*` IDs, and
+tenant-generated `definition_activity_*` IDs. It does not provide the native
+HTTP, prompt, approval, or child-workflow property schema, so those activity
+definitions must still be captured from a tenant-created workflow rather than
+invented.
+
 ## Source-of-truth files
 
 - `workflows/production_workflow_manifest.yaml` is the portable workflow and
@@ -31,6 +50,10 @@ legacy V2 API, one static fabric, and no separated service identities.
 - `orchestrator/meraki_workflow_package.py` validates and compiles the build
   contract.
 - `tools/validate_meraki_workflow_package.py` is the operator/CI command.
+- `orchestrator/meraki_native_export.py` inventories real tenant exports
+  without emitting property values and fails closed on unsafe or incomplete
+  packages.
+- `tools/audit_meraki_native_export.py` is the native-export intake command.
 
 Run the validation from the repository root:
 
@@ -41,6 +64,24 @@ python tools/validate_meraki_workflow_package.py --compile --matrix
 Success means `safe_to_build: true`. It intentionally reports
 `production_ready: false`, `importable_exports_present: false`, and
 `apply_enabled: false` at this stage.
+
+Audit a newly exported native workflow without requiring the whole package:
+
+```powershell
+python tools/audit_meraki_native_export.py --inventory-only path\to\export.json
+```
+
+After all parent and child workflows are exported, validate the set against
+the portable manifest:
+
+```powershell
+python tools/audit_meraki_native_export.py `
+  --manifest workflows\production_workflow_manifest.yaml `
+  workflows\native\*.json
+```
+
+The command reports only workflow/action structure and property-key names. It
+does not print property values, Account Keys, or target credentials.
 
 ## Why the first Meraki UI accepts requirements JSON
 

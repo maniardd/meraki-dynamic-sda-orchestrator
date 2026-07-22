@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Audit tenant-native Meraki workflow JSON without printing secret values."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from orchestrator.meraki_native_export import (
+    audit_native_export,
+    audit_native_export_set,
+    load_native_export,
+)
+from orchestrator.meraki_workflow_package import load_workflow_package
+
+
+REQUIRED_NATIVE_ACTIVITIES = (
+    "HTTP Request",
+    "Create Prompt",
+    "Request Approval",
+)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("exports", nargs="+", type=Path)
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument(
+        "--inventory-only",
+        action="store_true",
+        help="Inventory one or more exports without requiring the full workflow set",
+    )
+    args = parser.parse_args()
+
+    documents = [load_native_export(path) for path in args.exports]
+    if args.manifest and not args.inventory_only:
+        manifest = load_workflow_package(args.manifest)
+        expected_names = [item["name"] for item in manifest.get("workflows", [])]
+        result = audit_native_export_set(
+            documents,
+            expected_workflow_names=expected_names,
+            required_activity_names=REQUIRED_NATIVE_ACTIVITIES,
+        )
+        valid = result["native_export_set_valid"]
+    else:
+        reports = [audit_native_export(document) for document in documents]
+        result = {"reports": reports}
+        valid = all(report["native_export_valid"] for report in reports)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if valid else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
