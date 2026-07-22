@@ -54,6 +54,91 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
                     self.assertFalse(request["allow_auto_redirect"])
                     self.assertFalse(request["allow_sensitive_headers_redirect"])
 
+    def test_native_assembly_covers_every_portable_step_with_captured_primitives(self):
+        compiled = compile_workflow_build_plan(self.document)
+        recipes = compiled["native_assembly"]["portable_activity_recipes"]
+        portable_activities = {
+            step["activity"]
+            for workflow in self.document["workflows"]
+            for step in workflow["steps"]
+        }
+        captured_primitives = set(compiled["native_serialization"]["activity_types"])
+
+        self.assertEqual(set(recipes), portable_activities)
+        self.assertEqual(
+            "tenant_generated_only",
+            compiled["native_assembly"]["tenant_identifier_policy"],
+        )
+        self.assertFalse(compiled["native_assembly"]["compiler_emits_importable_json"])
+
+        expected_expansions = {
+            "approval_task_rule": ["condition"],
+            "bounded_poll": ["set_variables", "while_loop"],
+            "build_json": ["parse_json", "set_variables"],
+            "json_path_extract": ["json_path_query"],
+            "result_summary": ["create_prompt"],
+        }
+        for portable_name, sequence in expected_expansions.items():
+            self.assertEqual(sequence, recipes[portable_name]["native_sequence"])
+        self.assertEqual(
+            ["http_request", "condition", "sleep", "set_variables"],
+            recipes["bounded_poll"]["loop_body_sequence"],
+        )
+        self.assertEqual(
+            [
+                "input_json_parsed_before_use",
+                "fixed_request_body_template",
+                "no_quoted_user_controlled_interpolation",
+                "payload_substitution_acceptance_required",
+            ],
+            recipes["build_json"]["invariants"],
+        )
+
+        for portable_name, recipe in recipes.items():
+            referenced = set(recipe["native_sequence"])
+            referenced.update(recipe.get("loop_body_sequence", []))
+            referenced.update(recipe.get("supporting_activities", []))
+            self.assertTrue(referenced, portable_name)
+            self.assertLessEqual(referenced, captured_primitives, portable_name)
+
+        for workflow in compiled["workflows"]:
+            for step in workflow["steps"]:
+                self.assertEqual(
+                    recipes[step["activity"]],
+                    step["native_implementation"],
+                    "{}:{}".format(workflow["id"], step["id"]),
+                )
+
+    def test_native_assembly_contract_tampering_fails_closed(self):
+        mutations = (
+            lambda item: item["native_assembly"].update(
+                {"tenant_identifier_policy": "compiler_generated"}
+            ),
+            lambda item: item["native_assembly"]["portable_activity_recipes"].pop(
+                "bounded_poll"
+            ),
+            lambda item: item["native_assembly"]["portable_activity_recipes"][
+                "bounded_poll"
+            ]["loop_body_sequence"].append("python"),
+            lambda item: item["native_assembly"]["portable_activity_recipes"][
+                "http_request"
+            ]["native_sequence"].append("sleep"),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                candidate = copy.deepcopy(self.document)
+                mutation(candidate)
+                result = validate_workflow_package(candidate)
+                self.assertFalse(result["safe_to_build"])
+                self.assertIn(
+                    "native.assembly_contract",
+                    {item["code"] for item in result["issues"]},
+                )
+                with self.assertRaisesRegex(
+                    ValueError, "Invalid Meraki workflow package"
+                ):
+                    compile_workflow_build_plan(candidate)
+
     def test_genuine_native_activity_types_are_pinned_without_property_values(self):
         fingerprint = json.loads(NATIVE_FINGERPRINT.read_text(encoding="utf-8"))
         self.assertEqual(
@@ -222,6 +307,20 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         for step in apply_workflow["steps"]:
             if step["activity"] in {"http_request", "bounded_poll"}:
                 self.assertFalse(step["enabled"])
+
+        compiled = {
+            item["id"]: item
+            for item in compile_workflow_build_plan(self.document)["workflows"]
+        }
+        compiled_apply = compiled["start_apply"]
+        self.assertFalse(compiled_apply["enabled"])
+        executable_steps = [
+            step
+            for step in compiled_apply["steps"]
+            if step["activity"] in {"http_request", "bounded_poll"}
+        ]
+        self.assertTrue(executable_steps)
+        self.assertFalse(any(step["enabled"] for step in executable_steps))
 
     def test_operation_matrix_contains_no_enabled_apply_operation(self):
         matrix = workflow_operation_matrix(self.document)

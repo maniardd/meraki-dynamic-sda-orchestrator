@@ -248,6 +248,72 @@ native_serialization:
         - value
         - variable_string_format
 
+native_assembly:
+  contract_version: "1.0"
+  tenant_identifier_policy: tenant_generated_only
+  compiler_emits_importable_json: false
+  portable_activity_recipes:
+    approval_task_rule:
+      kind: composite
+      native_sequence: [condition]
+      supporting_activities: [condition_branch, completed]
+      invariants:
+        - approval_decision_exact_match
+        - rejected_expired_or_cancelled_terminates
+    bounded_poll:
+      kind: composite
+      native_sequence: [set_variables, while_loop]
+      loop_body_sequence: [http_request, condition, sleep, set_variables]
+      supporting_activities: [condition_branch, completed]
+      invariants:
+        - attempt_counter_bounded
+        - terminal_status_exact_match
+        - http_error_branch_immediate
+        - sleep_only_after_non_terminal_status
+    build_json:
+      kind: composite
+      native_sequence: [parse_json, set_variables]
+      invariants:
+        - input_json_parsed_before_use
+        - fixed_request_body_template
+        - no_quoted_user_controlled_interpolation
+        - payload_substitution_acceptance_required
+    child_workflow:
+      kind: direct
+      native_sequence: [child_workflow]
+    condition:
+      kind: composite
+      native_sequence: [condition]
+      supporting_activities: [condition_branch, completed]
+      invariants: [exact_rule_match, explicit_terminal_branch]
+    create_prompt:
+      kind: direct
+      native_sequence: [create_prompt]
+    http_request:
+      kind: direct
+      native_sequence: [http_request]
+      invariants:
+        - fixed_relative_v1_path
+        - redirects_disabled
+        - immediate_http_status_branch
+    json_path_extract:
+      kind: alias
+      native_sequence: [json_path_query]
+      invariants: [declared_output_contract_only]
+    request_approval:
+      kind: direct
+      native_sequence: [request_approval]
+      invariants:
+        - minimum_one_approval
+        - comment_and_acknowledgement_required
+        - expiry_required_for_execution_modes
+    result_summary:
+      kind: alias
+      native_sequence: [create_prompt]
+      invariants:
+        - wait_for_prompt_response_false
+        - secret_and_raw_configuration_outputs_forbidden
+
 safety:
   apply_enabled: false
   require_distinct_production_approver: true

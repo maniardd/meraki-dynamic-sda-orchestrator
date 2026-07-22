@@ -11,6 +11,7 @@ These are separate gates:
 | Dynamic planner/API | Complete | Requirements produce deterministic allocations, intent, plan, and rendered artifacts. |
 | Portable Meraki build specification | Complete | Workflows, roles, paths, inputs, outputs, bounds, and failure branches are machine validated. |
 | Native Meraki serialization schema | Complete | Configured activity, logic, and child-workflow shapes were captured from the development tenant without execution. |
+| Native Meraki assembly contract | Complete | Every portable step is mapped to captured native primitives with deterministic sequencing and fail-closed invariants. |
 | Native Meraki package exports | Pending | Production parent and child workflows must still be assembled and exported with genuine tenant-generated identifiers. |
 | Dry-run workflow | Software complete | It can be assembled and tested without touching switches. |
 | Apply workflow | Disabled | Native export validation plus SJC23 hardware/API/reconciliation acceptance are required first. |
@@ -72,6 +73,8 @@ raw export and all property values remain outside the repository.
   requirements accepted by the planner.
 - `orchestrator/meraki_workflow_package.py` validates and compiles the build
   contract.
+- `docs/meraki-native-assembly-contract.md` defines how each portable activity
+  is assembled from the genuine captured Meraki primitives.
 - `tools/validate_meraki_workflow_package.py` is the operator/CI command.
 - `orchestrator/meraki_native_export.py` inventories real tenant exports
   without emitting property values and fails closed on unsafe or incomplete
@@ -176,6 +179,11 @@ Header Authentication or client-certificate authentication is an acceptable
 planned alternative. The role must still be a separate backend identity.
 
 ### 4. Assemble child workflows first
+
+Use the compiled `native_implementation` on every step and the exact composite
+sequences in `docs/meraki-native-assembly-contract.md`. The compiler does not
+fabricate Meraki identifiers or claim to emit importable JSON; the tenant must
+generate those values.
 
 Build the child workflows in this order:
 
