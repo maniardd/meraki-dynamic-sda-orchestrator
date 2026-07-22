@@ -57,7 +57,7 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
     def test_genuine_native_activity_types_are_pinned_without_property_values(self):
         fingerprint = json.loads(NATIVE_FINGERPRINT.read_text(encoding="utf-8"))
         self.assertEqual(
-            "0550cc91613a5d8d91b1e81d0e9c9670c1dea5b259de2d7592f49d35054bf4aa",
+            "efb6d7806a1ad26447cafbfeb5c3cabd85f2c01ae9ec5b06547eaa3743ba1187",
             fingerprint["source"]["export_sha256"],
         )
         self.assertFalse(fingerprint["safety"]["contains_property_values"])
@@ -78,6 +78,11 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
             "completed": "logic.completed",
             "request_approval": "task.request_approval",
             "child_workflow": "workflow.sub_workflow",
+            "while_loop": "logic.while",
+            "set_variables": "core.set_multiple_variables",
+            "sleep": "core.sleep",
+            "parse_json": "core.parsejson",
+            "json_path_query": "corejava.jsonpathquery",
         }
         self.assertEqual(
             expected,
@@ -87,6 +92,10 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
             },
         )
         compiled = compile_workflow_build_plan(self.document)
+        self.assertEqual(
+            fingerprint["source"]["export_sha256"],
+            compiled["native_serialization"]["capture_export_sha256"],
+        )
         self.assertEqual(expected, compiled["native_serialization"]["activity_types"])
         self.assertTrue(compiled["native_serialization"]["configured_properties_complete"])
         self.assertEqual(
@@ -96,6 +105,29 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         self.assertEqual(
             sorted(fingerprint["workflow"]["property_keys"]),
             compiled["native_serialization"]["workflow_property_keys"],
+        )
+        self.assertEqual(
+            sorted(fingerprint["export_top_level_keys"]),
+            compiled["native_serialization"]["export_top_level_keys"],
+        )
+        self.assertEqual(
+            sorted(fingerprint["workflow"]["top_level_keys"]),
+            compiled["native_serialization"]["workflow_top_level_keys"],
+        )
+        self.assertEqual(
+            {
+                "object_type": fingerprint["workflow"]["variable"]["object_type"],
+                "unique_name_prefix": fingerprint["workflow"]["variable"][
+                    "unique_name_prefix"
+                ],
+                "wrapper_keys": sorted(
+                    fingerprint["workflow"]["variable"]["wrapper_keys"]
+                ),
+                "property_keys": sorted(
+                    fingerprint["workflow"]["variable"]["property_keys"]
+                ),
+            },
+            compiled["native_serialization"]["workflow_variable"],
         )
         self.assertEqual(
             {
@@ -151,6 +183,37 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
             "native.serialization_topology",
             {item["code"] for item in result["issues"]},
         )
+
+        tamper_cases = (
+            (
+                lambda item: item["native_serialization"][
+                    "observed_export_top_level_keys"
+                ].append("invented"),
+                "native.export_top_level_keys",
+            ),
+            (
+                lambda item: item["native_serialization"]["workflow"][
+                    "observed_top_level_keys"
+                ].remove("variables"),
+                "native.workflow_top_level_keys",
+            ),
+            (
+                lambda item: item["native_serialization"]["workflow"]["variable"][
+                    "observed_property_keys"
+                ].remove("scope"),
+                "native.variable_property_keys",
+            ),
+        )
+        for mutation, expected_code in tamper_cases:
+            with self.subTest(expected_code=expected_code):
+                candidate = copy.deepcopy(self.document)
+                mutation(candidate)
+                result = validate_workflow_package(candidate)
+                self.assertFalse(result["safe_to_build"])
+                self.assertIn(
+                    expected_code,
+                    {item["code"] for item in result["issues"]},
+                )
 
     def test_apply_workflow_and_executable_steps_are_disabled(self):
         workflows = {item["id"]: item for item in self.document["workflows"]}

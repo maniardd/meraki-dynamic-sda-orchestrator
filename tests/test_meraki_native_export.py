@@ -7,6 +7,7 @@ from orchestrator.meraki_native_export import (
     audit_native_export,
     audit_native_export_set,
     inventory_native_export,
+    verify_capture_fingerprint,
 )
 
 
@@ -45,6 +46,56 @@ def native_action(name, activity_type, properties=None):
             "display_name": name,
             **(properties or {}),
         },
+    }
+
+
+def structural_fingerprint(document, portable_types, topology):
+    inventory = inventory_native_export(document)
+    workflow = inventory["workflows"][0]
+    variable = workflow["variables"][0]
+    actions = {}
+    for portable_name, activity_type in portable_types.items():
+        action = next(
+            item for item in workflow["actions"] if item["type"] == activity_type
+        )
+        actions[portable_name] = {
+            "type": action["type"],
+            "base_type": action["base_type"],
+            "object_type": action["object_type"],
+            "unique_name_prefix": action["unique_name_prefix"],
+            "property_keys": action["property_keys"],
+        }
+    return {
+        "source": {
+            "export_sha256": inventory["export_sha256"],
+            "workflow_name": workflow["name"],
+            "raw_export_committed": False,
+            "child_workflows_embedded": False,
+        },
+        "safety": {
+            "contains_property_values": False,
+            "contains_credentials": False,
+            "contains_target_bindings": False,
+            "configured_properties_complete": True,
+            "workflow_executed": False,
+        },
+        "export_top_level_keys": inventory["top_level_keys"],
+        "workflow": {
+            "type": workflow["type"],
+            "base_type": workflow["base_type"],
+            "object_type": workflow["object_type"],
+            "unique_name_prefix": workflow["unique_name_prefix"],
+            "top_level_keys": workflow["top_level_keys"],
+            "property_keys": workflow["property_keys"],
+            "variable": {
+                "object_type": variable["object_type"],
+                "unique_name_prefix": variable["unique_name_prefix"],
+                "wrapper_keys": variable["wrapper_keys"],
+                "property_keys": variable["property_keys"],
+            },
+        },
+        "activities": actions,
+        "serialization_topology": topology,
     }
 
 
@@ -115,6 +166,188 @@ class MerakiNativeExportTests(unittest.TestCase):
         self.assertIn("workflow_id", rendered)
         self.assertNotIn("CAPTURE_ONLY", rendered)
         self.assertFalse(result["inventory"]["contains_property_values"])
+
+    def test_configured_capture_fingerprint_verifies_without_exposing_values(self):
+        document = native_workflow(
+            actions=[
+                native_action(
+                    "HTTP Request",
+                    "web-service.http_request",
+                    {
+                        "relative_url": "/v1/workflow-actions/plan",
+                        "skip_execution": True,
+                    },
+                )
+            ]
+        )
+        document["dependent_workflows"] = []
+        document["workflow"]["variables"] = [
+            {
+                "unique_name": "variable_workflow_02SYNTHETIC",
+                "schema_id": "synthetic",
+                "object_type": "variable_workflow",
+                "properties": {
+                    "description": "Synthetic",
+                    "name": "capture",
+                    "scope": "local",
+                    "type": "string",
+                    "value": "must-not-leak",
+                },
+            }
+        ]
+        inventory = inventory_native_export(document)
+        workflow = inventory["workflows"][0]
+        action = workflow["actions"][0]
+        variable = workflow["variables"][0]
+        fingerprint = {
+            "source": {
+                "export_sha256": inventory["export_sha256"],
+                "workflow_name": workflow["name"],
+                "raw_export_committed": False,
+                "child_workflows_embedded": False,
+            },
+            "safety": {
+                "contains_property_values": False,
+                "contains_credentials": False,
+                "contains_target_bindings": False,
+                "configured_properties_complete": True,
+                "workflow_executed": False,
+            },
+            "export_top_level_keys": inventory["top_level_keys"],
+            "workflow": {
+                "type": workflow["type"],
+                "base_type": workflow["base_type"],
+                "object_type": workflow["object_type"],
+                "unique_name_prefix": workflow["unique_name_prefix"],
+                "top_level_keys": workflow["top_level_keys"],
+                "property_keys": workflow["property_keys"],
+                "variable": {
+                    "object_type": variable["object_type"],
+                    "unique_name_prefix": variable["unique_name_prefix"],
+                    "wrapper_keys": variable["wrapper_keys"],
+                    "property_keys": variable["property_keys"],
+                },
+            },
+            "activities": {
+                "http_request": {
+                    "type": action["type"],
+                    "base_type": action["base_type"],
+                    "object_type": action["object_type"],
+                    "unique_name_prefix": action["unique_name_prefix"],
+                    "property_keys": action["property_keys"],
+                }
+            },
+            "serialization_topology": {
+                "root_action_sequence": ["http_request"]
+            },
+        }
+        result = verify_capture_fingerprint(document, fingerprint)
+        self.assertTrue(result["capture_fingerprint_valid"], result["issues"])
+        rendered = str(result)
+        self.assertNotIn("/v1/workflow-actions/plan", rendered)
+        self.assertNotIn("must-not-leak", rendered)
+
+        candidate = copy.deepcopy(fingerprint)
+        candidate["activities"]["http_request"]["property_keys"].remove(
+            "relative_url"
+        )
+        result = verify_capture_fingerprint(document, candidate)
+        self.assertFalse(result["capture_fingerprint_valid"])
+        self.assertIn("capture.activity", {item["code"] for item in result["issues"]})
+
+    def test_capture_fingerprint_rejects_nested_topology_tampering(self):
+        completed = native_action("Completed", "logic.completed")
+        branch = native_action("Condition Branch", "logic.condition_block")
+        branch["actions"] = [completed]
+        condition = native_action("Condition Block", "logic.if_else")
+        condition["blocks"] = [branch]
+
+        while_branch = native_action("Condition Branch", "logic.condition_block")
+        while_loop = native_action("While Loop", "logic.while")
+        while_loop["blocks"] = [while_branch]
+
+        child = native_action(
+            "Synthetic Child",
+            "workflow.sub_workflow",
+            {"workflow_id": "definition_workflow_02SYNTHETICCHILD"},
+        )
+        child["base_type"] = "subworkflow"
+        document = native_workflow(actions=[condition, child, while_loop])
+        document["dependent_workflows"] = [
+            "definition_workflow_02SYNTHETICCHILD"
+        ]
+        document["workflow"]["variables"] = [
+            {
+                "unique_name": "variable_workflow_02SYNTHETIC",
+                "schema_id": "synthetic",
+                "object_type": "variable_workflow",
+                "properties": {
+                    "name": "capture",
+                    "scope": "local",
+                    "type": "string",
+                    "value": "capture",
+                },
+            }
+        ]
+        fingerprint = structural_fingerprint(
+            document,
+            {
+                "condition": "logic.if_else",
+                "condition_branch": "logic.condition_block",
+                "completed": "logic.completed",
+                "child_workflow": "workflow.sub_workflow",
+                "while_loop": "logic.while",
+            },
+            {
+                "root_action_sequence": [
+                    "condition",
+                    "child_workflow",
+                    "while_loop",
+                ],
+                "condition": {
+                    "children_key": "blocks",
+                    "branch_activity": "condition_branch",
+                    "branch_actions_key": "actions",
+                    "terminal_activity": "completed",
+                },
+                "child_workflow": {
+                    "dependency_key": "dependent_workflows",
+                    "embedded_workflows": False,
+                },
+                "while_loop": {
+                    "children_key": "blocks",
+                    "branch_activity": "condition_branch",
+                },
+            },
+        )
+        self.assertTrue(
+            verify_capture_fingerprint(document, fingerprint)[
+                "capture_fingerprint_valid"
+            ]
+        )
+
+        cases = (
+            ("condition", "capture.condition_topology"),
+            ("while", "capture.while_topology"),
+            ("child", "capture.child_topology"),
+        )
+        for case, expected_code in cases:
+            with self.subTest(case=case):
+                candidate = copy.deepcopy(document)
+                if case == "condition":
+                    candidate["workflow"]["actions"][0]["blocks"] = []
+                elif case == "while":
+                    candidate["workflow"]["actions"][2]["blocks"][0][
+                        "type"
+                    ] = "logic.invented"
+                else:
+                    candidate["dependent_workflows"] = []
+                result = verify_capture_fingerprint(candidate, fingerprint)
+                self.assertFalse(result["capture_fingerprint_valid"])
+                self.assertIn(
+                    expected_code,
+                    {item["code"] for item in result["issues"]},
+                )
 
     def test_valid_native_http_export_passes(self):
         document = native_workflow(

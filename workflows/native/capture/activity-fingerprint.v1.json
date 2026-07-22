@@ -1,7 +1,7 @@
 {
-  "capture_schema_version": "1.1",
+  "capture_schema_version": "1.2",
   "source": {
-    "export_sha256": "0550cc91613a5d8d91b1e81d0e9c9670c1dea5b259de2d7592f49d35054bf4aa",
+    "export_sha256": "efb6d7806a1ad26447cafbfeb5c3cabd85f2c01ae9ec5b06547eaa3743ba1187",
     "workflow_name": "SDA Native Activity Capture v1",
     "captured_at": "2026-07-22",
     "environment": "development_tenant",
@@ -15,20 +15,56 @@
     "configured_properties_complete": true,
     "workflow_executed": false
   },
+  "export_top_level_keys": [
+    "dependent_workflows",
+    "workflow"
+  ],
   "workflow": {
     "type": "generic.workflow",
     "base_type": "workflow",
     "object_type": "definition_workflow",
     "unique_name_prefix": "definition_workflow_",
+    "top_level_keys": [
+      "actions",
+      "base_type",
+      "categories",
+      "name",
+      "object_type",
+      "properties",
+      "title",
+      "type",
+      "unique_name",
+      "variables"
+    ],
     "property_keys": [
       "atomic",
       "delete_workflow_instance",
       "description",
       "display_name",
-      "owner",
       "runtime_user",
       "target"
-    ]
+    ],
+    "variable": {
+      "object_type": "variable_workflow",
+      "unique_name_prefix": "variable_workflow_",
+      "wrapper_keys": [
+        "object_type",
+        "properties",
+        "schema_id",
+        "unique_name"
+      ],
+      "property_keys": [
+        "description",
+        "display_on_wizard",
+        "is_invisible",
+        "is_required",
+        "name",
+        "scope",
+        "type",
+        "value",
+        "variable_string_format"
+      ]
+    }
   },
   "activities": {
     "http_request": {
@@ -160,6 +196,80 @@
         "workflow_id",
         "workflow_name"
       ]
+    },
+    "while_loop": {
+      "display_name": "While Loop",
+      "type": "logic.while",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution"
+      ]
+    },
+    "set_variables": {
+      "display_name": "Set Variables",
+      "type": "core.set_multiple_variables",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution",
+        "variables_to_update"
+      ]
+    },
+    "sleep": {
+      "display_name": "Sleep",
+      "type": "core.sleep",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "skip_execution",
+        "sleep_interval"
+      ]
+    },
+    "parse_json": {
+      "display_name": "Parse JSON",
+      "type": "core.parsejson",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "action_timeout",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "example_json",
+        "input_json",
+        "set_default_value",
+        "skip_execution"
+      ]
+    },
+    "json_path_query": {
+      "display_name": "JSONPath Query",
+      "type": "corejava.jsonpathquery",
+      "base_type": "activity",
+      "object_type": "definition_activity",
+      "unique_name_prefix": "definition_activity_",
+      "property_keys": [
+        "action_timeout",
+        "continue_on_failure",
+        "description",
+        "display_name",
+        "input_json",
+        "jsonpath_queries",
+        "skip_execution"
+      ]
     }
   },
   "serialization_topology": {
@@ -168,7 +278,12 @@
       "create_prompt",
       "condition",
       "request_approval",
-      "child_workflow"
+      "child_workflow",
+      "while_loop",
+      "set_variables",
+      "sleep",
+      "parse_json",
+      "json_path_query"
     ],
     "condition": {
       "children_key": "blocks",
@@ -179,6 +294,32 @@
     "child_workflow": {
       "dependency_key": "dependent_workflows",
       "embedded_workflows": false
+    },
+    "while_loop": {
+      "children_key": "blocks",
+      "branch_activity": "condition_branch"
+    },
+    "workflow_variables": {
+      "collection_key": "variables",
+      "object_type": "variable_workflow",
+      "unique_name_prefix": "variable_workflow_",
+      "wrapper_keys": [
+        "object_type",
+        "properties",
+        "schema_id",
+        "unique_name"
+      ],
+      "property_keys": [
+        "description",
+        "display_on_wizard",
+        "is_invisible",
+        "is_required",
+        "name",
+        "scope",
+        "type",
+        "value",
+        "variable_string_format"
+      ]
     }
   }
 }
