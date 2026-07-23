@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import copy
+import json
 import tempfile
 import unittest
-import copy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -145,6 +146,36 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual(200, second.status_code, second.get_json())
         self.assertEqual(body["reservation_id"], second.get_json()["reservation_id"])
         self.assertEqual(body["plan_id"], second.get_json()["plan_id"])
+
+    def test_meraki_string_encoded_plan_body_is_decoded_once(self):
+        payload = {
+            "requirements": self.requirements,
+            "idempotency_key": "meraki-native-http-json-string-001",
+        }
+        response = self.client.post(
+            "/v1/workflow-actions/plan",
+            data=json.dumps(json.dumps(payload)),
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, response.status_code, response.get_json())
+        self.assertEqual("plan_ready", response.get_json()["status"])
+
+    def test_meraki_string_compatibility_remains_object_only_and_endpoint_scoped(self):
+        non_object = self.client.post(
+            "/v1/workflow-actions/plan",
+            data=json.dumps(json.dumps(["not", "an", "object"])),
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(400, non_object.status_code)
+        self.assertEqual("body", non_object.get_json()["error"])
+
+        strict_route = self.client.post(
+            "/v1/intents/validate",
+            data=json.dumps(json.dumps(self.intent)),
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(400, strict_route.status_code)
+        self.assertEqual("body", strict_route.get_json()["error"])
 
     def test_dynamic_idempotency_key_rebinding_is_rejected(self):
         payload = {
