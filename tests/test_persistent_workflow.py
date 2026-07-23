@@ -160,6 +160,33 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual(200, response.status_code, response.get_json())
         self.assertEqual("plan_ready", response.get_json()["status"])
 
+    def test_meraki_unquoted_idempotency_token_is_repaired_with_strict_grammar(self):
+        idempotency_key = "meraki-native-http-unquoted-001"
+        payload = {
+            "requirements": self.requirements,
+            "idempotency_key": idempotency_key,
+        }
+        valid_json = json.dumps(payload, separators=(",", ":"))
+        meraki_body = valid_json.replace(
+            json.dumps(idempotency_key), idempotency_key, 1
+        )
+        response = self.client.post(
+            "/v1/workflow-actions/plan",
+            data=meraki_body,
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, response.status_code, response.get_json())
+        self.assertEqual("plan_ready", response.get_json()["status"])
+
+        invalid_body = meraki_body.replace(idempotency_key, "unsafe key", 1)
+        rejected = self.client.post(
+            "/v1/workflow-actions/plan",
+            data=invalid_body,
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(400, rejected.status_code)
+        self.assertEqual("body", rejected.get_json()["error"])
+
     def test_meraki_string_compatibility_remains_object_only_and_endpoint_scoped(self):
         non_object = self.client.post(
             "/v1/workflow-actions/plan",

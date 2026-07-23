@@ -31,8 +31,11 @@ from .store import (
 )
 
 
-API_VERSION = "0.6.1"
+API_VERSION = "0.6.2"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
+MERAKI_UNQUOTED_IDEMPOTENCY_KEY = re.compile(
+    r'("idempotency_key"\s*:\s*)([A-Za-z0-9_.:-]{12,128})(\s*}\s*)\Z'
+)
 
 
 def _boolean_environment(name: str, default: bool = False) -> bool:
@@ -236,6 +239,23 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 document = json.loads(document)
             except (TypeError, ValueError):
                 document = None
+        if allow_string_encoded_object and document is None:
+            # The Meraki JSON editor emits a STRING variable token without JSON
+            # quotes even though the surrounding fixed template is JSON. Repair
+            # only the final, single idempotency_key field and only when its
+            # value matches the API's constrained identifier grammar.
+            raw_document = request.get_data(cache=True, as_text=True)
+            match = MERAKI_UNQUOTED_IDEMPOTENCY_KEY.search(raw_document)
+            if match and raw_document.count('"idempotency_key"') == 1:
+                repaired_document = (
+                    raw_document[: match.start(2)]
+                    + json.dumps(match.group(2))
+                    + raw_document[match.end(2) :]
+                )
+                try:
+                    document = json.loads(repaired_document)
+                except (TypeError, ValueError):
+                    document = None
         if not isinstance(document, dict):
             return None, (jsonify({"error": "body", "message": "JSON object required"}), 400)
         return document, None
