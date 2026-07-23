@@ -204,6 +204,14 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual(400, strict_route.status_code)
         self.assertEqual("body", strict_route.get_json()["error"])
 
+        decoded_twice = self.client.post(
+            "/v1/workflow-actions/plan",
+            data=json.dumps(json.dumps(json.dumps({"intent": self.intent}))),
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(400, decoded_twice.status_code)
+        self.assertEqual("body", decoded_twice.get_json()["error"])
+
     def test_dynamic_idempotency_key_rebinding_is_rejected(self):
         payload = {
             "requirements": self.requirements,
@@ -370,6 +378,71 @@ class PersistentWorkflowTests(unittest.TestCase):
         evidence = self.client.post(
             "/v1/workflow-actions/evidence",
             json={"run_id": run_id},
+            headers=self.headers("auditor-token"),
+        )
+        self.assertEqual(200, evidence.status_code, evidence.get_json())
+        self.assertTrue(evidence.get_json()["chain_valid"])
+
+    def test_string_encoded_meraki_action_contract(self):
+        def encoded(document):
+            return json.dumps(json.dumps(document))
+
+        planned = self.client.post(
+            "/v1/workflow-actions/plan",
+            data=encoded({"intent": self.intent}),
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, planned.status_code, planned.get_json())
+        plan_id = planned.get_json()["plan_id"]
+
+        approved = self.client.post(
+            "/v1/workflow-actions/approve",
+            data=encoded(
+                {
+                    "plan_id": plan_id,
+                    "decision": "approved",
+                    "change_reference": "CHG-MERAKI-STRING-001",
+                    "expires_at": (
+                        datetime.now(timezone.utc) + timedelta(hours=1)
+                    ).isoformat(),
+                }
+            ),
+            headers=self.headers("approver-token"),
+        )
+        self.assertEqual(200, approved.status_code, approved.get_json())
+
+        started = self.client.post(
+            "/v1/workflow-actions/run",
+            data=encoded(
+                {
+                    "plan_id": plan_id,
+                    "mode": "dry_run",
+                    "idempotency_key": "fixed-meraki-string-action-0001",
+                }
+            ),
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(200, started.status_code, started.get_json())
+        run_id = started.get_json()["run"]["run_id"]
+
+        processed = self.client.post(
+            "/v1/workflow-actions/process-dry-run",
+            data=encoded({"run_id": run_id}),
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(200, processed.status_code, processed.get_json())
+
+        status = self.client.post(
+            "/v1/workflow-actions/status",
+            data=encoded({"run_id": run_id}),
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(200, status.status_code, status.get_json())
+        self.assertEqual("dry_run_blocked", status.get_json()["status"])
+
+        evidence = self.client.post(
+            "/v1/workflow-actions/evidence",
+            data=encoded({"run_id": run_id}),
             headers=self.headers("auditor-token"),
         )
         self.assertEqual(200, evidence.status_code, evidence.get_json())

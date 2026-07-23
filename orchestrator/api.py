@@ -260,6 +260,16 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             return None, (jsonify({"error": "body", "message": "JSON object required"}), 400)
         return document, None
 
+    def workflow_json_object():
+        """Decode the native Meraki HTTP activity's fixed JSON body once.
+
+        Some Meraki Workflows releases serialize a composed JSON-editor value
+        as a top-level JSON string. Compatibility is deliberately limited to
+        the fixed ``/v1/workflow-actions/*`` surface; ordinary API routes keep
+        the strict object-only contract.
+        """
+        return json_object(allow_string_encoded_object=True)
+
     @app.post("/v1/intents/validate")
     @require_roles("viewer", "planner", "approver", "operator")
     def validate():
@@ -299,11 +309,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @require_roles("planner")
     def workflow_action_plan():
         """Fixed-path Meraki action: validate, persist, plan, and render."""
-        # Meraki Workflows' native HTTP Request activity serializes a composed
-        # JSON editor value as a top-level JSON string in some tenant releases.
-        # Accept exactly one additional decode on this fixed workflow endpoint;
-        # all other API routes retain the strict object-only contract.
-        document, error = json_object(allow_string_encoded_object=True)
+        document, error = workflow_json_object()
         if error:
             return error
         intent_document = document.get("intent")
@@ -464,7 +470,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.post("/v1/workflow-actions/approve")
     @require_roles("approver")
     def workflow_action_approve():
-        document, error = json_object()
+        document, error = workflow_json_object()
         if error:
             return error
         try:
@@ -482,7 +488,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.post("/v1/workflow-actions/adopt-owned-state-baseline")
     @require_roles("approver")
     def workflow_action_adopt_owned_state_baseline():
-        document, error = json_object()
+        document, error = workflow_json_object()
         if error:
             return error
         manifest = document.get("manifest")
@@ -504,7 +510,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.post("/v1/workflow-actions/owned-state-baseline")
     @require_roles("viewer", "planner", "approver", "operator", "auditor")
     def workflow_action_owned_state_baseline():
-        document, error = json_object()
+        document, error = workflow_json_object()
         if error:
             return error
         baseline = store().latest_owned_state(str(document.get("fabric_id", "")))
@@ -538,7 +544,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.post("/v1/workflow-actions/run")
     @require_roles("operator")
     def workflow_action_run():
-        document, error = json_object()
+        document, error = workflow_json_object()
         if error:
             return error
         window = document.get("maintenance_window") or {}
@@ -576,7 +582,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.post("/v1/workflow-actions/process-dry-run")
     @require_roles("operator")
     def workflow_action_process_dry_run():
-        document, error = json_object()
+        document, error = workflow_json_object()
         if error:
             return error
         run_id = str(document.get("run_id", ""))
@@ -590,7 +596,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.post("/v1/workflow-actions/status")
     @require_roles("viewer", "planner", "approver", "operator", "auditor")
     def workflow_action_status():
-        document, error = json_object()
+        document, error = workflow_json_object()
         if error:
             return error
         run_record = store().get_run(str(document.get("run_id", "")))
@@ -599,7 +605,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @app.post("/v1/workflow-actions/evidence")
     @require_roles("auditor")
     def workflow_action_evidence():
-        document, error = json_object()
+        document, error = workflow_json_object()
         if error:
             return error
         run_id = str(document.get("run_id", ""))
