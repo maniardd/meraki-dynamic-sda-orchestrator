@@ -98,7 +98,7 @@ gates:
     owner_roles: [platform_owner, automation_owner]
     dependencies: [software.complete_suite]
     evidence: []
-    rationale: PostgreSQL backup, restore, retention, and recovery-time evidence is required.
+    rationale: Guarded local backup and disposable-restore tooling is implemented, but the reviewed release must still prove a live restore, approved encrypted off-host retention, recovery objectives, alerting, and a second-host recovery exercise.
 
   - id: runtime.ha_worker_recovery
     category: runtime

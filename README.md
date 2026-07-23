@@ -134,6 +134,9 @@ redundant-hardware tests.
 The [native multicast acceptance boundary](docs/multicast-overlay-renderer.md)
 records per-VN planning, rendered IOS XE policy, gates, and traffic tests still
 required before enablement.
+The [PostgreSQL recovery runbook](docs/postgresql-backup-restore.md)
+defines private backups, checksum-bound disposable restores, retention, and the
+evidence still required before the runtime recovery gate can pass.
 The [policy-plane acceptance boundary](docs/policy-plane-renderer.md) records
 ISE ownership, SXP propagation, edge enforcement, API reconciliation, gates,
 and the evidence required before policy apply can be enabled.
