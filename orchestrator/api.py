@@ -33,9 +33,48 @@ from .store import (
 
 API_VERSION = "0.6.2"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
-MERAKI_UNQUOTED_IDEMPOTENCY_KEY = re.compile(
-    r'("idempotency_key"\s*:\s*)([A-Za-z0-9_.:-]{12,128})(\s*}\s*)\Z'
+MERAKI_UNQUOTED_SCALAR = re.compile(
+    r'("(?P<key>[A-Za-z_][A-Za-z0-9_]*)"\s*:\s*)'
+    r"(?P<value>[A-Za-z0-9_.:@/+\-]{1,256})(?=\s*[,}])"
 )
+MERAKI_SCALAR_GRAMMARS = {
+    "plan_id": re.compile(r"plan_[0-9a-f]{16}"),
+    "run_id": re.compile(r"run_[0-9a-f]{32}"),
+    "idempotency_key": re.compile(r"[A-Za-z0-9_.:-]{12,128}"),
+    "mode": re.compile(r"(?:dry_run|apply)"),
+    "decision": re.compile(r"(?:approved|rejected)"),
+    "change_reference": re.compile(r"[A-Za-z0-9_.:/\-]{3,128}"),
+    "expires_at": re.compile(r"[0-9TtZz:+.\-]{10,64}"),
+    "start": re.compile(r"[0-9TtZz:+.\-]{10,64}"),
+    "end": re.compile(r"[0-9TtZz:+.\-]{10,64}"),
+    "fabric_id": re.compile(r"[A-Za-z0-9_.:\-]{3,128}"),
+    "evidence_hash": re.compile(r"[0-9a-f]{64}"),
+    "discovered_by": re.compile(r"[A-Za-z0-9_.:@/\-]{3,128}"),
+}
+
+
+def _repair_meraki_unquoted_scalars(raw_document: str) -> Optional[Dict[str, Any]]:
+    """Quote only approved native-workflow tokens with constrained grammars."""
+
+    replacements = 0
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal replacements
+        grammar = MERAKI_SCALAR_GRAMMARS.get(match.group("key"))
+        value = match.group("value")
+        if grammar is None or grammar.fullmatch(value) is None:
+            return match.group(0)
+        replacements += 1
+        return match.group(1) + json.dumps(value)
+
+    repaired = MERAKI_UNQUOTED_SCALAR.sub(replace, raw_document)
+    if replacements == 0:
+        return None
+    try:
+        document = json.loads(repaired)
+    except (TypeError, ValueError):
+        return None
+    return document if isinstance(document, dict) else None
 
 
 def _boolean_environment(name: str, default: bool = False) -> bool:
@@ -240,22 +279,12 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             except (TypeError, ValueError):
                 document = None
         if allow_string_encoded_object and document is None:
-            # The Meraki JSON editor emits a STRING variable token without JSON
-            # quotes even though the surrounding fixed template is JSON. Repair
-            # only the final, single idempotency_key field and only when its
-            # value matches the API's constrained identifier grammar.
+            # The Meraki JSON editor can emit STRING variable tokens without
+            # JSON quotes even though the surrounding fixed template is JSON.
+            # Repair only explicitly supported field names whose values match
+            # their constrained grammars; arbitrary fields remain invalid.
             raw_document = request.get_data(cache=True, as_text=True)
-            match = MERAKI_UNQUOTED_IDEMPOTENCY_KEY.search(raw_document)
-            if match and raw_document.count('"idempotency_key"') == 1:
-                repaired_document = (
-                    raw_document[: match.start(2)]
-                    + json.dumps(match.group(2))
-                    + raw_document[match.end(2) :]
-                )
-                try:
-                    document = json.loads(repaired_document)
-                except (TypeError, ValueError):
-                    document = None
+            document = _repair_meraki_unquoted_scalars(raw_document)
         if not isinstance(document, dict):
             return None, (jsonify({"error": "body", "message": "JSON object required"}), 400)
         return document, None
