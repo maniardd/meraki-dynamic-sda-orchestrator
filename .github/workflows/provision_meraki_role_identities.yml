@@ -1,0 +1,58 @@
+name: Provision Meraki API Role Identities
+
+on:
+  workflow_dispatch:
+    inputs:
+      approver_digest:
+        description: SHA-256 digest for the Meraki approver token
+        required: true
+        type: string
+      operator_digest:
+        description: SHA-256 digest for the Meraki operator token
+        required: true
+        type: string
+      auditor_digest:
+        description: SHA-256 digest for the Meraki auditor token
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sda-orchestrator-api-administration
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: [self-hosted, sda-relay]
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out reviewed administration code
+        uses: actions/checkout@v4
+
+      - name: Provision hashed role identities
+        shell: bash
+        env:
+          APPROVER_DIGEST: ${{ inputs.approver_digest }}
+          OPERATOR_DIGEST: ${{ inputs.operator_digest }}
+          AUDITOR_DIGEST: ${{ inputs.auditor_digest }}
+          IDENTITY_FILE: /home/sdaadmin/.config/sda-orchestrator/token-identities.json
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 admin/provision_meraki_role_identities.py \
+            --output "${IDENTITY_FILE}" \
+            --approver-digest "${APPROVER_DIGEST}" \
+            --operator-digest "${OPERATOR_DIGEST}" \
+            --auditor-digest "${AUDITOR_DIGEST}"
+          sudo systemctl restart sda-orchestrator-api.service
+
+      - name: Verify API health and execution lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --silent --show-error --fail --max-time 5 http://127.0.0.1:8080/health)"
+          python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"] == "ok"; assert d["execution_enabled"] is False; print("api_health=ok"); print("execution_enabled=false")' <<<"${response}"
