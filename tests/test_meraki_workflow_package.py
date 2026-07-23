@@ -33,6 +33,8 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         mutations = (
             ("require_checkbox", "", "approval.acknowledgement"),
             ("require_checkbox", None, "approval.acknowledgement"),
+            ("due_at_input", "unreviewed_due", "approval.due_binding"),
+            ("due_at_input", None, "approval.due_binding"),
             ("expires_at_input", "unreviewed_expiry", "approval.expiry_binding"),
             ("expires_at_input", None, "approval.expiry_binding"),
         )

@@ -943,6 +943,13 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.workflows[request_approval]",
             "Approval requires a non-empty plan-review acknowledgement",
         )
+    elif native_approval.get("due_at_input") != "approval_expires_at":
+        _issue(
+            issues,
+            "approval.due_binding",
+            "$.workflows[request_approval]",
+            "Native approval due date must bind to the reviewed approval_expires_at input",
+        )
     elif native_approval.get("expires_at_input") != "approval_expires_at":
         _issue(
             issues,

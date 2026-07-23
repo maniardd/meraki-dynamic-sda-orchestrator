@@ -13,6 +13,19 @@
     "native_task_display_date": "2026-07-26",
     "alignment_verified": false
   },
+  "workflow_correction": {
+    "applied_at": "2026-07-23T16:57:24Z",
+    "source_workflow_id": "02X8XU5DM3D0R5EBWrSPxNpfn0sC2CxMbar",
+    "validated_backup_workflow_id": "02X953XCLHSDO0yELFytxri7RF5o461yTwJ",
+    "native_due_date_binding": "Input.approvalExpiresAt",
+    "native_expiration_date_binding": "Input.approvalExpiresAt",
+    "source_workflow_validated": true,
+    "source_workflow_locked": true,
+    "parent_workflow_validated": true,
+    "parent_workflow_locked": true,
+    "validated_parent_safety_copy_id": "02X958B61494Z6C03cv0XcsE0glvF8te5wo",
+    "future_tasks_only": true
+  },
   "plan": {
     "plan_id": "plan_4d6cfb096a4526a1",
     "plan_hash": "4d6cfb096a4526a10ab9a65883715774159962e26f5516b65151f3315ac797d2",
@@ -23,6 +36,6 @@
     "device_writes_performed": false,
     "approval_decision_recorded": false
   },
-  "next_action": "Authorized approver must review the immutable hashes and decide the native Meraki task; automation owner must reconcile the displayed task expiry with the requested UTC expiry before this gate passes.",
+  "next_action": "Authorized approver must review the immutable hashes and decide the existing native Meraki task. After it completes, run a new integrated parent acceptance to prove that both the native due date and expiration date equal the requested UTC input.",
   "result": "pending"
 }

@@ -115,6 +115,28 @@ approval decision. The pending state is recorded in the production acceptance
 registry and does not block independent software, documentation, or evidence
 work.
 
+The expiry mismatch was traced to the native Request Approval activity: both
+its due date and expiration date were configured as a static relative duration
+of 72 hours. The `approvalExpiresAt` input appeared in the body text but did
+not control either native field. On 2026-07-23 the child was corrected so both
+fields use the specified-date mode and bind to `Input.approvalExpiresAt`. The
+source workflow is validated and locked. A validated, locked safety copy was
+also created before editing the referenced child:
+
+Cisco documents due date and expiration date as separate Request Approval
+properties, each supporting either a specified date or a relative duration:
+<https://documentation.meraki.com/Platform_Management/Workflows/Tasks/Request_Approval_Task>.
+
+- corrected source workflow: `02X8XU5DM3D0R5EBWrSPxNpfn0sC2CxMbar`
+- protected safety copy: `02X953XCLHSDO0yELFytxri7RF5o461yTwJ`
+- revalidated and locked parent: `02X92FV8CYQLX5vsmumjTB2CsfTtalICfWS`
+- validated and locked parent safety copy: `02X958B61494Z6C03cv0XcsE0glvF8te5wo`
+
+The already-created task retains its original `07/26/26` deadline; the change
+applies only to tasks created after the correction. Therefore the integrated
+gate stays pending until the current human decision completes and a fresh
+parent run proves exact native due-date and expiration-date alignment.
+
 ## Release posture
 
 - Deterministic planner/orchestrator software: implemented and independently reviewed.
@@ -131,7 +153,9 @@ work.
 ## Remaining gates before production Apply can exist
 
 1. Complete the pending integrated parent approval, dry run, and evidence
-   export. The live tenant currently terminates directly on non-2xx responses;
+   export, then run a fresh parent acceptance proving both native task dates
+   equal the supplied `approvalExpiresAt` value. The live tenant currently
+   terminates directly on non-2xx responses;
    before declaring the exported package production-ready, either assemble the
    manifest-pinned immediate HTTP status branches or formally version the
    simpler fail-stop contract and re-review it.
