@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import copy
+import json
+import os
+import subprocess
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from orchestrator.runtime_recovery import (
     RuntimeRecoveryInspectionError,
@@ -75,6 +80,24 @@ class RuntimeRecoveryInspectionTests(unittest.TestCase):
                 [{"mode": "apply", "status": "apply_running", "count": True}],
                 self.now,
             )
+
+    def test_direct_tool_invocation_loads_package_and_fails_structurally(self):
+        root = Path(__file__).resolve().parents[1]
+        environment = dict(os.environ)
+        environment["ORCHESTRATOR_DATABASE_URL"] = "unsupported://database"
+        result = subprocess.run(
+            [sys.executable, str(root / "tools" / "inspect_runtime_recovery.py")],
+            cwd=str(root.parent),
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(2, result.returncode)
+        payload = json.loads(result.stdout)
+        self.assertEqual("RuntimeRecoveryInspectionError", payload["error_type"])
+        self.assertFalse(payload["safe"])
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
 
 
 if __name__ == "__main__":
