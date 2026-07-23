@@ -146,6 +146,9 @@ hardware/API acceptance procedure required before its blocker can be cleared.
 The [Meraki workflow build runbook](docs/meraki-workflow-build-runbook.md)
 defines the native workflow assembly, target/account-key mapping, validation,
 export, dry-run, and acceptance sequence.
+The [Figma workflow UX](docs/figma-workflow-ux.md) records the editable
+Cisco-enterprise Plan, Review/Approve, and Dry Run/Evidence storyboard and its
+honest mapping to Meraki-native activities.
 The [production acceptance registry](docs/production-acceptance-registry.md)
 defines the machine-enforced evidence, dependency, sign-off, and Apply-lock
 decision that must pass before controlled enablement can be requested.
