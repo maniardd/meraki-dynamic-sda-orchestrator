@@ -97,8 +97,14 @@ gates:
     status: pending
     owner_roles: [platform_owner, automation_owner]
     dependencies: [software.complete_suite]
-    evidence: []
-    rationale: Guarded local backup and disposable-restore tooling is implemented, but the reviewed release must still prove a live restore, approved encrypted off-host retention, recovery objectives, alerting, and a second-host recovery exercise.
+    evidence:
+      - id: runtime.postgres-backup-restore.20260723
+        kind: test_report
+        ref: evidence://acceptance/evidence/postgres-backup-restore-20260723.json
+        sha256: fe12125685861c9a610d87afacfafaa8b3754bd6b9b070896aa8648ebf8bba58
+        captured_at: "2026-07-23T18:15:04Z"
+        result: passed
+    rationale: A private local backup and isolated disposable-cluster restore passed on the Ubuntu runner, but approved encrypted off-host retention, recovery objectives, alerting, and a second-host recovery exercise remain required.
 
   - id: runtime.ha_worker_recovery
     category: runtime
