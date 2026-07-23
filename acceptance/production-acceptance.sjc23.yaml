@@ -31,7 +31,7 @@ gates:
       - id: software.full-suite.20260723
         kind: test_report
         ref: evidence://acceptance/evidence/software-suite-20260723.json
-        sha256: 7cd8d927cb08e52819b7acadec7ee97246a4af0390633ae86dee7d0bc5db0338
+        sha256: ba4b66c7fd5f1c9d32cfc09e3d4a1838b806cf421f87742c53d23e2e8452ab05
         captured_at: "2026-07-23T16:12:24Z"
         result: passed
 

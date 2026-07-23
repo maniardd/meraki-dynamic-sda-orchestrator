@@ -9,11 +9,11 @@
   "command": "python -m unittest discover -s tests -q",
   "result": {
     "status": "passed",
-    "tests_run": 290,
+    "tests_run": 291,
     "tests_skipped": 5,
     "failures": 0,
     "errors": 0,
-    "elapsed_seconds": 84.901
+    "elapsed_seconds": 85.542
   },
   "notes": [
     "The complete suite passed serially.",

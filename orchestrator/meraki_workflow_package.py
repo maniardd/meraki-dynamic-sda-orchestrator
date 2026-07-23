@@ -934,6 +934,22 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "$.workflows[request_approval]",
             "Approval comment is required",
         )
+    elif not isinstance(native_approval.get("require_checkbox"), str) or not native_approval[
+        "require_checkbox"
+    ].strip():
+        _issue(
+            issues,
+            "approval.acknowledgement",
+            "$.workflows[request_approval]",
+            "Approval requires a non-empty plan-review acknowledgement",
+        )
+    elif native_approval.get("expires_at_input") != "approval_expires_at":
+        _issue(
+            issues,
+            "approval.expiry_binding",
+            "$.workflows[request_approval]",
+            "Native approval expiry must bind to the reviewed approval_expires_at input",
+        )
 
     apply_workflow = workflows.get("start_apply") or {}
     if not apply_enabled:
