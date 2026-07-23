@@ -1,0 +1,24 @@
+name: Deploy SDA Orchestrator API Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sda-orchestrator-api-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, sda-relay]
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out reviewed release
+        uses: actions/checkout@v4
+
+      - name: Stage immutable API release
+        shell: bash
+        run: bash admin/stage_api_release.sh "$GITHUB_WORKSPACE"
