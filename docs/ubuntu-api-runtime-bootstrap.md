@@ -16,7 +16,9 @@ the existing `sda-relay` self-hosted runner. It:
 3. creates an isolated virtual environment and installs pinned dependencies;
 4. compiles the runtime and runs the complete test suite;
 5. atomically updates `~/sda-orchestrator/current`; and
-6. restarts the API only when the separately installed system service exists.
+6. restarts the API only when the separately installed system service exists,
+   waits for health using a bounded 30-attempt retry, and restores the prior
+   release if restart or health validation fails.
 
 The workflow does not receive secrets, inspect network configuration, contact
 devices, or upload host diagnostics.

@@ -97,10 +97,15 @@ if [ -n "${systemctl_path}" ] &&
     fi
     fail "service_restart_not_authorized_or_failed"
   fi
-  health_status="$(
-    curl --silent --output /dev/null --write-out '%{http_code}' \
-      --max-time 10 http://127.0.0.1:8080/health 2>/dev/null || true
-  )"
+  health_status=""
+  for _ in $(seq 1 30); do
+    health_status="$(
+      curl --silent --output /dev/null --write-out '%{http_code}' \
+        --max-time 3 http://127.0.0.1:8080/health 2>/dev/null || true
+    )"
+    [ "${health_status}" = "200" ] && break
+    sleep 1
+  done
   if [ "${health_status}" != "200" ]; then
     if [ -n "${previous_release}" ] && [ -d "${previous_release}" ]; then
       rollback_link="${runtime_root}/.current.rollback.$$"

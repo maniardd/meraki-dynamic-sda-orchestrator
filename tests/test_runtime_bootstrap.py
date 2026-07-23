@@ -21,6 +21,9 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertIn("previous_release", rendered)
         self.assertIn("rollback_link", rendered)
         self.assertIn("service_health_not_200", rendered)
+        self.assertIn("for _ in $(seq 1 30); do", rendered)
+        self.assertIn("--max-time 3 http://127.0.0.1:8080/health", rendered)
+        self.assertNotIn("--max-time 10 http://127.0.0.1:8080/health", rendered)
         self.assertNotIn("git reset", rendered)
         self.assertNotIn("git clean", rendered)
 
