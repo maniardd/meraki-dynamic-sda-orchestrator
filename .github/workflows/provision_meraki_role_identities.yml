@@ -40,10 +40,12 @@ jobs:
           OPERATOR_DIGEST: ${{ inputs.operator_digest }}
           AUDITOR_DIGEST: ${{ inputs.auditor_digest }}
           IDENTITY_FILE: /home/sdaadmin/.config/sda-orchestrator/token-identities.json
+          RUNTIME_PYTHON: /home/sdaadmin/sda-orchestrator/current/.venv/bin/python
         run: |
           set -euo pipefail
           umask 077
-          python3 admin/provision_meraki_role_identities.py \
+          test -x "${RUNTIME_PYTHON}"
+          "${RUNTIME_PYTHON}" admin/provision_meraki_role_identities.py \
             --output "${IDENTITY_FILE}" \
             --approver-digest "${APPROVER_DIGEST}" \
             --operator-digest "${OPERATOR_DIGEST}" \
