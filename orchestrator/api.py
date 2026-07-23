@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import uuid
@@ -30,7 +31,7 @@ from .store import (
 )
 
 
-API_VERSION = "0.6.0"
+API_VERSION = "0.6.1"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
 
 
@@ -226,10 +227,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             }
         ), (200 if ready_state else 503)
 
-    def json_object():
+    def json_object(*, allow_string_encoded_object: bool = False):
         if not request.is_json:
             return None, (jsonify({"error": "content_type", "message": "Use application/json"}), 415)
         document = request.get_json(silent=True)
+        if allow_string_encoded_object and isinstance(document, str):
+            try:
+                document = json.loads(document)
+            except (TypeError, ValueError):
+                document = None
         if not isinstance(document, dict):
             return None, (jsonify({"error": "body", "message": "JSON object required"}), 400)
         return document, None
@@ -273,7 +279,11 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     @require_roles("planner")
     def workflow_action_plan():
         """Fixed-path Meraki action: validate, persist, plan, and render."""
-        document, error = json_object()
+        # Meraki Workflows' native HTTP Request activity serializes a composed
+        # JSON editor value as a top-level JSON string in some tenant releases.
+        # Accept exactly one additional decode on this fixed workflow endpoint;
+        # all other API routes retain the strict object-only contract.
+        document, error = json_object(allow_string_encoded_object=True)
         if error:
             return error
         intent_document = document.get("intent")
