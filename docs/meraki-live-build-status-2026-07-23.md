@@ -93,6 +93,28 @@ Evidence export acceptance:
 
 No switch configuration, ISE object, or Apply operation was executed.
 
+### Ubuntu relay read-only preflight
+
+GitHub Actions run
+[`30029287447`](https://github.com/maniardd/meraki-dynamic-sda-orchestrator/actions/runs/30029287447)
+executed the repository-tested read-only preflight on the private Ubuntu
+self-hosted runner. It performed no repository checkout, device login, sudo,
+service restart, or configuration operation.
+
+- Ubuntu: 22.04.5 LTS, 4 CPUs, approximately 8 GB RAM
+- root disk: 38 GB total, 42% used
+- PostgreSQL: active
+- hardened orchestrator health: HTTP 200 on loopback port 8080
+- legacy relay health: no service on port 5000
+- Border and Edge Dashboard/OOB SSH: reachable
+- Border and Edge execution-management SSH: unreachable
+
+This proves that the relay host and switch SSH service are reachable through
+the `192.168.128.x` Dashboard/OOB plane, while the required `10.40.x.x`
+execution plane is not currently routed or permitted end to end. The IOS XE
+read-only hardware precheck therefore remains pending; production automation
+must not silently fall back to the Dashboard/OOB addresses.
+
 ### Integrated parent acceptance
 
 An integrated parent run was started after the HTTP transport hardening:

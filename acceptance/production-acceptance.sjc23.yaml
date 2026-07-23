@@ -106,8 +106,14 @@ gates:
     status: pending
     owner_roles: [platform_owner, automation_owner]
     dependencies: [runtime.postgres_backup_restore]
-    evidence: []
-    rationale: API and worker restart, stuck-lock recovery, and high-availability behavior require operational evidence.
+    evidence:
+      - id: runtime.relay-preflight.20260723
+        kind: test_report
+        ref: evidence://acceptance/evidence/relay-preflight-20260723.json
+        sha256: b8bde51fae099d19e3ef55f0bc4534ca6b6fdee729f56542f1aac3785383049e
+        captured_at: "2026-07-23T17:24:51Z"
+        result: pending
+    rationale: The loopback API and PostgreSQL are healthy, but worker restart, Redis, stuck-lock recovery, backup/restore, and high-availability behavior remain unproven.
 
   - id: runtime.secret_rotation
     category: security
@@ -124,8 +130,14 @@ gates:
     status: pending
     owner_roles: [network_design_authority, automation_owner]
     dependencies: [software.complete_suite]
-    evidence: []
-    rationale: The exact management plane, roles, links, releases, features, and checkpoint support must be re-confirmed.
+    evidence:
+      - id: iosxe.relay-two-plane-preflight.20260723
+        kind: test_report
+        ref: evidence://acceptance/evidence/relay-preflight-20260723.json
+        sha256: b8bde51fae099d19e3ef55f0bc4534ca6b6fdee729f56542f1aac3785383049e
+        captured_at: "2026-07-23T17:24:51Z"
+        result: pending
+    rationale: Dashboard/OOB SSH is reachable for both switches, but both required execution-management SSH endpoints are unreachable; device facts cannot be re-confirmed until that path is restored.
 
   - id: iosxe.underlay
     category: iosxe
