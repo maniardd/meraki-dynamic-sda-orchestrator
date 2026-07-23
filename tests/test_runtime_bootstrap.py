@@ -8,6 +8,9 @@ STAGE = ROOT / "admin" / "stage_api_release.sh"
 INSTALL = ROOT / "admin" / "install_api_service.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "deploy_orchestrator_api.yml"
 VALIDATION_WORKFLOW = ROOT / ".github" / "workflows" / "validate_foundation.yml"
+ROLE_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "provision_meraki_role_identities.yml"
+)
 
 
 class RuntimeBootstrapTests(unittest.TestCase):
@@ -70,6 +73,22 @@ class RuntimeBootstrapTests(unittest.TestCase):
     def test_ci_validates_runtime_shell_syntax(self):
         workflow_text = VALIDATION_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("bash -n admin/*.sh", workflow_text)
+
+    def test_role_provisioning_uses_the_installed_runtime_environment(self):
+        workflow_text = ROLE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "RUNTIME_PYTHON: /home/sdaadmin/sda-orchestrator/current/.venv/bin/python",
+            workflow_text,
+        )
+        self.assertIn('test -x "${RUNTIME_PYTHON}"', workflow_text)
+        self.assertIn(
+            '"${RUNTIME_PYTHON}" admin/provision_meraki_role_identities.py',
+            workflow_text,
+        )
+        self.assertNotIn(
+            "\n          python3 admin/provision_meraki_role_identities.py",
+            workflow_text,
+        )
 
 
 if __name__ == "__main__":
