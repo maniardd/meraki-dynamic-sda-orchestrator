@@ -23,6 +23,10 @@ The parent workflow is also assembled and validated:
 
 The parent contains no Apply child. All tenant HTTP targets use role-separated
 credentials. HTTP redirects and sensitive-header redirects are disabled.
+All five live HTTP activities are configured to stop on activity or non-2xx
+failure, so a failed callback cannot be reported as a successful child run.
+The four child workflows are locked and remain Meraki-validated after this
+check.
 
 ## Live acceptance results
 
@@ -89,6 +93,25 @@ Evidence export acceptance:
 
 No switch configuration, ISE object, or Apply operation was executed.
 
+### Integrated parent acceptance
+
+An integrated parent run was started after the HTTP transport hardening:
+
+- Meraki run ID: `02X93ZAOTHTLS0yv9NVuGfEoAvYHdUXeafP`
+- plan ID: `plan_4d6cfb096a4526a1`
+- plan hash: `4d6cfb096a4526a10ab9a65883715774159962e26f5516b65151f3315ac797d2`
+- artifact hash: `e7a054025636e57f7b13a68006ad62612291f8f9b0dc4456522fc0562aac728a`
+- change reference: `SDA-PARENT-ACCEPT-20260723`
+- current state: waiting at the native Meraki human approval task
+- Apply child: absent
+- device writes: none
+
+The run is intentionally not self-approved by the automation author. The
+authorized user must review the immutable hashes and make the native Meraki
+approval decision. The pending state is recorded in the production acceptance
+registry and does not block independent software, documentation, or evidence
+work.
+
 ## Release posture
 
 - Deterministic planner/orchestrator software: implemented and independently reviewed.
@@ -99,11 +122,16 @@ No switch configuration, ISE object, or Apply operation was executed.
 - SJC23 plan -> approval -> dry-run -> evidence path: passed through the child workflows.
 - Hardware/API acceptance matrices: still pending by design.
 - Production Apply: disabled and absent from the parent workflow.
+- Production acceptance registry: implemented and fail-closed; incomplete
+  hardware, platform, security, and operational gates remain explicit.
 
 ## Remaining gates before production Apply can exist
 
-1. Add immediate fail-closed HTTP status branches to every tenant-native HTTP
-   activity, then run the integrated parent workflow once with Apply still absent.
+1. Complete the pending integrated parent approval, dry run, and evidence
+   export. The live tenant currently terminates directly on non-2xx responses;
+   before declaring the exported package production-ready, either assemble the
+   manifest-pinned immediate HTTP status branches or formally version the
+   simpler fail-stop contract and re-review it.
 2. Export the corrected tenant-native definitions, run the structural auditor,
    and keep raw tenant exports uncommitted.
 3. Complete the IOS XE hardware acceptance matrices for the exact target
@@ -118,3 +146,7 @@ No switch configuration, ISE object, or Apply operation was executed.
 7. Only after every blocker is closed, add a separately approved Apply child
    protected by maintenance-window, immutable-hash, dual-control, checkpoint,
    verification, and rollback gates.
+
+The authoritative gate state is now
+`acceptance/production-acceptance.sjc23.yaml`; prose checklists do not clear
+production blockers.

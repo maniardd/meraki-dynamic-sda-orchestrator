@@ -78,6 +78,8 @@ Implemented foundation:
 - Genuine configured Meraki serialization fingerprint for HTTP, prompt,
   approval, condition blocks/branches, completion, and child-workflow
   invocation; only structural metadata is committed
+- Machine-validated production acceptance registry with dependency-safe gates,
+  hash-bound evidence, independent sign-offs, and fail-open Apply detection
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. The portable Meraki build specification
@@ -141,3 +143,6 @@ hardware/API acceptance procedure required before its blocker can be cleared.
 The [Meraki workflow build runbook](docs/meraki-workflow-build-runbook.md)
 defines the native workflow assembly, target/account-key mapping, validation,
 export, dry-run, and acceptance sequence.
+The [production acceptance registry](docs/production-acceptance-registry.md)
+defines the machine-enforced evidence, dependency, sign-off, and Apply-lock
+decision that must pass before controlled enablement can be requested.

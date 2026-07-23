@@ -1,0 +1,228 @@
+schema_version: "1.0"
+registry_id: sjc23-dynamic-sda-rc1
+
+scope:
+  environment: lab
+  fabric_id: fab-sjc23-001
+  release_candidate: rc1
+  plan_hash: 4d6cfb096a4526a10ab9a65883715774159962e26f5516b65151f3315ac797d2
+  artifact_hash: e7a054025636e57f7b13a68006ad62612291f8f9b0dc4456522fc0562aac728a
+
+controls:
+  apply_authorization_requested: false
+  apply_workflow_present: false
+  device_writes_permitted: false
+
+required_signoff_roles:
+  - network_design_authority
+  - automation_owner
+  - security_owner
+  - platform_owner
+  - change_approver
+
+gates:
+  - id: software.complete_suite
+    category: software
+    required: true
+    status: passed
+    owner_roles: [automation_owner]
+    dependencies: []
+    evidence:
+      - id: software.full-suite.20260723
+        kind: test_report
+        ref: evidence://acceptance/evidence/software-suite-20260723.json
+        sha256: 7cd8d927cb08e52819b7acadec7ee97246a4af0390633ae86dee7d0bc5db0338
+        captured_at: "2026-07-23T16:12:24Z"
+        result: passed
+
+  - id: meraki.child_path
+    category: meraki
+    required: true
+    status: passed
+    owner_roles: [automation_owner]
+    dependencies: []
+    evidence:
+      - id: meraki.child-dry-run.20260723
+        kind: meraki_run
+        ref: evidence://acceptance/evidence/meraki-child-dry-run-20260723.json
+        sha256: 09324f02b9bbc5f74fb5e2230d9686e2c41fc88cd9576bded82ecaac0d0be1cf
+        captured_at: "2026-07-23T15:20:00Z"
+        result: passed
+
+  - id: meraki.integrated_parent
+    category: meraki
+    required: true
+    status: pending
+    owner_roles: [automation_owner, change_approver]
+    dependencies: [meraki.child_path]
+    evidence:
+      - id: meraki.parent-pending.20260723
+        kind: meraki_run
+        ref: evidence://acceptance/evidence/meraki-parent-pending-20260723.json
+        sha256: 9d76c330c145c89bdc77117ad226b8bc69992dea3a33b242bd69afd88bafbd3b
+        captured_at: "2026-07-23T15:51:45Z"
+        result: pending
+    rationale: Native parent run is waiting for the authorized human approval decision.
+
+  - id: meraki.native_export_import
+    category: meraki
+    required: true
+    status: pending
+    owner_roles: [automation_owner, platform_owner]
+    dependencies: [meraki.integrated_parent]
+    evidence: []
+    rationale: Corrected parent and child exports must pass the structural auditor and duplicate-tenant import.
+
+  - id: meraki.role_negative
+    category: security
+    required: true
+    status: pending
+    owner_roles: [security_owner, automation_owner]
+    dependencies: [meraki.native_export_import]
+    evidence: []
+    rationale: Planner, approver, operator, and auditor authorization-denial tests remain to be captured.
+
+  - id: ingress.stable_tls
+    category: ingress
+    required: true
+    status: pending
+    owner_roles: [platform_owner, security_owner]
+    dependencies: []
+    evidence: []
+    rationale: Temporary ngrok ingress must be replaced by stable DNS, trusted TLS, monitoring, and controlled renewal.
+
+  - id: runtime.postgres_backup_restore
+    category: runtime
+    required: true
+    status: pending
+    owner_roles: [platform_owner, automation_owner]
+    dependencies: [software.complete_suite]
+    evidence: []
+    rationale: PostgreSQL backup, restore, retention, and recovery-time evidence is required.
+
+  - id: runtime.ha_worker_recovery
+    category: runtime
+    required: true
+    status: pending
+    owner_roles: [platform_owner, automation_owner]
+    dependencies: [runtime.postgres_backup_restore]
+    evidence: []
+    rationale: API and worker restart, stuck-lock recovery, and high-availability behavior require operational evidence.
+
+  - id: runtime.secret_rotation
+    category: security
+    required: true
+    status: pending
+    owner_roles: [security_owner, platform_owner]
+    dependencies: [ingress.stable_tls]
+    evidence: []
+    rationale: Role-token, device-credential, certificate, and ISE-secret rotation must be proven without secret disclosure.
+
+  - id: iosxe.read_only_precheck
+    category: iosxe
+    required: true
+    status: pending
+    owner_roles: [network_design_authority, automation_owner]
+    dependencies: [software.complete_suite]
+    evidence: []
+    rationale: The exact management plane, roles, links, releases, features, and checkpoint support must be re-confirmed.
+
+  - id: iosxe.underlay
+    category: iosxe
+    required: true
+    status: pending
+    owner_roles: [network_design_authority, automation_owner]
+    dependencies: [iosxe.read_only_precheck]
+    evidence: []
+    rationale: IS-IS, BFD, PIM, loopback, MTU, convergence, and rollback acceptance is required.
+
+  - id: iosxe.lisp_vxlan
+    category: iosxe
+    required: true
+    status: pending
+    owner_roles: [network_design_authority, automation_owner]
+    dependencies: [iosxe.underlay]
+    evidence: []
+    rationale: LISP control-plane, VXLAN data-plane, endpoint registration, reachability, and rollback acceptance is required.
+
+  - id: fusion.bgp_handoff
+    category: fusion
+    required: true
+    status: pending
+    owner_roles: [network_design_authority, automation_owner]
+    dependencies: [iosxe.lisp_vxlan]
+    evidence: []
+    rationale: The isolated lab has no fusion node; a representative redundant fusion topology is required for production acceptance.
+
+  - id: multicast.native_overlay
+    category: multicast
+    required: true
+    status: pending
+    owner_roles: [network_design_authority, automation_owner]
+    dependencies: [iosxe.lisp_vxlan]
+    evidence: []
+    rationale: ASM/SSM, BUM, RP/MSDP, traffic-flow, stale-state, and rollback evidence is required.
+
+  - id: policy.ise_sxp_sgt
+    category: policy
+    required: true
+    status: pending
+    owner_roles: [network_design_authority, security_owner, platform_owner]
+    dependencies: [iosxe.lisp_vxlan]
+    evidence: []
+    rationale: ISE ERS ownership, SGT/SGACL, SXP release semantics, propagation, enforcement, and rollback require acceptance.
+
+  - id: reconciliation.owned_state
+    category: reconciliation
+    required: true
+    status: pending
+    owner_roles: [automation_owner, network_design_authority]
+    dependencies: [iosxe.lisp_vxlan, multicast.native_overlay]
+    evidence: []
+    rationale: Approved baseline adoption, removal, mode-change, absence gates, and stale-state rollback require evidence.
+
+  - id: telemetry.observability
+    category: telemetry
+    required: true
+    status: pending
+    owner_roles: [platform_owner, network_design_authority]
+    dependencies: [runtime.ha_worker_recovery, iosxe.lisp_vxlan]
+    evidence: []
+    rationale: Metrics, logs, alerts, audit retention, device telemetry, and operator response procedures require acceptance.
+
+  - id: scale.multisite
+    category: scale
+    required: true
+    status: pending
+    owner_roles: [automation_owner, network_design_authority, platform_owner]
+    dependencies: [runtime.ha_worker_recovery, reconciliation.owned_state]
+    evidence: []
+    rationale: Multi-site planning, concurrency, idempotency, pool exhaustion, workflow runtime, and recovery objectives require evidence.
+
+  - id: operations.pilot_change
+    category: operations
+    required: true
+    status: pending
+    owner_roles: [change_approver, network_design_authority, automation_owner]
+    dependencies:
+      - meraki.role_negative
+      - runtime.secret_rotation
+      - fusion.bgp_handoff
+      - multicast.native_overlay
+      - policy.ise_sxp_sgt
+      - telemetry.observability
+      - scale.multisite
+    evidence: []
+    rationale: The controlled pilot maintenance window, rollback authority, communications, and final evidence review remain pending.
+
+signoffs:
+  - role: network_design_authority
+    status: pending
+  - role: automation_owner
+    status: pending
+  - role: security_owner
+    status: pending
+  - role: platform_owner
+    status: pending
+  - role: change_approver
+    status: pending

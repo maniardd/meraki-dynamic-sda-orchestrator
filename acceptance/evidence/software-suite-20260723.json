@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "software-suite-20260723",
+  "captured_at": "2026-07-23T16:12:24Z",
+  "environment": {
+    "operating_system": "Windows",
+    "python_version": "3.12.13"
+  },
+  "command": "python -m unittest discover -s tests -q",
+  "result": {
+    "status": "passed",
+    "tests_run": 290,
+    "tests_skipped": 5,
+    "failures": 0,
+    "errors": 0,
+    "elapsed_seconds": 84.901
+  },
+  "notes": [
+    "The complete suite passed serially.",
+    "A preceding concurrent run encountered one transient Windows temporary-file rename denial; the isolated test and the complete serial rerun both passed.",
+    "No Meraki, switch, ISE, or device-write operation is performed by this test command."
+  ]
+}

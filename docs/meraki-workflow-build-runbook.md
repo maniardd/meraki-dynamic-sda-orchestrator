@@ -12,7 +12,7 @@ These are separate gates:
 | Portable Meraki build specification | Complete | Workflows, roles, paths, inputs, outputs, bounds, and failure branches are machine validated. |
 | Native Meraki serialization schema | Complete | Configured activity, logic, and child-workflow shapes were captured from the development tenant without execution. |
 | Native Meraki assembly contract | Complete | Every portable step is mapped to captured native primitives with deterministic sequencing and fail-closed invariants. |
-| Native Meraki package exports | Pending | Production parent and child workflows must still be assembled and exported with genuine tenant-generated identifiers. |
+| Native Meraki package exports | In progress | Parent and four dry-run children are assembled and child-tested in the development tenant; corrected exports, structural audit, and duplicate import remain pending. |
 | Dry-run workflow | Software complete | It can be assembled and tested without touching switches. |
 | Apply workflow | Disabled | Native export validation plus SJC23 hardware/API/reconciliation acceptance are required first. |
 | Exchange publication | Disabled | Pilot evidence and publishing review are required first. |
@@ -90,6 +90,17 @@ python tools/validate_meraki_workflow_package.py --compile --matrix
 Success means `safe_to_build: true`. It intentionally reports
 `production_ready: false`, `importable_exports_present: false`, and
 `apply_enabled: false` at this stage.
+
+Validate the independent production evidence and sign-off registry:
+
+```powershell
+python tools/validate_production_acceptance.py
+python tools/validate_production_acceptance.py --require-ready
+```
+
+The first command proves the registry is structurally and cryptographically
+valid. The second remains blocked until every required gate and sign-off is
+complete. See `docs/production-acceptance-registry.md`.
 
 Audit a newly exported native workflow without requiring the whole package:
 
@@ -282,6 +293,8 @@ The acceptance decision is joint: the network design authority signs the
 fabric behavior, the automation owner signs the software/evidence, the system
 owners sign ISE/ingress/database controls, and the authorized change approver
 permits the pilot. No single test counter or developer declaration clears it.
+Those decisions and the hashes of their evidence are recorded in
+`acceptance/production-acceptance.sjc23.yaml`.
 
 ## Official Meraki references
 

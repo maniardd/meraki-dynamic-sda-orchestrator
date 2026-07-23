@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "meraki-child-dry-run-20260723",
+  "captured_at": "2026-07-23T15:20:00Z",
+  "environment": "lab",
+  "fabric_id": "fab-sjc23-001",
+  "safety": {
+    "apply_workflow_present_in_parent": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false
+  },
+  "plan": {
+    "plan_id": "plan_967854d7a15a063d",
+    "plan_hash": "967854d7a15a063da1c1a276aeb2bf9c27b0dcd1d0cc8ce490125044c9d5c378",
+    "intent_id": "intent_e41b71df92c7b3e8",
+    "intent_hash": "e41b71df92c7b3e8afda805b90a5314b84d6d36d927991608d8de0a5cfa51918",
+    "artifact_hash": "d2a7be8b179394be400c4cf40632460d9a3ae376d7e0ee361de645d26f8edc68",
+    "blocking_requirements": []
+  },
+  "approval": {
+    "meraki_run_id": "02X930JEPWG9I6kIGwCXS9QnK6ELy0uihKz",
+    "http_status": 200,
+    "decision": "approved",
+    "role_separated": true
+  },
+  "dry_run": {
+    "meraki_run_id": "02X938HSR7LZJ5oS3bWJbGWdSoFEhBaDNFt",
+    "orchestrator_run_id": "run_bd3a5f2963cd4e7e84afa9b97651a87d",
+    "status": "dry_run_succeeded",
+    "http_status": 200,
+    "device_count": 2,
+    "phase_count": 7,
+    "command_block_count": 27,
+    "simulated_command_count": 203
+  },
+  "evidence_export": {
+    "meraki_run_id": "02X939Y6KQP4T1XT6a5NSXUnmTsxTi1G4yA",
+    "http_status": 200,
+    "chain_valid": true,
+    "record_count": 8,
+    "contains_secret_values": false,
+    "artifact_hash_matches_plan": true
+  },
+  "result": "passed"
+}
