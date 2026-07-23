@@ -41,6 +41,21 @@ class RelayPreflightWorkflowTests(unittest.TestCase):
         for forbidden in ("printenv", " env ", ".env", "password", "api_key", "token"):
             self.assertNotIn(forbidden, lowered)
 
+    def test_checks_execution_and_dashboard_management_planes_separately(self):
+        for required in (
+            "SDA_BORDER_HOST",
+            "SDA_EDGE_HOST",
+            "SDA_BORDER_DASHBOARD_HOST",
+            "SDA_EDGE_DASHBOARD_HOST",
+            "border_execution_ssh",
+            "edge_execution_ssh",
+            "border_dashboard_ssh",
+            "edge_dashboard_ssh",
+        ):
+            self.assertIn(required, self.text)
+        self.assertNotIn("10.40.", self.text)
+        self.assertNotIn("192.168.128.", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()
