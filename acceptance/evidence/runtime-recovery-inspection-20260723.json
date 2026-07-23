@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "runtime.recovery-inspection.20260723",
+  "captured_at": "2026-07-23T18:59:31Z",
+  "source": {
+    "kind": "github_actions_self_hosted_runner",
+    "repository": "maniardd/meraki-dynamic-sda-orchestrator",
+    "workflow": "Deploy SDA Orchestrator API Release",
+    "run_id": 30036015733,
+    "job_id": 89304067716,
+    "url": "https://github.com/maniardd/meraki-dynamic-sda-orchestrator/actions/runs/30036015733"
+  },
+  "release": {
+    "commit": "4acb2f4ad925214aead042038531035c582cee6d",
+    "service_status": "healthy",
+    "test_count": 301,
+    "skipped_count": 5,
+    "failure_count": 0
+  },
+  "inspection": {
+    "mode": "read_only",
+    "safe": true,
+    "active_lock_count": 0,
+    "expired_lock_count": 0,
+    "issue_count": 0,
+    "run_status_counts": {
+      "dry_run:dry_run_queued": 1,
+      "dry_run:dry_run_succeeded": 1
+    },
+    "unattended_takeover_allowed": false,
+    "automatic_lock_release_allowed": false,
+    "contains_raw_identifiers": false,
+    "contains_secret_values": false
+  },
+  "result": "passed",
+  "remaining_requirements": [
+    "reviewed dispatcher for isolated worker units",
+    "redundant worker failover without duplicate execution",
+    "dual-control recovery authorization",
+    "verified checkpoint rollback after an interrupted run",
+    "recovery and stale-lock alerting",
+    "representative-network failure injection"
+  ],
+  "contains_secret_values": false,
+  "contains_device_output": false
+}

@@ -119,7 +119,13 @@ gates:
         sha256: b8bde51fae099d19e3ef55f0bc4534ca6b6fdee729f56542f1aac3785383049e
         captured_at: "2026-07-23T17:24:51Z"
         result: pending
-    rationale: The loopback API and PostgreSQL are healthy, but worker restart, Redis, stuck-lock recovery, backup/restore, and high-availability behavior remain unproven.
+      - id: runtime.recovery-inspection.20260723
+        kind: test_report
+        ref: evidence://acceptance/evidence/runtime-recovery-inspection-20260723.json
+        sha256: 60fe86324963d941e7513d1d013a52143b07d939a901ff33ef3b88ea238ab3d9
+        captured_at: "2026-07-23T18:59:31Z"
+        result: passed
+    rationale: The loopback API, PostgreSQL, and read-only lock inspection are healthy with no active or expired locks, but dispatcher failover, dual-control recovery, alerting, verified interrupted-run rollback, and high-availability behavior remain unproven.
 
   - id: runtime.secret_rotation
     category: security
