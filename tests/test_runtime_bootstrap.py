@@ -39,6 +39,14 @@ class RuntimeBootstrapTests(unittest.TestCase):
         self.assertIn("postgresql_peer_readiness_failed", rendered)
         self.assertIn("require_single_setting", rendered)
         self.assertIn("duplicate_or_missing_", rendered)
+        self.assertIn(
+            "ExecStart=${current_path}/.venv/bin/python -m gunicorn",
+            rendered,
+        )
+        self.assertNotIn(
+            "ExecStart=${current_path}/.venv/bin/gunicorn",
+            rendered,
+        )
         self.assertNotIn("ORCHESTRATOR_EXECUTION_ENABLED=true", rendered)
         self.assertNotIn("password=", rendered.lower())
 
