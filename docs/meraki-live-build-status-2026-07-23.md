@@ -103,6 +103,9 @@ An integrated parent run was started after the HTTP transport hardening:
 - artifact hash: `e7a054025636e57f7b13a68006ad62612291f8f9b0dc4456522fc0562aac728a`
 - change reference: `SDA-PARENT-ACCEPT-20260723`
 - current state: waiting at the native Meraki human approval task
+- expiry finding: approval body records `2026-07-24T23:59:59Z`, while
+  the native task header displays `07/26/26`; the integrated gate cannot pass
+  until this mapping is explained or corrected and re-tested
 - Apply child: absent
 - device writes: none
 

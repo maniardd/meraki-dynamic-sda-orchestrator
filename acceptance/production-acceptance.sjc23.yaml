@@ -59,10 +59,10 @@ gates:
       - id: meraki.parent-pending.20260723
         kind: meraki_run
         ref: evidence://acceptance/evidence/meraki-parent-pending-20260723.json
-        sha256: 9d76c330c145c89bdc77117ad226b8bc69992dea3a33b242bd69afd88bafbd3b
+        sha256: e6a5e7ef773e8a0c4007a59c2ebc4eb79ef374f7a0479230994cdb7ac7f7f9ee
         captured_at: "2026-07-23T15:51:45Z"
         result: pending
-    rationale: Native parent run is waiting for the authorized human approval decision.
+    rationale: Native parent run is waiting for the authorized human approval decision; its displayed task expiry must also be reconciled with the requested UTC expiry.
 
   - id: meraki.native_export_import
     category: meraki

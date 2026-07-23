@@ -8,6 +8,11 @@
   "meraki_run_id": "02X93ZAOTHTLS0yv9NVuGfEoAvYHdUXeafP",
   "status": "waiting_for_native_approval",
   "change_reference": "SDA-PARENT-ACCEPT-20260723",
+  "approval_expiry": {
+    "requested_utc": "2026-07-24T23:59:59Z",
+    "native_task_display_date": "2026-07-26",
+    "alignment_verified": false
+  },
   "plan": {
     "plan_id": "plan_4d6cfb096a4526a1",
     "plan_hash": "4d6cfb096a4526a10ab9a65883715774159962e26f5516b65151f3315ac797d2",
@@ -18,6 +23,6 @@
     "device_writes_performed": false,
     "approval_decision_recorded": false
   },
-  "next_action": "Authorized approver must review the immutable hashes and decide the native Meraki task.",
+  "next_action": "Authorized approver must review the immutable hashes and decide the native Meraki task; automation owner must reconcile the displayed task expiry with the requested UTC expiry before this gate passes.",
   "result": "pending"
 }
