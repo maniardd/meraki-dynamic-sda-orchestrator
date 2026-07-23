@@ -48,6 +48,9 @@ jobs:
       - name: Compile production foundation
         run: python -m compileall -q orchestrator tools tests
 
+      - name: Validate runtime shell scripts
+        run: bash -n admin/*.sh
+
       - name: Validate schema and example
         run: |
           python -m json.tool schemas/fabric-intent.schema.json >/dev/null
