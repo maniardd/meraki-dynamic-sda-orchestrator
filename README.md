@@ -137,6 +137,9 @@ required before enablement.
 The [PostgreSQL recovery runbook](docs/postgresql-backup-restore.md)
 defines private backups, checksum-bound disposable restores, retention, and the
 evidence still required before the runtime recovery gate can pass.
+The [runtime recovery inspector](docs/runtime-recovery-inspection.md) defines
+read-only stale-lock detection and the fail-closed boundary for any future
+dual-control worker recovery implementation.
 The [policy-plane acceptance boundary](docs/policy-plane-renderer.md) records
 ISE ownership, SXP propagation, edge enforcement, API reconciliation, gates,
 and the evidence required before policy apply can be enabled.

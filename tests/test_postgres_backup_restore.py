@@ -84,9 +84,14 @@ class PostgreSqlBackupRestoreTests(unittest.TestCase):
         recovery_input = dispatch["inputs"]["verify_postgres_recovery"]
         self.assertEqual(False, recovery_input["default"])
         self.assertEqual("boolean", recovery_input["type"])
+        inspection_input = dispatch["inputs"]["inspect_runtime_recovery"]
+        self.assertEqual(False, inspection_input["default"])
+        self.assertEqual("boolean", inspection_input["type"])
         self.assertIn("if: ${{ inputs.verify_postgres_recovery }}", text)
+        self.assertIn("if: ${{ inputs.inspect_runtime_recovery }}", text)
         self.assertIn("backup_postgresql.sh", text)
         self.assertIn("verify_postgresql_restore.sh", text)
+        self.assertIn("tools/inspect_runtime_recovery.py", text)
         self.assertNotIn("ORCHESTRATOR_EXECUTION_ENABLED=true", text)
 
 

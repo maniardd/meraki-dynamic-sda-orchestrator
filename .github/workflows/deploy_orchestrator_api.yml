@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      inspect_runtime_recovery:
+        description: Read and validate worker run/fabric-lock recovery state
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -41,3 +46,11 @@ jobs:
             grep -Eq '^/home/sdaadmin/[.]local/share/sda-orchestrator/backups/sda_orchestrator_[0-9]{8}T[0-9]{6}Z[.]dump$'
           /home/sdaadmin/sda-orchestrator/current/admin/verify_postgresql_restore.sh \
             "${backup_path}"
+
+      - name: Inspect worker and fabric-lock recovery state
+        if: ${{ inputs.inspect_runtime_recovery }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/sdaadmin/sda-orchestrator/current
+          .venv/bin/python tools/inspect_runtime_recovery.py
