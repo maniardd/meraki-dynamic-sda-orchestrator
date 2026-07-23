@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BACKUP = ROOT / "admin" / "backup_postgresql.sh"
 RESTORE = ROOT / "admin" / "verify_postgresql_restore.sh"
 WORKFLOW = ROOT / ".github" / "workflows" / "postgres_backup_restore_acceptance.yml"
+DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy_orchestrator_api.yml"
 
 
 class PostgreSqlBackupRestoreTests(unittest.TestCase):
@@ -71,6 +72,19 @@ class PostgreSqlBackupRestoreTests(unittest.TestCase):
             "systemctl restart",
         ):
             self.assertNotIn(forbidden, text)
+
+    def test_existing_deploy_workflow_has_explicit_default_off_recovery_gate(self):
+        text = DEPLOY_WORKFLOW.read_text(encoding="utf-8")
+        document = yaml.safe_load(text)
+        triggers = document.get("on", document.get(True, {}))
+        dispatch = triggers["workflow_dispatch"]
+        recovery_input = dispatch["inputs"]["verify_postgres_recovery"]
+        self.assertEqual(False, recovery_input["default"])
+        self.assertEqual("boolean", recovery_input["type"])
+        self.assertIn("if: ${{ inputs.verify_postgres_recovery }}", text)
+        self.assertIn("backup_postgresql.sh", text)
+        self.assertIn("verify_postgresql_restore.sh", text)
+        self.assertNotIn("ORCHESTRATOR_EXECUTION_ENABLED=true", text)
 
 
 if __name__ == "__main__":
