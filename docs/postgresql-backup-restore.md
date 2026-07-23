@@ -29,16 +29,14 @@ off-host repository and separately tested retention policy.
 
 `admin/verify_postgresql_restore.sh` accepts only a managed backup filename
 under the private backup root. It verifies the checksum and archive catalog,
-creates a uniquely named disposable database, restores into that database,
+initializes a disposable PostgreSQL cluster under that root, starts it with
+TCP disabled and a private Unix socket, restores into that isolated cluster,
 checks all required tables and basic audit-hash integrity, records the elapsed
-restore time, and drops the disposable database on success or failure.
+restore time, stops it, and removes it on success or failure.
 
 It never targets or drops `sda_orchestrator`. The production database remains
-read-only throughout backup and verification. The peer-authenticated runtime
-database role must be permitted to create and drop the disposable verification
-database. If it is not, verification fails before restore; do not grant a broad
-role change merely to bypass that failure. Provision the narrow recovery
-operator control through the reviewed platform baseline.
+read-only throughout backup and verification. The application role therefore
+does not need `CREATEDB`, superuser, or another broad production privilege.
 
 ## Controlled acceptance
 
