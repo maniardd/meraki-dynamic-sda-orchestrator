@@ -138,6 +138,16 @@ class ProductionAcceptanceTests(unittest.TestCase):
                     evidence["id"],
                 )
 
+    def test_hash_bound_evidence_is_pinned_to_lf(self):
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        rules = {
+            line.strip()
+            for line in attributes.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        self.assertIn("/acceptance/evidence/*.json text eol=lf", rules)
+        self.assertIn("/acceptance/*.yaml text eol=lf", rules)
+
     def test_missing_or_tampered_local_evidence_fails_closed(self):
         missing = copy.deepcopy(self.registry)
         missing["gates"][1]["evidence"][0]["ref"] = (
