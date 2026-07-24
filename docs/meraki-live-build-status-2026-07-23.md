@@ -184,6 +184,29 @@ The integrated-parent acceptance gate is now passed. Corrected native export,
 duplicate-import, negative authorization, platform, and operational gates
 remain pending.
 
+### Native package v5 correction audit
+
+On 2026-07-24, a separate correction copy removed the obsolete Approval v1 and
+Dry Run v3 child references, added a production-purpose parent description,
+added a genuine final prompt activity, and passed Meraki editor validation.
+The validated v4 workflow was not changed, no workflow was run, Apply remained
+absent, and no device or ISE write occurred.
+
+The structural-only audit of the new five-workflow package reduced the error
+count from twenty to eighteen. It now has no obsolete embedded child versions
+and three fewer missing workflow descriptions. The gate remains pending
+because the production contract still requires:
+
+- the exact `Create Prompt` activity label and exact unversioned workflow
+  labels;
+- disabled `Start Apply` and `Bootstrap Owned-State Baseline` workflows;
+- Meraki Account Key bindings instead of inline credential fields;
+- stable trusted TLS targets instead of temporary ngrok ingress; and
+- descriptions on the remaining three child workflows.
+
+The raw tenant export is retained outside the repository. Only the
+property-value-free audit summary and its source-export hash are committed.
+
 ### Master result-output finding
 
 The corrected parent run proved execution ordering and HTTP success, but the
