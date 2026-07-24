@@ -184,6 +184,28 @@ The integrated-parent acceptance gate is now passed. Corrected native export,
 duplicate-import, negative authorization, platform, and operational gates
 remain pending.
 
+### Master result-output finding
+
+The corrected parent run proved execution ordering and HTTP success, but the
+Meraki result panel did not expose the complete orchestrator result. In
+particular, the dry-run child wrapper displayed empty `runId` and
+`dryRunStatus` values, and the evidence wrapper did not expose the redacted
+evidence/audit result to the parent.
+
+The repository package now pins a fail-closed output-binding contract for every
+active child and the parent. The compiled build plan carries exact response
+JSONPaths, child-output mappings, and a final non-blocking result summary for:
+
+- immutable intent, plan, and artifact identity;
+- approval ID, decision, and expiry;
+- orchestrator run ID and terminal dry-run status; and
+- audit-chain validity plus redacted evidence/audit summaries.
+
+This is software/build-spec complete but not yet tenant accepted. The live
+child variables, JSONPath Query activities, parent child-output mappings, and
+final result prompt must be reassembled from this contract, exported, audited,
+and proven in a fresh zero-write parent run. Apply remains absent.
+
 ## Release posture
 
 - Deterministic planner/orchestrator software: implemented and independently reviewed.
@@ -192,6 +214,8 @@ remain pending.
 - Role-separated Planner, Approver, Operator, and Auditor targets: configured and tested.
 - Parent orchestration: assembled, validated, and accepted through the complete
   native plan -> approval -> dry-run -> evidence path.
+- Master result-output contract: implemented and fail-closed in the portable
+  build plan; tenant reassembly and live output acceptance are pending.
 - SJC23 plan -> approval -> dry-run -> evidence path: passed through the child workflows.
 - Hardware/API acceptance matrices: still pending by design.
 - Production Apply: disabled and absent from the parent workflow.

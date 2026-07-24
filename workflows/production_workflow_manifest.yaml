@@ -3,7 +3,7 @@ schema_version: "1.1"
 package:
   id: meraki-dynamic-sda
   name: SDA Fabric Production Automation
-  version: 0.2.0
+  version: 0.3.0
   release_state: development
   production_ready: false
   exchange_publishable: false
@@ -333,9 +333,11 @@ runtime:
   max_parent_runtime_seconds: 1500
   terminal_statuses:
     - dry_run_succeeded
+    - dry_run_blocked
+    - dry_run_failed
     - apply_succeeded
     - apply_failed
-    - rollback_succeeded
+    - rolled_back
     - rollback_failed
     - quarantined
 
@@ -406,11 +408,14 @@ state_contract:
     - reservation_id
     - approval_id
     - approval_decision
+    - approval_expires_at
     - run_id
     - run_status
+    - evidence_chain_valid
     - blocking_requirements_json
     - validation_errors_json
     - evidence_summary_json
+    - audit_summary_json
   forbidden_outputs:
     - bearer_token
     - device_credential
@@ -426,11 +431,68 @@ workflows:
     enabled: true
     production_ready: false
     description: Operator entry point for dynamic planning, approval, dry-run, apply, status, and evidence.
+    outputs:
+      - name: intent_id
+        type: string
+        required: true
+        source: {step: plan, channel: child_output, path: intent_id}
+      - name: intent_hash
+        type: string
+        required: true
+        source: {step: plan, channel: child_output, path: intent_hash}
+      - name: plan_id
+        type: string
+        required: true
+        source: {step: plan, channel: child_output, path: plan_id}
+      - name: plan_hash
+        type: string
+        required: true
+        source: {step: plan, channel: child_output, path: plan_hash}
+      - name: artifact_hash
+        type: string
+        required: true
+        source: {step: plan, channel: child_output, path: artifact_hash}
+      - name: blocking_requirements_json
+        type: json
+        required: true
+        source: {step: plan, channel: child_output, path: blocking_requirements_json}
+      - name: approval_id
+        type: string
+        required: true
+        source: {step: approval, channel: child_output, path: approval_id}
+      - name: approval_decision
+        type: string
+        required: true
+        source: {step: approval, channel: child_output, path: approval_decision}
+      - name: approval_expires_at
+        type: string
+        required: true
+        source: {step: approval, channel: child_output, path: approval_expires_at}
+      - name: run_id
+        type: string
+        required: true
+        source: {step: dry_run, channel: child_output, path: run_id}
+      - name: run_status
+        type: string
+        required: true
+        source: {step: dry_run, channel: child_output, path: run_status}
+      - name: evidence_chain_valid
+        type: boolean
+        required: true
+        source: {step: evidence, channel: child_output, path: evidence_chain_valid}
+      - name: evidence_summary_json
+        type: json
+        required: true
+        source: {step: evidence, channel: child_output, path: evidence_summary_json}
+      - name: audit_summary_json
+        type: json
+        required: true
+        source: {step: evidence, channel: child_output, path: audit_summary_json}
     steps:
       - {id: collect_request, activity: create_prompt, form: operator_inputs}
       - {id: validate_mode, activity: condition, rule: apply_requires_window}
       - {id: plan, activity: child_workflow, workflow: validate_and_plan}
-      - {id: show_plan, activity: result_summary, template: plan_review}
+      - {id: show_plan, activity: result_summary, template: plan_review, wait_for_prompt_response: false}
       - {id: stop_plan_only, activity: condition, rule: requested_mode_is_plan_only}
       - {id: approval, activity: child_workflow, workflow: request_approval}
       - {id: reject_branch, activity: condition, rule: approval_is_rejected}
@@ -438,6 +500,22 @@ workflows:
       - {id: stop_dry_run, activity: condition, rule: requested_mode_is_dry_run}
       - {id: apply, activity: child_workflow, workflow: start_apply, enabled: false}
       - {id: evidence, activity: child_workflow, workflow: export_evidence}
+      - id: show_final_result
+        activity: result_summary
+        template: execution_result
+        wait_for_prompt_response: false
+        fields:
+          - intent_id
+          - plan_id
+          - plan_hash
+          - artifact_hash
+          - blocking_requirements_json
+          - approval_id
+          - approval_decision
+          - approval_expires_at
+          - run_id
+          - run_status
+          - evidence_chain_valid
 
   - id: validate_and_plan
     name: SDA Fabric - Validate and Plan
@@ -445,6 +523,35 @@ workflows:
     enabled: true
     target_role: planner
     description: Validates requirements, allocates deterministically, and returns immutable plan and artifact hashes.
+    outputs:
+      - name: plan_status
+        type: string
+        required: true
+        source: {step: create_plan, channel: response_body, path: $.status}
+      - name: intent_id
+        type: string
+        required: true
+        source: {step: create_plan, channel: response_body, path: $.intent_id}
+      - name: intent_hash
+        type: string
+        required: true
+        source: {step: create_plan, channel: response_body, path: $.intent_hash}
+      - name: plan_id
+        type: string
+        required: true
+        source: {step: create_plan, channel: response_body, path: $.plan_id}
+      - name: plan_hash
+        type: string
+        required: true
+        source: {step: create_plan, channel: response_body, path: $.plan_hash}
+      - name: artifact_hash
+        type: string
+        required: true
+        source: {step: create_plan, channel: response_body, path: $.artifact_hash}
+      - name: blocking_requirements_json
+        type: json
+        required: true
+        source: {step: create_plan, channel: response_body, path: $.blocking_requirements}
     steps:
       - id: build_plan_body
         activity: build_json
@@ -476,6 +583,27 @@ workflows:
     enabled: true
     target_role: approver
     description: Requests native Meraki approval for the exact immutable plan and records the decision through the approver identity.
+    outputs:
+      - name: approval_status
+        type: string
+        required: true
+        source: {step: record_approval, channel: response_body, path: $.status}
+      - name: approval_id
+        type: string
+        required: true
+        source: {step: record_approval, channel: response_body, path: $.approval_id}
+      - name: plan_id
+        type: string
+        required: true
+        source: {step: record_approval, channel: response_body, path: $.plan_id}
+      - name: approval_decision
+        type: string
+        required: true
+        source: {step: record_approval, channel: response_body, path: $.decision}
+      - name: approval_expires_at
+        type: string
+        required: true
+        source: {step: record_approval, channel: response_body, path: $.expires_at}
     steps:
       - id: request_native_approval
         activity: request_approval
@@ -498,6 +626,27 @@ workflows:
     enabled: true
     target_role: operator
     description: Creates an idempotent dry run, processes it, and polls with bounded retries.
+    outputs:
+      - name: run_id
+        type: string
+        required: true
+        source: {step: poll_dry_run, channel: response_body, path: $.run.run_id}
+      - name: run_status
+        type: string
+        required: true
+        source: {step: poll_dry_run, channel: response_body, path: $.run.status}
+      - name: plan_id
+        type: string
+        required: true
+        source: {step: poll_dry_run, channel: response_body, path: $.run.plan_id}
+      - name: plan_hash
+        type: string
+        required: true
+        source: {step: poll_dry_run, channel: response_body, path: $.run.plan_hash}
+      - name: artifact_hash
+        type: string
+        required: true
+        source: {step: poll_dry_run, channel: response_body, path: $.run.artifact_hash}
     steps:
       - id: create_dry_run
         activity: http_request
@@ -524,6 +673,15 @@ workflows:
     enabled: false
     target_role: operator
     description: Locked apply path; it cannot be enabled until every package, hardware, reconciliation, and API acceptance gate is cleared.
+    outputs:
+      - name: run_id
+        type: string
+        required: true
+        source: {step: poll_apply, channel: response_body, path: $.run.run_id}
+      - name: run_status
+        type: string
+        required: true
+        source: {step: poll_apply, channel: response_body, path: $.run.status}
     prerequisites:
       - approved_plan_hash_matches
       - approved_artifact_hash_matches
@@ -556,6 +714,27 @@ workflows:
     enabled: true
     target_role: auditor
     description: Retrieves a redacted evidence summary and verifies the append-only audit chain.
+    outputs:
+      - name: evidence_status
+        type: string
+        required: true
+        source: {step: retrieve_evidence, channel: response_body, path: $.status}
+      - name: run_id
+        type: string
+        required: true
+        source: {step: retrieve_evidence, channel: response_body, path: $.run_id}
+      - name: evidence_chain_valid
+        type: boolean
+        required: true
+        source: {step: retrieve_evidence, channel: response_body, path: $.chain_valid}
+      - name: evidence_summary_json
+        type: json
+        required: true
+        source: {step: retrieve_evidence, channel: response_body, path: $.evidence}
+      - name: audit_summary_json
+        type: json
+        required: true
+        source: {step: retrieve_evidence, channel: response_body, path: $.audit}
     steps:
       - id: retrieve_evidence
         activity: http_request

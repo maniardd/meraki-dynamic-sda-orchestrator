@@ -84,6 +84,163 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
                     self.assertFalse(request["allow_auto_redirect"])
                     self.assertFalse(request["allow_sensitive_headers_redirect"])
 
+    def test_master_and_child_output_bindings_are_compiled_end_to_end(self):
+        compiled = {
+            workflow["id"]: workflow
+            for workflow in compile_workflow_build_plan(self.document)["workflows"]
+        }
+        self.assertEqual(
+            {
+                "intent_id",
+                "intent_hash",
+                "plan_id",
+                "plan_hash",
+                "artifact_hash",
+                "blocking_requirements_json",
+                "approval_id",
+                "approval_decision",
+                "approval_expires_at",
+                "run_id",
+                "run_status",
+                "evidence_chain_valid",
+                "evidence_summary_json",
+                "audit_summary_json",
+            },
+            {output["name"] for output in compiled["parent"]["outputs"]},
+        )
+        self.assertEqual(
+            "$.run.run_id",
+            next(
+                output
+                for output in compiled["start_dry_run"]["outputs"]
+                if output["name"] == "run_id"
+            )["source"]["path"],
+        )
+        self.assertEqual(
+            "$.run.status",
+            next(
+                output
+                for output in compiled["start_dry_run"]["outputs"]
+                if output["name"] == "run_status"
+            )["source"]["path"],
+        )
+        self.assertEqual(
+            "$.chain_valid",
+            next(
+                output
+                for output in compiled["export_evidence"]["outputs"]
+                if output["name"] == "evidence_chain_valid"
+            )["source"]["path"],
+        )
+        for workflow_id, workflow in compiled.items():
+            for output in workflow["outputs"]:
+                self.assertTrue(output["required"], (workflow_id, output))
+                self.assertNotIn(output["name"], self.document["state_contract"]["forbidden_outputs"])
+                expected_channel = (
+                    "child_output" if workflow_id == "parent" else "response_body"
+                )
+                self.assertEqual(expected_channel, output["source"]["channel"])
+
+        parent_steps = compiled["parent"]["steps"]
+        self.assertEqual("show_final_result", parent_steps[-1]["id"])
+        self.assertEqual("result_summary", parent_steps[-1]["activity"])
+        self.assertFalse(parent_steps[-1]["wait_for_prompt_response"])
+        self.assertNotIn(
+            "apply",
+            {
+                output["source"]["step"]
+                for output in compiled["parent"]["outputs"]
+            },
+        )
+
+    def test_output_binding_or_master_summary_tampering_fails_closed(self):
+        cases = (
+            (
+                lambda item: next(
+                    workflow
+                    for workflow in item["workflows"]
+                    if workflow["id"] == "start_dry_run"
+                )["outputs"].pop(),
+                "workflow.output_contract",
+            ),
+            (
+                lambda item: next(
+                    output
+                    for workflow in item["workflows"]
+                    if workflow["id"] == "export_evidence"
+                    for output in workflow["outputs"]
+                    if output["name"] == "evidence_chain_valid"
+                )["source"].update({"path": "$.invented"}),
+                "workflow.output_contract",
+            ),
+            (
+                lambda item: next(
+                    output
+                    for workflow in item["workflows"]
+                    if workflow["id"] == "parent"
+                    for output in workflow["outputs"]
+                    if output["name"] == "run_id"
+                )["source"].update({"channel": "constant"}),
+                "workflow.output_contract",
+            ),
+            (
+                lambda item: next(
+                    step
+                    for workflow in item["workflows"]
+                    if workflow["id"] == "parent"
+                    for step in workflow["steps"]
+                    if step["id"] == "show_final_result"
+                )["fields"].remove("run_id"),
+                "workflow.master_summary",
+            ),
+        )
+        for mutation, expected_code in cases:
+            with self.subTest(expected_code=expected_code):
+                candidate = copy.deepcopy(self.document)
+                mutation(candidate)
+                result = validate_workflow_package(candidate)
+                self.assertFalse(result["safe_to_build"])
+                self.assertIn(
+                    expected_code,
+                    {issue["code"] for issue in result["issues"]},
+                )
+                with self.assertRaisesRegex(
+                    ValueError, "Invalid Meraki workflow package"
+                ):
+                    compile_workflow_build_plan(candidate)
+
+    def test_poll_terminal_states_cover_dry_run_failure_and_persisted_rollback(self):
+        expected = [
+            "dry_run_succeeded",
+            "dry_run_blocked",
+            "dry_run_failed",
+            "apply_succeeded",
+            "apply_failed",
+            "rolled_back",
+            "rollback_failed",
+            "quarantined",
+        ]
+        self.assertEqual(expected, self.document["runtime"]["terminal_statuses"])
+        compiled = {
+            workflow["id"]: workflow
+            for workflow in compile_workflow_build_plan(self.document)["workflows"]
+        }
+        dry_run_poll = next(
+            step
+            for step in compiled["start_dry_run"]["steps"]
+            if step["id"] == "poll_dry_run"
+        )
+        self.assertEqual(expected, dry_run_poll["terminal_statuses"])
+
+        candidate = copy.deepcopy(self.document)
+        candidate["runtime"]["terminal_statuses"].remove("dry_run_blocked")
+        result = validate_workflow_package(candidate)
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn(
+            "runtime.terminal_statuses",
+            {issue["code"] for issue in result["issues"]},
+        )
+
     def test_native_assembly_covers_every_portable_step_with_captured_primitives(self):
         compiled = compile_workflow_build_plan(self.document)
         recipes = compiled["native_assembly"]["portable_activity_recipes"]

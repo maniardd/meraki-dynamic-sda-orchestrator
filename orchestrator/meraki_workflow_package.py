@@ -21,6 +21,16 @@ import yaml
 
 
 EXPECTED_ROLES = {"planner", "approver", "operator", "auditor"}
+EXPECTED_TERMINAL_STATUSES = [
+    "dry_run_succeeded",
+    "dry_run_blocked",
+    "dry_run_failed",
+    "apply_succeeded",
+    "apply_failed",
+    "rolled_back",
+    "rollback_failed",
+    "quarantined",
+]
 ALLOWED_ACCOUNT_KEY_TYPES = {
     "http_bearer_authentication",
     "http_custom_header_authentication",
@@ -335,6 +345,394 @@ EXPECTED_NATIVE_ASSEMBLY_CONTRACT = {
         },
     },
 }
+
+EXPECTED_WORKFLOW_OUTPUTS = {
+    "parent": [
+        {
+            "name": "intent_id",
+            "type": "string",
+            "required": True,
+            "source": {"step": "plan", "channel": "child_output", "path": "intent_id"},
+        },
+        {
+            "name": "intent_hash",
+            "type": "string",
+            "required": True,
+            "source": {"step": "plan", "channel": "child_output", "path": "intent_hash"},
+        },
+        {
+            "name": "plan_id",
+            "type": "string",
+            "required": True,
+            "source": {"step": "plan", "channel": "child_output", "path": "plan_id"},
+        },
+        {
+            "name": "plan_hash",
+            "type": "string",
+            "required": True,
+            "source": {"step": "plan", "channel": "child_output", "path": "plan_hash"},
+        },
+        {
+            "name": "artifact_hash",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "plan",
+                "channel": "child_output",
+                "path": "artifact_hash",
+            },
+        },
+        {
+            "name": "blocking_requirements_json",
+            "type": "json",
+            "required": True,
+            "source": {
+                "step": "plan",
+                "channel": "child_output",
+                "path": "blocking_requirements_json",
+            },
+        },
+        {
+            "name": "approval_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "approval",
+                "channel": "child_output",
+                "path": "approval_id",
+            },
+        },
+        {
+            "name": "approval_decision",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "approval",
+                "channel": "child_output",
+                "path": "approval_decision",
+            },
+        },
+        {
+            "name": "approval_expires_at",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "approval",
+                "channel": "child_output",
+                "path": "approval_expires_at",
+            },
+        },
+        {
+            "name": "run_id",
+            "type": "string",
+            "required": True,
+            "source": {"step": "dry_run", "channel": "child_output", "path": "run_id"},
+        },
+        {
+            "name": "run_status",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "dry_run",
+                "channel": "child_output",
+                "path": "run_status",
+            },
+        },
+        {
+            "name": "evidence_chain_valid",
+            "type": "boolean",
+            "required": True,
+            "source": {
+                "step": "evidence",
+                "channel": "child_output",
+                "path": "evidence_chain_valid",
+            },
+        },
+        {
+            "name": "evidence_summary_json",
+            "type": "json",
+            "required": True,
+            "source": {
+                "step": "evidence",
+                "channel": "child_output",
+                "path": "evidence_summary_json",
+            },
+        },
+        {
+            "name": "audit_summary_json",
+            "type": "json",
+            "required": True,
+            "source": {
+                "step": "evidence",
+                "channel": "child_output",
+                "path": "audit_summary_json",
+            },
+        },
+    ],
+    "validate_and_plan": [
+        {
+            "name": "plan_status",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "create_plan",
+                "channel": "response_body",
+                "path": "$.status",
+            },
+        },
+        {
+            "name": "intent_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "create_plan",
+                "channel": "response_body",
+                "path": "$.intent_id",
+            },
+        },
+        {
+            "name": "intent_hash",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "create_plan",
+                "channel": "response_body",
+                "path": "$.intent_hash",
+            },
+        },
+        {
+            "name": "plan_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "create_plan",
+                "channel": "response_body",
+                "path": "$.plan_id",
+            },
+        },
+        {
+            "name": "plan_hash",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "create_plan",
+                "channel": "response_body",
+                "path": "$.plan_hash",
+            },
+        },
+        {
+            "name": "artifact_hash",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "create_plan",
+                "channel": "response_body",
+                "path": "$.artifact_hash",
+            },
+        },
+        {
+            "name": "blocking_requirements_json",
+            "type": "json",
+            "required": True,
+            "source": {
+                "step": "create_plan",
+                "channel": "response_body",
+                "path": "$.blocking_requirements",
+            },
+        },
+    ],
+    "request_approval": [
+        {
+            "name": "approval_status",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "record_approval",
+                "channel": "response_body",
+                "path": "$.status",
+            },
+        },
+        {
+            "name": "approval_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "record_approval",
+                "channel": "response_body",
+                "path": "$.approval_id",
+            },
+        },
+        {
+            "name": "plan_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "record_approval",
+                "channel": "response_body",
+                "path": "$.plan_id",
+            },
+        },
+        {
+            "name": "approval_decision",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "record_approval",
+                "channel": "response_body",
+                "path": "$.decision",
+            },
+        },
+        {
+            "name": "approval_expires_at",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "record_approval",
+                "channel": "response_body",
+                "path": "$.expires_at",
+            },
+        },
+    ],
+    "start_dry_run": [
+        {
+            "name": "run_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "poll_dry_run",
+                "channel": "response_body",
+                "path": "$.run.run_id",
+            },
+        },
+        {
+            "name": "run_status",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "poll_dry_run",
+                "channel": "response_body",
+                "path": "$.run.status",
+            },
+        },
+        {
+            "name": "plan_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "poll_dry_run",
+                "channel": "response_body",
+                "path": "$.run.plan_id",
+            },
+        },
+        {
+            "name": "plan_hash",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "poll_dry_run",
+                "channel": "response_body",
+                "path": "$.run.plan_hash",
+            },
+        },
+        {
+            "name": "artifact_hash",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "poll_dry_run",
+                "channel": "response_body",
+                "path": "$.run.artifact_hash",
+            },
+        },
+    ],
+    "start_apply": [
+        {
+            "name": "run_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "poll_apply",
+                "channel": "response_body",
+                "path": "$.run.run_id",
+            },
+        },
+        {
+            "name": "run_status",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "poll_apply",
+                "channel": "response_body",
+                "path": "$.run.status",
+            },
+        },
+    ],
+    "export_evidence": [
+        {
+            "name": "evidence_status",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "retrieve_evidence",
+                "channel": "response_body",
+                "path": "$.status",
+            },
+        },
+        {
+            "name": "run_id",
+            "type": "string",
+            "required": True,
+            "source": {
+                "step": "retrieve_evidence",
+                "channel": "response_body",
+                "path": "$.run_id",
+            },
+        },
+        {
+            "name": "evidence_chain_valid",
+            "type": "boolean",
+            "required": True,
+            "source": {
+                "step": "retrieve_evidence",
+                "channel": "response_body",
+                "path": "$.chain_valid",
+            },
+        },
+        {
+            "name": "evidence_summary_json",
+            "type": "json",
+            "required": True,
+            "source": {
+                "step": "retrieve_evidence",
+                "channel": "response_body",
+                "path": "$.evidence",
+            },
+        },
+        {
+            "name": "audit_summary_json",
+            "type": "json",
+            "required": True,
+            "source": {
+                "step": "retrieve_evidence",
+                "channel": "response_body",
+                "path": "$.audit",
+            },
+        },
+    ],
+}
+EXPECTED_MASTER_SUMMARY_FIELDS = [
+    "intent_id",
+    "plan_id",
+    "plan_hash",
+    "artifact_hash",
+    "blocking_requirements_json",
+    "approval_id",
+    "approval_decision",
+    "approval_expires_at",
+    "run_id",
+    "run_status",
+    "evidence_chain_valid",
+]
 
 
 @dataclass(frozen=True)
@@ -786,6 +1184,13 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "Parent runtime budget must be a positive integer",
         )
     max_parent_runtime = max_parent_runtime_value if max_parent_runtime_valid else 0
+    if runtime.get("terminal_statuses") != EXPECTED_TERMINAL_STATUSES:
+        _issue(
+            issues,
+            "runtime.terminal_statuses",
+            "$.runtime.terminal_statuses",
+            "Runtime terminal statuses must match every persisted terminal run state",
+        )
     for workflow_id, workflow in workflows.items():
         workflow_path = "$.workflows[{}]".format(workflow_id)
         if not str(workflow.get("description", "")).strip():
@@ -896,6 +1301,86 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
                         step_path + ".terminal_statuses",
                         "Bounded poll requires terminal statuses",
                     )
+            if (
+                activity == "result_summary"
+                and step.get("wait_for_prompt_response") is not False
+            ):
+                _issue(
+                    issues,
+                    "summary.blocking",
+                    step_path + ".wait_for_prompt_response",
+                    "Result summaries must be non-blocking",
+                )
+
+        expected_outputs = EXPECTED_WORKFLOW_OUTPUTS.get(workflow_id)
+        if expected_outputs is not None:
+            outputs = workflow.get("outputs")
+            if outputs != expected_outputs:
+                _issue(
+                    issues,
+                    "workflow.output_contract",
+                    workflow_path + ".outputs",
+                    "Workflow outputs must match the pinned master/child data-flow contract",
+                )
+            if isinstance(outputs, list):
+                for output_index, output in enumerate(outputs):
+                    output_path = "{}.outputs[{}]".format(
+                        workflow_path, output_index
+                    )
+                    if not isinstance(output, Mapping):
+                        _issue(
+                            issues,
+                            "workflow.output_type",
+                            output_path,
+                            "Workflow output must be an object",
+                        )
+                        continue
+                    source = output.get("source")
+                    if not isinstance(source, Mapping):
+                        _issue(
+                            issues,
+                            "workflow.output_source",
+                            output_path + ".source",
+                            "Workflow output requires a structured source binding",
+                        )
+                        continue
+                    source_step = str(source.get("step", ""))
+                    if source_step not in seen_steps:
+                        _issue(
+                            issues,
+                            "workflow.output_step",
+                            output_path + ".source.step",
+                            "Workflow output references an unknown step",
+                        )
+                    channel = source.get("channel")
+                    if workflow_id == "parent":
+                        if channel != "child_output":
+                            _issue(
+                                issues,
+                                "workflow.output_channel",
+                                output_path + ".source.channel",
+                                "Parent outputs must come from declared child outputs",
+                            )
+                    elif channel != "response_body":
+                        _issue(
+                            issues,
+                            "workflow.output_channel",
+                            output_path + ".source.channel",
+                            "Child outputs must come from an authenticated API response body",
+                        )
+                    source_path = source.get("path")
+                    if (
+                        not isinstance(source_path, str)
+                        or not source_path
+                        or "\n" in source_path
+                        or "\r" in source_path
+                    ):
+                        _issue(
+                            issues,
+                            "workflow.output_path",
+                            output_path + ".source.path",
+                            "Workflow output source path must be a non-empty single-line string",
+                        )
 
     parent = workflows.get("parent") or {}
     parent_ids = [step.get("id") for step in parent.get("steps", []) if isinstance(step, Mapping)]
@@ -908,6 +1393,26 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             "workflow.parent_sequence",
             "$.workflows[parent].steps",
             "Parent must order plan, approval, dry run, apply, then evidence",
+        )
+    parent_steps = {
+        str(step.get("id")): step
+        for step in parent.get("steps", [])
+        if isinstance(step, Mapping) and step.get("id")
+    }
+    final_summary = parent_steps.get("show_final_result") or {}
+    if (
+        final_summary.get("activity") != "result_summary"
+        or final_summary.get("template") != "execution_result"
+        or final_summary.get("wait_for_prompt_response") is not False
+        or final_summary.get("fields") != EXPECTED_MASTER_SUMMARY_FIELDS
+        or not parent_ids
+        or parent_ids[-1] != "show_final_result"
+    ):
+        _issue(
+            issues,
+            "workflow.master_summary",
+            "$.workflows[parent].steps",
+            "Parent must end with the pinned non-blocking execution result summary",
         )
 
     approval = workflows.get("request_approval") or {}
@@ -1071,6 +1576,7 @@ def compile_workflow_build_plan(document: Mapping[str, Any]) -> Dict[str, Any]:
                 "kind": workflow["kind"],
                 "enabled": workflow.get("enabled", True),
                 "description": workflow["description"],
+                "outputs": deepcopy(workflow.get("outputs", [])),
                 "steps": steps,
             }
         )
