@@ -77,10 +77,10 @@ The registry contains nineteen required gates across software, Meraki native
 workflows, ingress, runtime, IOS XE, fusion/BGP, multicast, policy/ISE,
 reconciliation, telemetry, scale, security, and pilot operations.
 
-The completed child-level Meraki plan/approval/dry-run/evidence path is backed
-by a committed, secret-free evidence summary. The integrated parent run is
-recorded as pending at the native human approval task. Raw Meraki exports,
-device output, credentials, and tenant Account Keys are not committed.
+The completed child-level and integrated-parent Meraki
+plan/approval/dry-run/evidence paths are backed by committed, secret-free
+evidence summaries. Three of nineteen required gates are passed. Raw Meraki
+exports, device output, credentials, and tenant Account Keys are not committed.
 
 Evidence files contain only reviewed summaries and immutable identifiers. They
 are not a substitute for the protected source evidence retained by the owning

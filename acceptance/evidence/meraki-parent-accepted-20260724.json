@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "evidence_type": "meraki_integrated_parent_acceptance",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-24T04:21:43Z",
+  "result": "passed",
+  "master_workflow": {
+    "display_name": "SDA Fabric - Plan, Approve, and Execute",
+    "workflow_id": "02X92FV8CYQLX5vsmumjTB2CsfTtalICfWS",
+    "run_id": "02X9JVCOBMP2K3GOW0AF5Kp89bIudK5YFUT",
+    "version": "1.0.0",
+    "started_at": "2026-07-24T04:18:53Z",
+    "completed_at": "2026-07-24T04:21:43Z",
+    "runtime_seconds": 170,
+    "status": "success"
+  },
+  "approval": {
+    "decision": "approved",
+    "change_reference": "SDA-PARENT-ACCEPT-20260724-R2",
+    "requested_expiry_utc": "2026-07-27T23:59:59Z",
+    "displayed_expiration_local": "07/28/26",
+    "display_timezone": "Asia/Kolkata",
+    "native_task_completed": true
+  },
+  "plan": {
+    "plan_id": "plan_bf8adb411cd33f0d",
+    "plan_hash": "bf8adb411cd33f0dbf70da733f7358a809d602b99e8977479d15894787ce15b8",
+    "artifact_hash": "5a275651ac7e08398cf8474246670b55e56fe2bfcd0ddd7ec4d1225ffae65ce3"
+  },
+  "children": [
+    {
+      "display_name": "SDA Fabric - Validate and Plan",
+      "status": "success"
+    },
+    {
+      "display_name": "SDA Fabric - Request Approval",
+      "status": "success"
+    },
+    {
+      "display_name": "SDA Fabric - Start Dry Run",
+      "instance_id": "02X9JVCQYDU4U6Mw1xxQDFnmj5zGe51Zc6t",
+      "status": "success",
+      "http_result": 200
+    },
+    {
+      "display_name": "SDA Fabric - Export Evidence",
+      "instance_id": "02X9JVCR797N10wx9y6x6V6QIjPxv3SHZzq",
+      "status": "success",
+      "http_result": 200
+    }
+  ],
+  "safety": {
+    "apply_child_present": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "contains_secret_values": false,
+    "contains_raw_configuration": false
+  }
+}
