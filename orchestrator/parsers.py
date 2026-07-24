@@ -484,6 +484,81 @@ def verify_ios_xe_version(output: str, expected_version: str) -> GateResult:
     )
 
 
+def verify_ios_xe_license_level(
+    output: str,
+    required_network_package: str = "network-advantage",
+    allowed_subscription_packages: List[str] | None = None,
+) -> GateResult:
+    """Require running and next-reboot SDA license packages to remain Advantage."""
+
+    configured_subscriptions = (
+        ["catalyst-advantage", "dna-advantage"]
+        if allowed_subscription_packages is None
+        else allowed_subscription_packages
+    )
+    allowed_subscriptions = sorted(
+        {
+            str(item).strip().lower()
+            for item in configured_subscriptions
+            if str(item).strip()
+        }
+    )
+    required_network = str(required_network_package).strip().lower()
+
+    network_matches = re.findall(
+        r"^\s*(network-(?:advantage|essentials))\s+"
+        r".*?\s+(network-(?:advantage|essentials))\s*$",
+        output,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+    subscription_matches = re.findall(
+        r"^\s*((?:catalyst|dna)-(?:advantage|essentials))\s+"
+        r".*?\s+((?:catalyst|dna)-(?:advantage|essentials))\s*$",
+        output,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+
+    current_network, next_network = (
+        tuple(value.lower() for value in network_matches[0])
+        if len(network_matches) == 1
+        else (None, None)
+    )
+    current_subscription, next_subscription = (
+        tuple(value.lower() for value in subscription_matches[0])
+        if len(subscription_matches) == 1
+        else (None, None)
+    )
+
+    passed = (
+        len(network_matches) == 1
+        and len(subscription_matches) == 1
+        and bool(allowed_subscriptions)
+        and current_network == required_network
+        and next_network == required_network
+        and current_subscription in allowed_subscriptions
+        and next_subscription in allowed_subscriptions
+    )
+    reason = (
+        "Running and next-reboot IOS XE license packages satisfy SDA policy"
+        if passed
+        else "IOS XE running or next-reboot license package does not satisfy SDA policy"
+    )
+    return GateResult(
+        passed,
+        reason,
+        {
+            "required_network_package": required_network,
+            "allowed_subscription_packages": allowed_subscriptions,
+            "network_row_count": len(network_matches),
+            "subscription_row_count": len(subscription_matches),
+            "current_network_package": current_network,
+            "next_reboot_network_package": next_network,
+            "current_subscription_package": current_subscription,
+            "next_reboot_subscription_package": next_subscription,
+        },
+    )
+
+
 def verify_route_prefix(output: str, expected_prefix: str) -> GateResult:
     """Require the exact IOS XE `Routing entry for` prefix evidence."""
 

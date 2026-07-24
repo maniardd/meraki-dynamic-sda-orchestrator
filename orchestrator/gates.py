@@ -11,6 +11,7 @@ from .parsers import (
     verify_bgp_neighbors,
     verify_exact_config_lines,
     verify_isis_neighbors,
+    verify_ios_xe_license_level,
     verify_ios_xe_version,
     verify_lisp_identity,
     verify_lisp_publishers,
@@ -96,6 +97,23 @@ def build_gate_plan(
                 "command": "show version",
                 "evaluator": "ios_xe_version",
                 "expected": {"version": str(device["software_version"])},
+                "blocking": True,
+            }
+        )
+        gates.append(
+            {
+                "gate_id": "precheck.license.{}".format(device_id),
+                "phase_id": "precheck",
+                "device_id": device_id,
+                "command": "show version",
+                "evaluator": "ios_xe_license_level",
+                "expected": {
+                    "network_package": "network-advantage",
+                    "subscription_packages": [
+                        "catalyst-advantage",
+                        "dna-advantage",
+                    ],
+                },
                 "blocking": True,
             }
         )
@@ -672,6 +690,12 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
     expected = gate["expected"]
     if evaluator == "ios_xe_version":
         return verify_ios_xe_version(output, str(expected["version"]))
+    if evaluator == "ios_xe_license_level":
+        return verify_ios_xe_license_level(
+            output,
+            str(expected["network_package"]),
+            list(expected["subscription_packages"]),
+        )
     if evaluator == "isis_neighbors":
         return verify_isis_neighbors(output, int(expected["minimum_up"]))
     if evaluator == "lisp_sessions":

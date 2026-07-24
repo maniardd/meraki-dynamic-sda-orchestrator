@@ -39,6 +39,25 @@ class GatePlanTests(unittest.TestCase):
             evaluate_gate(gate, "Cisco IOS XE Software, Version 17.18.2").passed
         )
 
+    def test_every_fabric_device_has_blocking_advantage_license_gate(self):
+        intent = load_intent(PRODUCTION)
+        gates = build_gate_plan(intent)
+        by_id = {gate["gate_id"]: gate for gate in gates}
+        for device in intent["devices"]:
+            gate = by_id["precheck.license.{}".format(device["id"])]
+            self.assertEqual("precheck", gate["phase_id"])
+            self.assertEqual("show version", gate["command"])
+            self.assertEqual("ios_xe_license_level", gate["evaluator"])
+            self.assertEqual(
+                "network-advantage",
+                gate["expected"]["network_package"],
+            )
+            self.assertEqual(
+                ["catalyst-advantage", "dna-advantage"],
+                gate["expected"]["subscription_packages"],
+            )
+            self.assertTrue(gate["blocking"])
+
 
 if __name__ == "__main__":
     unittest.main()

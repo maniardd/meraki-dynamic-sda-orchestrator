@@ -6,6 +6,7 @@ from orchestrator.parsers import (
     verify_bgp_neighbors,
     verify_exact_config_lines,
     verify_isis_neighbors,
+    verify_ios_xe_license_level,
     verify_lisp_identity,
     verify_lisp_publishers,
     verify_lisp_sessions,
@@ -19,6 +20,62 @@ from orchestrator.parsers import (
 
 
 class OperationalParserTests(unittest.TestCase):
+    def test_ios_xe_license_requires_advantage_now_and_after_reboot(self):
+        compliant = """
+Technology-package                                     Technology-package
+Current                        Type                       Next reboot
+network-advantage             Smart License              network-advantage
+dna-advantage                 Subscription Smart License dna-advantage
+"""
+        result = verify_ios_xe_license_level(compliant)
+        self.assertTrue(result.passed)
+        self.assertEqual(
+            "network-advantage",
+            result.observations["next_reboot_network_package"],
+        )
+
+        catalyst = compliant.replace("dna-advantage", "catalyst-advantage")
+        self.assertTrue(verify_ios_xe_license_level(catalyst).passed)
+
+    def test_ios_xe_license_downgrade_or_missing_row_fails_closed(self):
+        baseline = """
+network-advantage   Smart License                 network-advantage
+dna-advantage       Subscription Smart License    dna-advantage
+"""
+        rejected = [
+            baseline.replace(
+                "network-advantage\n", "network-essentials\n", 1
+            ),
+            baseline.replace(
+                "network-advantage   Smart License                 network-advantage",
+                "network-essentials  Smart License                 network-advantage",
+            ),
+            baseline.replace(
+                "dna-advantage       Subscription Smart License    dna-advantage",
+                "dna-essentials      Subscription Smart License    dna-advantage",
+            ),
+            baseline.replace(
+                "dna-advantage       Subscription Smart License    dna-advantage",
+                "dna-advantage       Subscription Smart License    dna-essentials",
+            ),
+            "Technology-package Current Type Next reboot",
+            baseline + baseline,
+            """
+network-advantage   Smart License                 network-advantage-extra
+dna-advantage       Subscription Smart License    dna-advantage
+""",
+        ]
+        for output in rejected:
+            with self.subTest(output=output):
+                self.assertFalse(verify_ios_xe_license_level(output).passed)
+
+        self.assertFalse(
+            verify_ios_xe_license_level(
+                baseline,
+                allowed_subscription_packages=[],
+            ).passed
+        )
+
     def test_lisp_up_down_header_does_not_create_false_positive(self):
         output = """
 Sessions for VRF default, total: 1, established: 0

@@ -57,8 +57,12 @@ class Schema12FakeAdapter:
 
     def run_show(self, command):
         if command == "show version":
-            output = "Cisco IOS XE Software, Version {}".format(
-                self.device["software_version"]
+            output = (
+                "Cisco IOS XE Software, Version {version}\n"
+                "network-advantage Smart License network-advantage\n"
+                "dna-advantage Subscription Smart License dna-advantage"
+            ).format(
+                version=self.device["software_version"]
             )
         elif command == "show isis neighbors":
             output = "\n".join(
