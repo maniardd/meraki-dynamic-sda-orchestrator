@@ -5,8 +5,8 @@ scope:
   environment: lab
   fabric_id: fab-sjc23-001
   release_candidate: rc1
-  plan_hash: bf8adb411cd33f0dbf70da733f7358a809d602b99e8977479d15894787ce15b8
-  artifact_hash: 5a275651ac7e08398cf8474246670b55e56fe2bfcd0ddd7ec4d1225ffae65ce3
+  plan_hash: 40e8f5baa78805f6ff135e89b9c19b1bb0073ca8fecdce08af1ecc784f60774b
+  artifact_hash: f81e5d829aaac28ce0727ccf65ca39d00f3ec00c0ee6da16aaaca5302361c823
 
 controls:
   apply_authorization_requested: false
@@ -56,13 +56,13 @@ gates:
     owner_roles: [automation_owner, change_approver]
     dependencies: [meraki.child_path]
     evidence:
-      - id: meraki.parent-accepted.20260724
+      - id: meraki.master-output-accepted.20260724
         kind: meraki_run
-        ref: evidence://acceptance/evidence/meraki-parent-accepted-20260724.json
-        sha256: 85b8246c344a97d669a9bbf640e70db2add85d4b9eb39946048916466fee7a16
-        captured_at: "2026-07-24T04:21:43Z"
+        ref: evidence://acceptance/evidence/meraki-master-output-accepted-20260724.json
+        sha256: 3456cdb0e905d2eff4a2511e665ce1348b294a25adf57303063f33d9ffc00aae
+        captured_at: "2026-07-24T09:43:11Z"
         result: passed
-    rationale: The corrected native parent completed plan, human approval, dry run, and evidence export successfully; the task displayed the UTC expiry on the correct localized calendar date and Apply remained absent.
+    rationale: The output-bound native parent completed plan, human approval, Dry Run v4, evidence export, and all fourteen parent-output mappings; the first stale-binding run failed closed, the corrected run succeeded, and Apply remained absent.
 
   - id: meraki.native_export_import
     category: meraki

@@ -214,13 +214,32 @@ and proven in a fresh zero-write parent run. Apply remains absent.
 - Role-separated Planner, Approver, Operator, and Auditor targets: configured and tested.
 - Parent orchestration: assembled, validated, and accepted through the complete
   native plan -> approval -> dry-run -> evidence path.
-- Master result-output contract: implemented and fail-closed in the portable
-  build plan; tenant reassembly and live output acceptance are pending.
+- Master result-output contract: implemented, assembled in the development
+  tenant, and accepted through a successful zero-write v4 run.
 - SJC23 plan -> approval -> dry-run -> evidence path: passed through the child workflows.
 - Hardware/API acceptance matrices: still pending by design.
 - Production Apply: disabled and absent from the parent workflow.
 - Production acceptance registry: implemented and fail-closed; incomplete
   hardware, platform, security, and operational gates remain explicit.
+
+### Output-bound master v4 acceptance
+
+On 2026-07-24, `SDA Fabric - Plan, Approve, and Execute v4` was assembled with
+the PR #29 contract: fourteen declared parent outputs, Approval v2, Dry Run v4,
+Evidence v3, and a final deterministic Set Variables mapping. The legacy
+approval and dry-run children are explicitly skipped and Apply is absent.
+
+The initial run (`02X9QMKBZS8I92n6Tgstg5kph8YSlHMtvOn`) failed closed because
+Evidence v3 retained the skipped Dry Run v3 `runId`. The binding was cleared
+and replaced with Dry Run v4 `runId` only. The corrected zero-write run
+(`02X9QRDECE0Q835ZQH9srVcGMPgBgSuDAwe`) completed successfully in 21.7
+seconds with native approval, deterministic plan/artifact identity, dry-run,
+evidence export, and all fourteen parent mappings. No device or ISE write
+occurred.
+
+The acceptance registry now binds the integrated-parent gate to
+`acceptance/evidence/meraki-master-output-accepted-20260724.json`. Portable
+native export/import and all production hardware/API gates remain pending.
 
 ## Remaining gates before production Apply can exist
 
