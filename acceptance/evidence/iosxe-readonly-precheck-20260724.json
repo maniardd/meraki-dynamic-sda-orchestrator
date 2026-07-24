@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "evidence_type": "iosxe_read_only_hardware_precheck",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-24T11:08:06Z",
+  "result": "passed",
+  "source": {
+    "repository": "maniardd/sda-relay",
+    "workflow": "SJC23 Read-Only Hardware Precheck",
+    "run_id": 30088517764,
+    "run_url": "https://github.com/maniardd/sda-relay/actions/runs/30088517764"
+  },
+  "targets": {
+    "border_control_plane": {
+      "management_ip": "192.168.128.9",
+      "hostname": "C9500",
+      "platform": "C9500-48Y4C",
+      "ios_xe": "17.18.2",
+      "connected": true,
+      "passed_commands": 18,
+      "failed_commands": 0,
+      "fabric_interface": "TwentyFiveGigE1/0/2"
+    },
+    "fabric_edge": {
+      "management_ip": "192.168.128.7",
+      "hostname": "C9300",
+      "platform": "C9300-24P",
+      "ios_xe": "17.18.3",
+      "connected": true,
+      "passed_commands": 19,
+      "failed_commands": 0,
+      "fabric_interface": "GigabitEthernet1/0/2"
+    }
+  },
+  "topology": {
+    "cdp_bidirectional": true,
+    "border_to_edge_link_up": true,
+    "edge_to_border_link_up": true,
+    "fabric_link_addresses_assigned": false
+  },
+  "observed_baseline": {
+    "loopback0_present": false,
+    "isis_configured": false,
+    "isis_neighbors_present": false,
+    "lisp_running": false,
+    "nve_peers_present": false,
+    "fabric_vrfs_present": false,
+    "management_vlan": 128
+  },
+  "licensing_observation": {
+    "border_current_network_package": "network-advantage",
+    "border_next_reboot_network_package": "network-essentials",
+    "edge_current_network_package": "network-advantage",
+    "edge_next_reboot_network_package": "network-advantage",
+    "requires_resolution_before_apply": true
+  },
+  "safety": {
+    "read_only": true,
+    "configuration_mode_used": false,
+    "raw_output_persisted": false,
+    "device_writes_performed": false,
+    "contains_secret_values": false,
+    "contains_raw_configuration": false
+  }
+}

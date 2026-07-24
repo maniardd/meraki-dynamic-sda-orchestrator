@@ -148,6 +148,43 @@ class ProductionAcceptanceTests(unittest.TestCase):
         self.assertIn("/acceptance/evidence/*.json text eol=lf", rules)
         self.assertIn("/acceptance/*.yaml text eol=lf", rules)
 
+    def test_iosxe_read_only_precheck_is_hash_bound_and_write_free(self):
+        gate = next(
+            gate
+            for gate in self.registry["gates"]
+            if gate["id"] == "iosxe.read_only_precheck"
+        )
+        self.assertEqual("passed", gate["status"])
+        self.assertEqual(1, len(gate["evidence"]))
+
+        relative = gate["evidence"][0]["ref"].removeprefix("evidence://")
+        evidence_path = ROOT / relative
+        content = evidence_path.read_bytes()
+        self.assertEqual(
+            hashlib.sha256(content).hexdigest(),
+            gate["evidence"][0]["sha256"],
+        )
+
+        evidence = json.loads(content)
+        self.assertEqual("passed", evidence["result"])
+        self.assertTrue(evidence["safety"]["read_only"])
+        self.assertFalse(evidence["safety"]["configuration_mode_used"])
+        self.assertFalse(evidence["safety"]["raw_output_persisted"])
+        self.assertFalse(evidence["safety"]["device_writes_performed"])
+        self.assertFalse(evidence["safety"]["contains_secret_values"])
+        self.assertFalse(evidence["safety"]["contains_raw_configuration"])
+        self.assertEqual(
+            18,
+            evidence["targets"]["border_control_plane"]["passed_commands"],
+        )
+        self.assertEqual(
+            19,
+            evidence["targets"]["fabric_edge"]["passed_commands"],
+        )
+        self.assertTrue(
+            evidence["licensing_observation"]["requires_resolution_before_apply"]
+        )
+
     def test_missing_or_tampered_local_evidence_fails_closed(self):
         missing = copy.deepcopy(self.registry)
         missing["gates"][1]["evidence"][0]["ref"] = (
