@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "evidence_type": "meraki_master_output_contract_acceptance",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-24T09:43:11Z",
+  "result": "passed",
+  "master_workflow": {
+    "display_name": "SDA Fabric - Plan, Approve, and Execute v4",
+    "workflow_id": "02X9PSYM730PJ4smw7l4qxkkroX2pO1sQGm",
+    "run_id": "02X9QRDECE0Q835ZQH9srVcGMPgBgSuDAwe",
+    "version": "1.0.0",
+    "started_at": "2026-07-24T09:42:49Z",
+    "completed_at": "2026-07-24T09:43:11Z",
+    "runtime_seconds": 21.7,
+    "status": "success"
+  },
+  "approval": {
+    "decision": "approved",
+    "change_reference": "SDA-MASTER-V4-ACCEPT-20260724-R2",
+    "requested_expiry_utc": "2026-07-31T23:59:59Z",
+    "native_task_completed": true
+  },
+  "plan": {
+    "plan_id": "plan_40e8f5baa78805f6",
+    "plan_hash": "40e8f5baa78805f6ff135e89b9c19b1bb0073ca8fecdce08af1ecc784f60774b",
+    "artifact_hash": "f81e5d829aaac28ce0727ccf65ca39d00f3ec00c0ee6da16aaaca5302361c823"
+  },
+  "output_contract": {
+    "declared_output_count": 14,
+    "mapped_output_count": 14,
+    "outputs": [
+      "intent_id",
+      "intent_hash",
+      "plan_id",
+      "plan_hash",
+      "artifact_hash",
+      "blocking_requirements_json",
+      "approval_id",
+      "approval_decision",
+      "approval_expires_at",
+      "run_id",
+      "run_status",
+      "evidence_chain_valid",
+      "evidence_summary_json",
+      "audit_summary_json"
+    ],
+    "legacy_approval_child_skipped": true,
+    "legacy_dry_run_child_skipped": true,
+    "approval_child": "SDA Fabric - Request Approval v2",
+    "dry_run_child": "SDA Fabric - Start Dry Run v4",
+    "evidence_child": "SDA Fabric - Export Evidence v3",
+    "evidence_run_id_source": "SDA Fabric - Start Dry Run v4.runId"
+  },
+  "fail_closed_correction": {
+    "initial_run_id": "02X9QMKBZS8I92n6Tgstg5kph8YSlHMtvOn",
+    "initial_result": "failed",
+    "failure_stage": "evidence",
+    "cause": "Evidence child retained a stale reference to the skipped Dry Run v3 runId.",
+    "correction": "Cleared the stale reference and bound the Evidence child only to Dry Run v4.runId.",
+    "device_writes_performed": false,
+    "ise_writes_performed": false
+  },
+  "safety": {
+    "apply_child_present": false,
+    "apply_enabled": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "contains_secret_values": false,
+    "contains_raw_configuration": false
+  }
+}

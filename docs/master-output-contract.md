@@ -55,20 +55,23 @@ The package validator rejects:
 The compiler copies all bindings into the deterministic build plan and therefore
 binds any change into `build_plan_hash`.
 
-## Tenant acceptance still required
+## Development-tenant acceptance
 
-This change does not fabricate Meraki export JSON and does not modify the live
-tenant. An operator must assemble the pinned workflow variables and JSONPath
-Query mappings in the development tenant, retain tenant-generated identifiers,
-validate and lock the workflows, then run a new zero-write parent acceptance.
+The native output contract was assembled and accepted in the development
+tenant on 2026-07-24. `SDA Fabric - Plan, Approve, and Execute v4` declares and
+maps all fourteen contract outputs across the planner, Approval v2, Dry Run v4,
+and Evidence v3 children. The legacy approval and dry-run children remain in
+the graph only as explicitly skipped compatibility nodes; Apply is absent.
 
-Acceptance requires all of these values to be non-empty and mutually
-consistent in the parent result:
+The first acceptance attempt failed closed because Evidence v3 still referenced
+the skipped Dry Run v3 `runId`. No device or ISE write occurred. The stale
+reference was cleared, Evidence v3 was bound only to Dry Run v4 `runId`, and
+the corrected zero-write run completed successfully in 21.7 seconds. The
+hash-bound record is
+`acceptance/evidence/meraki-master-output-accepted-20260724.json`.
 
-- plan ID, plan hash, and artifact hash;
-- approval ID, approved decision, and expiry;
-- orchestrator run ID and `dry_run_succeeded`;
-- evidence run ID equal to the dry-run run ID; and
-- `evidence_chain_valid:true`.
-
-Apply remains disabled in the package and absent from the live parent.
+This proves the development-tenant assembly and output propagation contract.
+It does not make tenant-generated exports portable, clear
+`meraki.native_export_import`, or authorize Apply. Duplicate-tenant import and
+the remaining hardware, ISE, ingress, recovery, observability, and security
+acceptance gates remain pending.
