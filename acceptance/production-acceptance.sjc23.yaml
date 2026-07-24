@@ -5,8 +5,8 @@ scope:
   environment: lab
   fabric_id: fab-sjc23-001
   release_candidate: rc1
-  plan_hash: 4d6cfb096a4526a10ab9a65883715774159962e26f5516b65151f3315ac797d2
-  artifact_hash: e7a054025636e57f7b13a68006ad62612291f8f9b0dc4456522fc0562aac728a
+  plan_hash: bf8adb411cd33f0dbf70da733f7358a809d602b99e8977479d15894787ce15b8
+  artifact_hash: 5a275651ac7e08398cf8474246670b55e56fe2bfcd0ddd7ec4d1225ffae65ce3
 
 controls:
   apply_authorization_requested: false
@@ -52,17 +52,17 @@ gates:
   - id: meraki.integrated_parent
     category: meraki
     required: true
-    status: pending
+    status: passed
     owner_roles: [automation_owner, change_approver]
     dependencies: [meraki.child_path]
     evidence:
-      - id: meraki.parent-pending.20260723
+      - id: meraki.parent-accepted.20260724
         kind: meraki_run
-        ref: evidence://acceptance/evidence/meraki-parent-pending-20260723.json
-        sha256: 398a398ca4857df6f26749d878a757ddf92cc01d5561480a1829be34f4efce01
-        captured_at: "2026-07-23T15:51:45Z"
-        result: pending
-    rationale: Native parent run is waiting for the authorized human approval decision. The workflow mapping is corrected, but a fresh task must prove that both native dates equal the requested UTC input.
+        ref: evidence://acceptance/evidence/meraki-parent-accepted-20260724.json
+        sha256: 85b8246c344a97d669a9bbf640e70db2add85d4b9eb39946048916466fee7a16
+        captured_at: "2026-07-24T04:21:43Z"
+        result: passed
+    rationale: The corrected native parent completed plan, human approval, dry run, and evidence export successfully; the task displayed the UTC expiry on the correct localized calendar date and Apply remained absent.
 
   - id: meraki.native_export_import
     category: meraki

@@ -159,13 +159,39 @@ applies only to tasks created after the correction. Therefore the integrated
 gate stays pending until the current human decision completes and a fresh
 parent run proves exact native due-date and expiration-date alignment.
 
+### Corrected integrated parent acceptance
+
+A fresh parent run completed after the native date-binding correction:
+
+- Meraki run ID: `02X9JVCOBMP2K3GOW0AF5Kp89bIudK5YFUT`
+- status: `Success`
+- runtime: 2.8 minutes
+- plan ID: `plan_bf8adb411cd33f0d`
+- plan hash: `bf8adb411cd33f0dbf70da733f7358a809d602b99e8977479d15894787ce15b8`
+- artifact hash: `5a275651ac7e08398cf8474246670b55e56fe2bfcd0ddd7ec4d1225ffae65ce3`
+- change reference: `SDA-PARENT-ACCEPT-20260724-R2`
+- approval input: `2026-07-27T23:59:59Z`
+- native expiration display: `07/28/26` in India time, the correct localized
+  calendar date for the supplied UTC instant
+- child workflows: Validate and Plan, Request Approval, Start Dry Run, and
+  Export Evidence all succeeded
+- dry-run child result: HTTP `200`
+- evidence child result: HTTP `200`
+- Apply child: absent
+- device and ISE writes: none
+
+The integrated-parent acceptance gate is now passed. Corrected native export,
+duplicate-import, negative authorization, platform, and operational gates
+remain pending.
+
 ## Release posture
 
 - Deterministic planner/orchestrator software: implemented and independently reviewed.
 - Ubuntu API runtime: deployed with execution disabled.
 - Meraki native child workflows: built, validated, and live-tested through evidence export.
 - Role-separated Planner, Approver, Operator, and Auditor targets: configured and tested.
-- Parent orchestration: assembled and validated; integrated parent-run acceptance remains.
+- Parent orchestration: assembled, validated, and accepted through the complete
+  native plan -> approval -> dry-run -> evidence path.
 - SJC23 plan -> approval -> dry-run -> evidence path: passed through the child workflows.
 - Hardware/API acceptance matrices: still pending by design.
 - Production Apply: disabled and absent from the parent workflow.
@@ -174,25 +200,18 @@ parent run proves exact native due-date and expiration-date alignment.
 
 ## Remaining gates before production Apply can exist
 
-1. Complete the pending integrated parent approval, dry run, and evidence
-   export, then run a fresh parent acceptance proving both native task dates
-   equal the supplied `approvalExpiresAt` value. The live tenant currently
-   terminates directly on non-2xx responses;
-   before declaring the exported package production-ready, either assemble the
-   manifest-pinned immediate HTTP status branches or formally version the
-   simpler fail-stop contract and re-review it.
-2. Export the corrected tenant-native definitions, run the structural auditor,
+1. Export the corrected tenant-native definitions, run the structural auditor,
    and keep raw tenant exports uncommitted.
-3. Complete the IOS XE hardware acceptance matrices for the exact target
+2. Complete the IOS XE hardware acceptance matrices for the exact target
    releases and platforms, including LISP/VXLAN, BGP/fusion, multicast,
    reconciliation, rollback, and evidence parsers.
-4. Complete release-specific ISE ERS and SXP acceptance, including transactional
+3. Complete release-specific ISE ERS and SXP acceptance, including transactional
    rollback evidence.
-5. Replace temporary ngrok ingress with stable production DNS, a trusted
+4. Replace temporary ngrok ingress with stable production DNS, a trusted
    certificate, and monitored highly available runtime infrastructure.
-6. Perform failure-injection, recovery, idempotency, concurrency, and scale
+5. Perform failure-injection, recovery, idempotency, concurrency, and scale
    acceptance against a production-like multi-site fixture.
-7. Only after every blocker is closed, add a separately approved Apply child
+6. Only after every blocker is closed, add a separately approved Apply child
    protected by maintenance-window, immutable-hash, dual-control, checkpoint,
    verification, and rollback gates.
 

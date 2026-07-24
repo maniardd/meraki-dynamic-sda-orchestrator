@@ -45,4 +45,4 @@ bypass the production acceptance registry.
 - Screenshots were inspected after each major section for clipping and
   overflow.
 - The final evidence screen contains an explicit
-  `Apply unavailable — 17 gates pending` state.
+  `Apply unavailable — 16 gates pending` state.
