@@ -151,12 +151,27 @@ gates:
         result: passed
     rationale: The Ubuntu relay authenticated to the confirmed SJC23 management targets at 192.168.128.9 and 192.168.128.7 and completed 18/18 border and 19/19 edge allowlisted show commands without configuration mode, raw-output persistence, or device writes. The 10.40.x.x addresses belong only to the separate BNL reference project.
 
+  - id: iosxe.license_state
+    category: iosxe
+    required: true
+    status: pending
+    owner_roles: [network_design_authority, platform_owner, change_approver]
+    dependencies: [iosxe.read_only_precheck]
+    evidence:
+      - id: iosxe.license-state.20260724
+        kind: test_report
+        ref: evidence://acceptance/evidence/iosxe-readonly-precheck-20260724.json
+        sha256: c66c888eb872ae3c0ac8225a10b1b9598233f595ffef3c8d0962ae32dc50c472
+        captured_at: "2026-07-24T11:08:06Z"
+        result: pending
+    rationale: The border is running Network Advantage but is configured to return to Network Essentials at next reboot. Both switches must pass the exact current-and-next Network Advantage plus DNA/Catalyst Advantage precheck before this gate can pass. License changes and reloads require separately approved operator action.
+
   - id: iosxe.underlay
     category: iosxe
     required: true
     status: pending
     owner_roles: [network_design_authority, automation_owner]
-    dependencies: [iosxe.read_only_precheck]
+    dependencies: [iosxe.license_state]
     evidence: []
     rationale: IS-IS, BFD, PIM, loopback, MTU, convergence, and rollback acceptance is required.
 

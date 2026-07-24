@@ -185,6 +185,30 @@ class ProductionAcceptanceTests(unittest.TestCase):
             evidence["licensing_observation"]["requires_resolution_before_apply"]
         )
 
+    def test_iosxe_license_state_is_explicit_and_blocks_underlay_acceptance(self):
+        by_id = {gate["id"]: gate for gate in self.registry["gates"]}
+        license_gate = by_id["iosxe.license_state"]
+        self.assertEqual("pending", license_gate["status"])
+        self.assertEqual(
+            ["iosxe.read_only_precheck"],
+            license_gate["dependencies"],
+        )
+        self.assertEqual(1, len(license_gate["evidence"]))
+        self.assertEqual("pending", license_gate["evidence"][0]["result"])
+        self.assertEqual(
+            "evidence://acceptance/evidence/iosxe-readonly-precheck-20260724.json",
+            license_gate["evidence"][0]["ref"],
+        )
+        self.assertEqual(
+            ["iosxe.license_state"],
+            by_id["iosxe.underlay"]["dependencies"],
+        )
+
+        result = self.validate()
+        self.assertEqual(20, result["required_gate_count"])
+        self.assertEqual(4, result["passed_required_gate_count"])
+        self.assertIn("iosxe.license_state", result["incomplete_gate_ids"])
+
     def test_missing_or_tampered_local_evidence_fails_closed(self):
         missing = copy.deepcopy(self.registry)
         missing["gates"][1]["evidence"][0]["ref"] = (
