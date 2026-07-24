@@ -77,7 +77,13 @@ gates:
         sha256: cc7d235c3bb098f339d51283058e9efd8319d2676078ad5b9ca9ef26c16d4f76
         captured_at: "2026-07-24T13:50:00Z"
         result: failed
-    rationale: The first corrected-parent package export failed closed with twenty structural findings, including obsolete embedded child versions, missing disabled Apply and baseline workflows, inline bearer-token fields, temporary ngrok targets, missing descriptions, and a missing final Create Prompt. The raw tenant export remains uncommitted. A corrected package must pass the structural auditor and duplicate-workspace import before this gate can pass.
+      - id: meraki.native-package-audit-v5.20260724
+        kind: test_report
+        ref: evidence://acceptance/evidence/meraki-native-package-audit-v5-20260724.json
+        sha256: 90451bcfd8d5479d192cdab6f291b14afc2f1d320bfc662dbd28bfa48a82cdc3
+        captured_at: "2026-07-24T15:42:23Z"
+        result: failed
+    rationale: The second corrected-parent package export improved from twenty to eighteen structural findings. It removed both obsolete embedded child versions, added three workflow descriptions, and added a genuine final prompt activity, but exact production labels, disabled Apply and baseline workflows, Account Key bindings, stable TLS targets, and three child descriptions remain incomplete. The raw tenant exports remain uncommitted. A corrected package must pass the structural auditor and duplicate-workspace import before this gate can pass.
 
   - id: meraki.role_negative
     category: security

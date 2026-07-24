@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "meraki.native-package-audit-v5.20260724",
+  "evidence_type": "meraki_native_export_structural_audit",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-24T15:42:23Z",
+  "result": "failed",
+  "source": {
+    "kind": "meraki_native_package_export",
+    "workflow": "SDA Fabric - Plan, Approve, Execute v5 Correction",
+    "export_sha256": "19e403fda7bcf19f1c2b10198a0312a4491d4755998d39866afc96092318ad29",
+    "raw_export_committed": false
+  },
+  "audit": {
+    "native_export_set_valid": false,
+    "production_package_complete": false,
+    "workflow_count": 5,
+    "error_count": 18,
+    "warning_count": 0,
+    "issue_counts": {
+      "package.activity_missing": 1,
+      "package.workflow_missing": 6,
+      "secret.inline_value": 4,
+      "documentation.workflow_description": 3,
+      "transport.ngrok": 4
+    },
+    "missing_activity_labels": [
+      "Create Prompt"
+    ],
+    "missing_workflow_labels": [
+      "SDA Fabric - Bootstrap Owned-State Baseline",
+      "SDA Fabric - Export Evidence",
+      "SDA Fabric - Plan, Approve, and Execute",
+      "SDA Fabric - Request Approval",
+      "SDA Fabric - Start Apply",
+      "SDA Fabric - Start Dry Run"
+    ],
+    "exported_workflow_labels": [
+      "SDA Fabric - Export Evidence v3",
+      "SDA Fabric - Plan, Approve, Execute v5 Correction",
+      "SDA Fabric - Request Approval v2",
+      "SDA Fabric - Start Dry Run v4",
+      "SDA Fabric - Validate and Plan"
+    ],
+    "obsolete_embedded_child_count": 0,
+    "final_prompt_activity_present": true,
+    "strict_final_prompt_label_match": false,
+    "inline_credential_field_count": 4,
+    "temporary_ingress_target_count": 4,
+    "missing_workflow_description_count": 3
+  },
+  "comparison_to_previous_audit": {
+    "previous_error_count": 20,
+    "current_error_count": 18,
+    "obsolete_embedded_children_removed": 2,
+    "workflow_descriptions_added": 3,
+    "new_exact_name_mismatch_count": 1
+  },
+  "safety": {
+    "audit_report_contains_property_values": false,
+    "contains_secret_values": false,
+    "contains_raw_configuration": false,
+    "contains_tenant_identifiers": false,
+    "workflow_run_performed": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "apply_enabled": false
+  },
+  "remaining_requirements": [
+    "rename the final result activity to the exact production label Create Prompt",
+    "assemble and link the exact unversioned production workflow names",
+    "assemble the disabled Start Apply and Bootstrap Owned-State Baseline workflows",
+    "replace inline bearer-token fields with Meraki Account Key bindings",
+    "replace temporary ngrok targets with approved stable TLS ingress",
+    "add descriptions to the remaining three exported child workflows",
+    "export the corrected package and pass the structural auditor",
+    "import the corrected package into a duplicate workspace and remap targets"
+  ]
+}

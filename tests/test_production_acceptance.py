@@ -216,21 +216,45 @@ class ProductionAcceptanceTests(unittest.TestCase):
             if gate["id"] == "meraki.native_export_import"
         )
         self.assertEqual("pending", gate["status"])
-        self.assertEqual(1, len(gate["evidence"]))
-        self.assertEqual("failed", gate["evidence"][0]["result"])
+        self.assertEqual(2, len(gate["evidence"]))
+        self.assertTrue(
+            all(evidence["result"] == "failed" for evidence in gate["evidence"])
+        )
 
-        relative = gate["evidence"][0]["ref"].removeprefix("evidence://")
+        latest = gate["evidence"][-1]
+        relative = latest["ref"].removeprefix("evidence://")
         content = (ROOT / relative).read_bytes()
         self.assertEqual(
             hashlib.sha256(content).hexdigest(),
-            gate["evidence"][0]["sha256"],
+            latest["sha256"],
         )
 
         evidence = json.loads(content)
         self.assertEqual("failed", evidence["result"])
         self.assertFalse(evidence["source"]["raw_export_committed"])
-        self.assertEqual(20, evidence["audit"]["error_count"])
-        self.assertEqual(7, evidence["audit"]["workflow_count"])
+        self.assertEqual(18, evidence["audit"]["error_count"])
+        self.assertEqual(5, evidence["audit"]["workflow_count"])
+        self.assertEqual(0, evidence["audit"]["obsolete_embedded_child_count"])
+        self.assertTrue(evidence["audit"]["final_prompt_activity_present"])
+        self.assertFalse(evidence["audit"]["strict_final_prompt_label_match"])
+        self.assertEqual(
+            {
+                "package.activity_missing": 1,
+                "package.workflow_missing": 6,
+                "secret.inline_value": 4,
+                "documentation.workflow_description": 3,
+                "transport.ngrok": 4,
+            },
+            evidence["audit"]["issue_counts"],
+        )
+        self.assertEqual(
+            20,
+            evidence["comparison_to_previous_audit"]["previous_error_count"],
+        )
+        self.assertEqual(
+            18,
+            evidence["comparison_to_previous_audit"]["current_error_count"],
+        )
         self.assertFalse(evidence["audit"]["native_export_set_valid"])
         self.assertFalse(evidence["audit"]["production_package_complete"])
         self.assertFalse(evidence["safety"]["contains_secret_values"])

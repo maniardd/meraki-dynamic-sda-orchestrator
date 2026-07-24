@@ -85,14 +85,16 @@ pending gate because the border is configured to return to Network Essentials
 at its next reboot; underlay acceptance cannot begin until both fabric devices
 pass the exact current-and-next Advantage license precheck.
 
-The first native Meraki package export was also audited and failed closed. Its
-secret-free summary records twenty structural findings without property
-values: obsolete embedded child versions, missing disabled Apply and baseline
-workflows, inline credential fields, temporary ngrok targets, missing
-descriptions, and a missing final Create Prompt. This evidence does not pass
-`meraki.native_export_import`; it provides the correction checklist for the
-next export. Raw Meraki exports, raw device output, credentials, and tenant
-Account Keys are not committed.
+Two native Meraki package exports have been audited and both failed closed.
+The first secret-free summary recorded twenty structural findings. The v5
+correction reduced that count to eighteen by removing both obsolete embedded
+child versions, adding three workflow descriptions, and adding a genuine final
+prompt activity. Exact production workflow/activity labels, the disabled Apply
+and baseline workflows, Account Key bindings, stable TLS targets, and three
+child descriptions remain incomplete. This evidence does not pass
+`meraki.native_export_import`; it narrows the correction checklist for the next
+export. Raw Meraki exports, raw device output, credentials, and tenant Account
+Keys are not committed.
 
 Evidence files contain only reviewed summaries and immutable identifiers. They
 are not a substitute for the protected source evidence retained by the owning
