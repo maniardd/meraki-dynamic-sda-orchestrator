@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/production-acceptance.schema.json",
+  "title": "Dynamic SDA production acceptance registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "scope",
+    "controls",
+    "required_signoff_roles",
+    "gates",
+    "signoffs"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "registry_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment",
+        "fabric_id",
+        "release_candidate"
+      ],
+      "properties": {
+        "environment": {
+          "enum": [
+            "lab",
+            "pilot",
+            "production"
+          ]
+        },
+        "fabric_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "release_candidate": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "plan_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "artifact_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "intent_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apply_authorization_requested",
+        "apply_workflow_present",
+        "device_writes_permitted"
+      ],
+      "properties": {
+        "apply_authorization_requested": {
+          "type": "boolean"
+        },
+        "apply_workflow_present": {
+          "type": "boolean"
+        },
+        "device_writes_permitted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "required_signoff_roles": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/signoffRole"
+      }
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/gate"
+      }
+    },
+    "signoffs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/signoff"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signoffRole": {
+      "enum": [
+        "network_design_authority",
+        "automation_owner",
+        "security_owner",
+        "platform_owner",
+        "change_approver"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "ref",
+        "sha256",
+        "captured_at",
+        "result"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"
+        },
+        "kind": {
+          "enum": [
+            "test_report",
+            "meraki_run",
+            "native_export_audit",
+            "device_precheck",
+            "hardware_test",
+            "api_test",
+            "rollback_test",
+            "scale_test",
+            "security_review",
+            "operational_review",
+            "change_record"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^(artifact|evidence|github|meraki|change)://[^\\s]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "result": {
+          "enum": [
+            "passed",
+            "failed",
+            "pending"
+          ]
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "required",
+        "status",
+        "owner_roles",
+        "dependencies",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{2,127}$"
+        },
+        "category": {
+          "enum": [
+            "software",
+            "meraki",
+            "ingress",
+            "runtime",
+            "iosxe",
+            "fusion",
+            "multicast",
+            "policy",
+            "ise",
+            "telemetry",
+            "reconciliation",
+            "scale",
+            "security",
+            "operations"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "passed",
+            "failed",
+            "not_applicable"
+          ]
+        },
+        "owner_roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/signoffRole"
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      }
+    },
+    "signoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "status"
+      ],
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/signoffRole"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        },
+        "principal_ref": {
+          "type": "string",
+          "pattern": "^principal://[^\\s]+$"
+        },
+        "decision_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence_ref": {
+          "type": "string",
+          "pattern": "^(artifact|evidence|github|meraki|change)://[^\\s]+$"
+        },
+        "evidence_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

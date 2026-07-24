@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "runtime.postgres-backup-restore.20260723",
+  "captured_at": "2026-07-23T18:15:04Z",
+  "source": {
+    "kind": "github_actions_self_hosted_runner",
+    "repository": "maniardd/meraki-dynamic-sda-orchestrator",
+    "workflow": "Deploy SDA Orchestrator API Release",
+    "run_id": 30032829434,
+    "job_id": 89293327968,
+    "url": "https://github.com/maniardd/meraki-dynamic-sda-orchestrator/actions/runs/30032829434"
+  },
+  "release": {
+    "commit": "224ca3706c6272141fba534bb748424a1202ad7d",
+    "service_status": "healthy",
+    "test_count": 296,
+    "skipped_count": 5,
+    "failure_count": 0
+  },
+  "backup": {
+    "format": "postgresql_custom",
+    "archive_sha256": "9063141603d97300f6854ab4db25a4fbaabf6282cea4feb527adf54c82be71ce",
+    "private_local_storage": true,
+    "uploaded_as_workflow_artifact": false
+  },
+  "restore_verification": {
+    "status": "passed",
+    "isolation": "ephemeral_postgresql_cluster_private_unix_socket",
+    "production_database_write": false,
+    "required_table_count": 11,
+    "invalid_audit_hash_count": 0,
+    "restore_seconds": 2
+  },
+  "result": "passed",
+  "remaining_requirements": [
+    "approved encrypted off-host backup repository",
+    "off-host retention enforcement and monitoring",
+    "documented and approved RPO and RTO",
+    "backup and recovery failure alerting",
+    "second-host recovery exercise"
+  ],
+  "contains_secret_values": false,
+  "contains_database_content": false
+}

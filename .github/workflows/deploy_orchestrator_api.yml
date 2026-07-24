@@ -2,6 +2,17 @@ name: Deploy SDA Orchestrator API Release
 
 on:
   workflow_dispatch:
+    inputs:
+      verify_postgres_recovery:
+        description: Create a private backup and verify a disposable restore
+        required: true
+        default: false
+        type: boolean
+      inspect_runtime_recovery:
+        description: Read and validate worker run/fabric-lock recovery state
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -22,3 +33,24 @@ jobs:
       - name: Stage immutable API release
         shell: bash
         run: bash admin/stage_api_release.sh "$GITHUB_WORKSPACE"
+
+      - name: Verify PostgreSQL backup and disposable restore
+        if: ${{ inputs.verify_postgres_recovery }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          backup_path="$(
+            /home/sdaadmin/sda-orchestrator/current/admin/backup_postgresql.sh
+          )"
+          printf '%s' "${backup_path}" |
+            grep -Eq '^/home/sdaadmin/[.]local/share/sda-orchestrator/backups/sda_orchestrator_[0-9]{8}T[0-9]{6}Z[.]dump$'
+          /home/sdaadmin/sda-orchestrator/current/admin/verify_postgresql_restore.sh \
+            "${backup_path}"
+
+      - name: Inspect worker and fabric-lock recovery state
+        if: ${{ inputs.inspect_runtime_recovery }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/sdaadmin/sda-orchestrator/current
+          .venv/bin/python tools/inspect_runtime_recovery.py

@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "relay-preflight-20260723",
+  "captured_at": "2026-07-23T17:24:51Z",
+  "environment": "lab",
+  "fabric_id": "fab-sjc23-001",
+  "github_actions": {
+    "run_id": "30029287447",
+    "run_url": "https://github.com/maniardd/meraki-dynamic-sda-orchestrator/actions/runs/30029287447",
+    "conclusion": "success",
+    "artifact_id": "8572595086",
+    "artifact_archive_sha256": "690a95eefc945089afd28369807ac3de65a89aeb6a392f4d18e8ad0c4f608ec4",
+    "retention_days": 7
+  },
+  "relay": {
+    "operating_system": "Ubuntu 22.04.5 LTS",
+    "cpu_count": 4,
+    "memory_kib": 8131708,
+    "root_disk": {
+      "size": "38G",
+      "used": "15G",
+      "available": "22G",
+      "use_percent": 42
+    }
+  },
+  "runtime": {
+    "postgresql": "active",
+    "redis_server": "inactive",
+    "sda_orchestrator_legacy_service": "inactive",
+    "legacy_port_5000_health": "unreachable",
+    "hardened_port_8080_health": 200
+  },
+  "management_plane_reachability": {
+    "border_execution_ssh": "unreachable",
+    "edge_execution_ssh": "unreachable",
+    "border_dashboard_ssh": "reachable",
+    "edge_dashboard_ssh": "reachable"
+  },
+  "safety": {
+    "read_only": true,
+    "repository_checkout_performed": false,
+    "device_login_performed": false,
+    "device_configuration_performed": false,
+    "credentials_printed": false,
+    "environment_dumped": false
+  },
+  "blocking_findings": [
+    "The relay cannot reach either required execution-management SSH endpoint.",
+    "No device login, release check, role check, topology check, or checkpoint check can proceed until execution-plane reachability is restored.",
+    "Redis, worker recovery, backup/restore, and high-availability behavior remain unproven."
+  ],
+  "result": "pending"
+}

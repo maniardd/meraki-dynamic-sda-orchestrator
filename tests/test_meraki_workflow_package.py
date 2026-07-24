@@ -29,6 +29,36 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         self.assertFalse(result["importable_exports_present"])
         self.assertFalse(result["apply_enabled"])
 
+    def test_native_approval_acknowledgement_and_expiry_binding_fail_closed(self):
+        mutations = (
+            ("require_checkbox", "", "approval.acknowledgement"),
+            ("require_checkbox", None, "approval.acknowledgement"),
+            ("due_at_input", "unreviewed_due", "approval.due_binding"),
+            ("due_at_input", None, "approval.due_binding"),
+            ("expires_at_input", "unreviewed_expiry", "approval.expiry_binding"),
+            ("expires_at_input", None, "approval.expiry_binding"),
+        )
+        for field, value, expected_code in mutations:
+            with self.subTest(field=field, value=value):
+                candidate = copy.deepcopy(self.document)
+                workflow = next(
+                    item
+                    for item in candidate["workflows"]
+                    if item["id"] == "request_approval"
+                )
+                native_approval = next(
+                    step
+                    for step in workflow["steps"]
+                    if step["activity"] == "request_approval"
+                )
+                native_approval[field] = value
+                result = validate_workflow_package(candidate)
+                self.assertFalse(result["safe_to_build"])
+                self.assertIn(
+                    expected_code,
+                    {issue["code"] for issue in result["issues"]},
+                )
+
     def test_role_separation_and_fixed_relative_operations(self):
         roles = {target["role"] for target in self.document["targets"]}
         self.assertEqual({"planner", "approver", "operator", "auditor"}, roles)

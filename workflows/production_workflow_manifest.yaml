@@ -482,6 +482,7 @@ workflows:
         minimum_approvals: 1
         require_comment: true
         require_checkbox: I reviewed the plan hash, artifact hash, blockers, and rollback scope.
+        due_at_input: approval_expires_at
         expires_at_input: approval_expires_at
       - {id: approval_task_rule, activity: approval_task_rule}
       - id: record_approval

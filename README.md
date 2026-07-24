@@ -78,6 +78,8 @@ Implemented foundation:
 - Genuine configured Meraki serialization fingerprint for HTTP, prompt,
   approval, condition blocks/branches, completion, and child-workflow
   invocation; only structural metadata is committed
+- Machine-validated production acceptance registry with dependency-safe gates,
+  hash-bound evidence, independent sign-offs, and fail-open Apply detection
 
 Live apply remains disabled. SQLite remains available for local tests, while
 the production runtime uses PostgreSQL. The portable Meraki build specification
@@ -132,6 +134,12 @@ redundant-hardware tests.
 The [native multicast acceptance boundary](docs/multicast-overlay-renderer.md)
 records per-VN planning, rendered IOS XE policy, gates, and traffic tests still
 required before enablement.
+The [PostgreSQL recovery runbook](docs/postgresql-backup-restore.md)
+defines private backups, checksum-bound disposable restores, retention, and the
+evidence still required before the runtime recovery gate can pass.
+The [runtime recovery inspector](docs/runtime-recovery-inspection.md) defines
+read-only stale-lock detection and the fail-closed boundary for any future
+dual-control worker recovery implementation.
 The [policy-plane acceptance boundary](docs/policy-plane-renderer.md) records
 ISE ownership, SXP propagation, edge enforcement, API reconciliation, gates,
 and the evidence required before policy apply can be enabled.
@@ -141,3 +149,9 @@ hardware/API acceptance procedure required before its blocker can be cleared.
 The [Meraki workflow build runbook](docs/meraki-workflow-build-runbook.md)
 defines the native workflow assembly, target/account-key mapping, validation,
 export, dry-run, and acceptance sequence.
+The [Figma workflow UX](docs/figma-workflow-ux.md) records the editable
+Cisco-enterprise Plan, Review/Approve, and Dry Run/Evidence storyboard and its
+honest mapping to Meraki-native activities.
+The [production acceptance registry](docs/production-acceptance-registry.md)
+defines the machine-enforced evidence, dependency, sign-off, and Apply-lock
+decision that must pass before controlled enablement can be requested.

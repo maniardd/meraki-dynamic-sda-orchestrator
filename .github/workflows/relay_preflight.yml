@@ -20,6 +20,8 @@ jobs:
         env:
           SDA_BORDER_HOST: ${{ secrets.SDA_BORDER_HOST }}
           SDA_EDGE_HOST: ${{ secrets.SDA_EDGE_HOST }}
+          SDA_BORDER_DASHBOARD_HOST: ${{ secrets.SDA_BORDER_DASHBOARD_HOST }}
+          SDA_EDGE_DASHBOARD_HOST: ${{ secrets.SDA_EDGE_DASHBOARD_HOST }}
         run: |
           set +e
           report="$RUNNER_TEMP/sda-relay-preflight.txt"
@@ -56,20 +58,37 @@ jobs:
             done
 
             echo
-            echo "[fabric_ssh_reachability]"
+            echo "[fabric_execution_ssh_reachability]"
             if [ -z "${SDA_BORDER_HOST:-}" ]; then
-              echo "border_ssh=not_configured"
+              echo "border_execution_ssh=not_configured"
             elif timeout 3 bash -c "</dev/tcp/${SDA_BORDER_HOST}/22" 2>/dev/null; then
-              echo "border_ssh=reachable"
+              echo "border_execution_ssh=reachable"
             else
-              echo "border_ssh=unreachable"
+              echo "border_execution_ssh=unreachable"
             fi
             if [ -z "${SDA_EDGE_HOST:-}" ]; then
-              echo "edge_ssh=not_configured"
+              echo "edge_execution_ssh=not_configured"
             elif timeout 3 bash -c "</dev/tcp/${SDA_EDGE_HOST}/22" 2>/dev/null; then
-              echo "edge_ssh=reachable"
+              echo "edge_execution_ssh=reachable"
             else
-              echo "edge_ssh=unreachable"
+              echo "edge_execution_ssh=unreachable"
+            fi
+
+            echo
+            echo "[dashboard_oob_ssh_reachability]"
+            if [ -z "${SDA_BORDER_DASHBOARD_HOST:-}" ]; then
+              echo "border_dashboard_ssh=not_configured"
+            elif timeout 3 bash -c "</dev/tcp/${SDA_BORDER_DASHBOARD_HOST}/22" 2>/dev/null; then
+              echo "border_dashboard_ssh=reachable"
+            else
+              echo "border_dashboard_ssh=unreachable"
+            fi
+            if [ -z "${SDA_EDGE_DASHBOARD_HOST:-}" ]; then
+              echo "edge_dashboard_ssh=not_configured"
+            elif timeout 3 bash -c "</dev/tcp/${SDA_EDGE_DASHBOARD_HOST}/22" 2>/dev/null; then
+              echo "edge_dashboard_ssh=reachable"
+            else
+              echo "edge_dashboard_ssh=unreachable"
             fi
 
             echo
