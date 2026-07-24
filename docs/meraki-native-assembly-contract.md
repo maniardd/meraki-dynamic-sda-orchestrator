@@ -67,6 +67,10 @@ The polling composite must be assembled in this order:
 9. Exit as pending when the attempt budget is exhausted; never create an
    unbounded loop.
 
+The terminal allow-list is pinned to the persisted run states. It includes
+`dry_run_blocked` and `dry_run_failed` so a safe negative result does not spin
+until timeout, and uses the actual rollback terminal spelling `rolled_back`.
+
 ## Tenant assembly rules
 
 1. Create the six child workflows in the runbook order, then the parent.
@@ -79,6 +83,33 @@ The polling composite must be assembled in this order:
    disabled.
 6. Validate in the Meraki editor, export without running, and audit the export
    before any plan-only test.
+
+## Master and child output bindings
+
+Package version 0.3.0 pins the complete child-to-parent data flow. Each child
+declares typed, required outputs with a structured source:
+
+- authenticated API response body plus an exact JSONPath for child outputs;
+- declared child output plus an exact field name for parent outputs.
+
+The plan child returns the immutable intent, plan, and artifact identifiers and
+hashes plus blockers. The approval child returns its immutable approval ID,
+decision, and expiry. The dry-run child returns the orchestrator run ID, final
+run status, and the matching plan/artifact identity. The evidence child returns
+the run ID, append-only audit-chain result, and redacted evidence/audit arrays.
+
+The parent aggregates these values and ends with a non-blocking native result
+summary. It never derives an output from the disabled Apply child. The compiler
+copies the output bindings into the deterministic build plan, and validation
+requires the exact pinned contract. A missing output, renamed field, changed
+JSONPath, invented source channel, or modified final-summary field makes
+`safe_to_build:false`.
+
+These bindings are an assembly contract, not a claim that the current
+tenant-native objects have already been rebuilt. After assembling the updated
+variables and JSONPath activities in Meraki, a fresh integrated run must prove
+that the parent displays non-empty plan hashes, approval decision, run ID,
+dry-run status, and evidence-chain result.
 
 ## Release boundary
 
