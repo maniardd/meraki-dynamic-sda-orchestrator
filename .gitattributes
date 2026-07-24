@@ -1,0 +1,4 @@
+# Production-acceptance evidence is content-addressed by SHA-256.
+# Keep its committed bytes identical on Windows and Linux.
+/acceptance/evidence/*.json text eol=lf
+/acceptance/*.yaml text eol=lf
