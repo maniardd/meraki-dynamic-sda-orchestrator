@@ -209,6 +209,38 @@ class ProductionAcceptanceTests(unittest.TestCase):
         self.assertEqual(4, result["passed_required_gate_count"])
         self.assertIn("iosxe.license_state", result["incomplete_gate_ids"])
 
+    def test_failed_meraki_native_package_audit_is_hash_bound_and_secret_free(self):
+        gate = next(
+            gate
+            for gate in self.registry["gates"]
+            if gate["id"] == "meraki.native_export_import"
+        )
+        self.assertEqual("pending", gate["status"])
+        self.assertEqual(1, len(gate["evidence"]))
+        self.assertEqual("failed", gate["evidence"][0]["result"])
+
+        relative = gate["evidence"][0]["ref"].removeprefix("evidence://")
+        content = (ROOT / relative).read_bytes()
+        self.assertEqual(
+            hashlib.sha256(content).hexdigest(),
+            gate["evidence"][0]["sha256"],
+        )
+
+        evidence = json.loads(content)
+        self.assertEqual("failed", evidence["result"])
+        self.assertFalse(evidence["source"]["raw_export_committed"])
+        self.assertEqual(20, evidence["audit"]["error_count"])
+        self.assertEqual(7, evidence["audit"]["workflow_count"])
+        self.assertFalse(evidence["audit"]["native_export_set_valid"])
+        self.assertFalse(evidence["audit"]["production_package_complete"])
+        self.assertFalse(evidence["safety"]["contains_secret_values"])
+        self.assertFalse(
+            evidence["safety"]["audit_report_contains_property_values"]
+        )
+        self.assertFalse(evidence["safety"]["workflow_run_performed"])
+        self.assertFalse(evidence["safety"]["device_writes_performed"])
+        self.assertFalse(evidence["safety"]["apply_enabled"])
+
     def test_missing_or_tampered_local_evidence_fails_closed(self):
         missing = copy.deepcopy(self.registry)
         missing["gates"][1]["evidence"][0]["ref"] = (

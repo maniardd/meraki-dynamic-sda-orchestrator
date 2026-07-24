@@ -83,8 +83,16 @@ read-only precheck are backed by committed, secret-free evidence summaries.
 Four of twenty required gates are passed. IOS XE license state is a distinct
 pending gate because the border is configured to return to Network Essentials
 at its next reboot; underlay acceptance cannot begin until both fabric devices
-pass the exact current-and-next Advantage license precheck. Raw Meraki exports, raw device
-output, credentials, and tenant Account Keys are not committed.
+pass the exact current-and-next Advantage license precheck.
+
+The first native Meraki package export was also audited and failed closed. Its
+secret-free summary records twenty structural findings without property
+values: obsolete embedded child versions, missing disabled Apply and baseline
+workflows, inline credential fields, temporary ngrok targets, missing
+descriptions, and a missing final Create Prompt. This evidence does not pass
+`meraki.native_export_import`; it provides the correction checklist for the
+next export. Raw Meraki exports, raw device output, credentials, and tenant
+Account Keys are not committed.
 
 Evidence files contain only reviewed summaries and immutable identifiers. They
 are not a substitute for the protected source evidence retained by the owning

@@ -70,8 +70,14 @@ gates:
     status: pending
     owner_roles: [automation_owner, platform_owner]
     dependencies: [meraki.integrated_parent]
-    evidence: []
-    rationale: Corrected parent and child exports must pass the structural auditor and duplicate-tenant import.
+    evidence:
+      - id: meraki.native-package-audit.20260724
+        kind: test_report
+        ref: evidence://acceptance/evidence/meraki-native-package-audit-20260724.json
+        sha256: cc7d235c3bb098f339d51283058e9efd8319d2676078ad5b9ca9ef26c16d4f76
+        captured_at: "2026-07-24T13:50:00Z"
+        result: failed
+    rationale: The first corrected-parent package export failed closed with twenty structural findings, including obsolete embedded child versions, missing disabled Apply and baseline workflows, inline bearer-token fields, temporary ngrok targets, missing descriptions, and a missing final Create Prompt. The raw tenant export remains uncommitted. A corrected package must pass the structural auditor and duplicate-workspace import before this gate can pass.
 
   - id: meraki.role_negative
     category: security
