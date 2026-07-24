@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "meraki.native-package-audit.20260724",
+  "evidence_type": "meraki_native_export_structural_audit",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-24T13:50:00Z",
+  "result": "failed",
+  "source": {
+    "kind": "meraki_native_package_export",
+    "workflow": "SDA Fabric - Plan, Approve, and Execute v4",
+    "export_sha256": "bf4ad8fc8bae571234aedf784ad4819c37e5b0b22cf37767b500a262c893c387",
+    "raw_export_committed": false
+  },
+  "audit": {
+    "native_export_set_valid": false,
+    "production_package_complete": false,
+    "workflow_count": 7,
+    "error_count": 20,
+    "warning_count": 0,
+    "issue_counts": {
+      "package.activity_missing": 1,
+      "package.workflow_missing": 5,
+      "secret.inline_value": 4,
+      "documentation.workflow_description": 6,
+      "transport.ngrok": 4
+    },
+    "missing_activity_labels": [
+      "Create Prompt"
+    ],
+    "missing_workflow_labels": [
+      "SDA Fabric - Bootstrap Owned-State Baseline",
+      "SDA Fabric - Export Evidence",
+      "SDA Fabric - Plan, Approve, and Execute",
+      "SDA Fabric - Start Apply",
+      "SDA Fabric - Start Dry Run"
+    ],
+    "exported_workflow_labels": [
+      "SDA Fabric - Export Evidence v3",
+      "SDA Fabric - Plan, Approve, and Execute v4",
+      "SDA Fabric - Request Approval",
+      "SDA Fabric - Request Approval v2",
+      "SDA Fabric - Start Dry Run v3",
+      "SDA Fabric - Start Dry Run v4",
+      "SDA Fabric - Validate and Plan"
+    ],
+    "obsolete_embedded_child_count": 2,
+    "inline_credential_field_count": 4,
+    "temporary_ingress_target_count": 4,
+    "missing_workflow_description_count": 6
+  },
+  "safety": {
+    "audit_report_contains_property_values": false,
+    "contains_secret_values": false,
+    "contains_raw_configuration": false,
+    "contains_tenant_identifiers": false,
+    "workflow_run_performed": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "apply_enabled": false
+  },
+  "remaining_requirements": [
+    "remove obsolete embedded Approval and Dry Run child versions",
+    "assemble the disabled Start Apply and Bootstrap Owned-State Baseline workflows",
+    "replace inline bearer-token fields with Meraki Account Key bindings",
+    "replace temporary ngrok targets with approved stable TLS ingress",
+    "add workflow descriptions and the final non-blocking Create Prompt",
+    "export the corrected package and pass the structural auditor",
+    "import the corrected package into a duplicate workspace and remap targets"
+  ]
+}
