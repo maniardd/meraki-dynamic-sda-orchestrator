@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from orchestrator.auth import load_hashed_token_identities
+from orchestrator.auth import AuthenticationConfigError, load_hashed_token_identities
 
 
 EXPECTED_ACTORS = (
@@ -56,7 +56,7 @@ def main() -> int:
     arguments = parser.parse_args()
     try:
         report = inspect_identities(arguments.identity_file)
-    except (OSError, ValueError) as exc:
+    except (AuthenticationConfigError, OSError, ValueError) as exc:
         print(
             json.dumps(
                 {

@@ -56,15 +56,14 @@ class InspectMerakiRoleIdentitiesTests(unittest.TestCase):
         path = self._identity_file(["meraki-planner", "meraki-approver"], 0o640)
         completed = subprocess.run(
             [sys.executable, str(SCRIPT), "--identity-file", str(path)],
-            check=True,
             capture_output=True,
             text=True,
         )
         report = json.loads(completed.stdout)
-        self.assertEqual(["meraki-operator", "meraki-auditor"], report["missing_meraki_role_actors"])
-        self.assertEqual("0640", report["identity_file_mode"])
-        self.assertFalse(report["private_file_mode"])
-        self.assertFalse(report["ready_for_meraki_targets"])
+        self.assertEqual(2, completed.returncode)
+        self.assertFalse(report["safe"])
+        self.assertFalse(report["contains_secret_values"])
+        self.assertFalse(report["contains_token_digests"])
 
     def test_workflow_is_manual_secret_free_and_read_only(self):
         text = WORKFLOW.read_text(encoding="utf-8")
