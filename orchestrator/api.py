@@ -53,6 +53,36 @@ MERAKI_SCALAR_GRAMMARS = {
 }
 
 
+def _meraki_evidence_summary(records: list[Mapping[str, Any]]) -> list[Dict[str, Any]]:
+    """Return structural evidence metadata safe to expose in a Meraki run."""
+
+    return [
+        {
+            "evidence_id": str(record["evidence_id"]),
+            "phase_id": str(record["phase_id"]),
+            "evidence_type": str(record["evidence_type"]),
+            "payload_hash": str(record["payload_hash"]),
+            "created_at": str(record["created_at"]),
+        }
+        for record in records
+    ]
+
+
+def _meraki_audit_summary(records: list[Mapping[str, Any]]) -> list[Dict[str, Any]]:
+    """Return hash-chain metadata without stored audit payloads."""
+
+    return [
+        {
+            "sequence": int(record["sequence"]),
+            "event_type": str(record["event_type"]),
+            "event_hash": str(record["event_hash"]),
+            "previous_hash": str(record["previous_hash"]),
+            "created_at": str(record["created_at"]),
+        }
+        for record in records
+    ]
+
+
 def _repair_meraki_unquoted_scalars(raw_document: str) -> Optional[Dict[str, Any]]:
     """Quote only approved native-workflow tokens with constrained grammars."""
 
@@ -639,14 +669,18 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             return error
         run_id = str(document.get("run_id", ""))
         run_record = store().get_run(run_id)
+        evidence = _meraki_evidence_summary(store().run_evidence(run_id))
+        audit = _meraki_audit_summary(store().audit_events("run", run_id))
         return jsonify(
             {
                 "succeeded": True,
                 "status": run_record["status"],
                 "run_id": run_id,
                 "chain_valid": store().verify_audit_chain(),
-                "evidence": store().run_evidence(run_id),
-                "audit": store().audit_events("run", run_id),
+                "evidence": evidence,
+                "audit": audit,
+                "contains_secret_values": False,
+                "contains_raw_configuration": False,
             }
         ), 200
 
