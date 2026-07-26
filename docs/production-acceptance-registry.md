@@ -80,7 +80,7 @@ reconciliation, telemetry, scale, security, and pilot operations.
 The completed child-level and integrated-parent Meraki
 plan/approval/dry-run/evidence paths and the authenticated SJC23 IOS XE
 read-only precheck are backed by committed, secret-free evidence summaries.
-Five of twenty required gates are passed. The IOS XE license-state gate passed
+Five of nineteen applicable gates are passed. The IOS XE license-state gate passed
 after the border reboot: both active fabric devices now report Network
 Advantage and DNA Advantage as their current and next-reboot packages. This
 unblocks planning for underlay acceptance, but it does not authorize a device

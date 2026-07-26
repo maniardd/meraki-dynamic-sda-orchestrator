@@ -179,7 +179,7 @@ handoff in the isolated lab. That fail-closed result is the correct demo.
 ### 7:10–9:00 — Prove safety and production maturity
 
 Show `acceptance/production-acceptance.sjc23.yaml` or the validator summary.
-State that five of twenty gates are passed: software suite, Meraki child path,
+State that five of nineteen applicable gates are passed: software suite, Meraki child path,
 integrated parent, read-only hardware precheck and licensing. Show that Apply
 remains disabled. Do not present a dry-run success as configuration acceptance.
 
