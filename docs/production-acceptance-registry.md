@@ -119,6 +119,10 @@ To close a gate:
    unit-test suite.
 7. Obtain the required role sign-offs through the approved change system.
 
+For the current two-node lab, use the
+[SJC23 controlled hardware-acceptance packet](sjc23-controlled-hardware-acceptance.md)
+for the underlay, LISP/VXLAN, and owned-state proof sequence.
+
 Never change a pending gate to `not_applicable` merely because the current
 two-node lab lacks the capability. A capability may be declared not applicable
 only when the release scope explicitly excludes it, its gate is marked
