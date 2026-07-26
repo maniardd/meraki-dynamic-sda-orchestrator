@@ -1,0 +1,31 @@
+name: Repair SDA POC Ingress
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type REPOINT_POC_TO_8080 to refresh the temporary tunnel
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    if: github.event.inputs.confirmation == 'REPOINT_POC_TO_8080'
+    runs-on: [self-hosted, sda-relay]
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out reviewed repair code
+        uses: actions/checkout@v4
+
+      - name: Refresh temporary POC tunnel only
+        shell: bash
+        env:
+          RUNTIME_PYTHON: /home/sdaadmin/sda-orchestrator/current/.venv/bin/python
+        run: |
+          set -euo pipefail
+          test -x "${RUNTIME_PYTHON}"
+          "${RUNTIME_PYTHON}" tools/repair_poc_ingress.py
