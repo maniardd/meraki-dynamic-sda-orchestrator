@@ -65,3 +65,13 @@ curl -sS http://127.0.0.1:8080/health
 Only after local health passes may the POC ngrok ingress be repointed from
 port 5000 to port 8080. Production still requires a stable approved ingress,
 permanent DNS, and trusted TLS rather than the temporary ngrok endpoint.
+
+## Role-identity readiness inspection
+
+`Inspect Meraki API Role Identity Readiness` is a manually dispatched,
+read-only GitHub Actions workflow for the self-hosted relay. It reports only
+the number of configured identities, the expected Meraki actor labels, missing
+roles, and whether the identity file is mode `0600`. It never prints bearer
+values, token digests, URL bindings, host addresses, or raw configuration; it
+does not restart the service, modify the identity file, upload an artifact, or
+enable execution.
