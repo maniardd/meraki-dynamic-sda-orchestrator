@@ -121,6 +121,102 @@ class PersistentWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(403, response.status_code)
 
+    def test_meraki_workflow_action_role_matrix_fails_closed(self):
+        """Every fixed workflow action has one mutating owner role.
+
+        The read-only status action is intentionally available to all four
+        service identities; it is the only exception and is asserted below.
+        """
+        _intent, plan = self.create_intent_and_plan()
+        plan_id = plan["plan_id"]
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+
+        denied_actions = (
+            (
+                "/v1/workflow-actions/plan",
+                {"intent": self.intent},
+                ("approver-token", "operator-token", "auditor-token"),
+            ),
+            (
+                "/v1/workflow-actions/approve",
+                {
+                    "plan_id": plan_id,
+                    "decision": "approved",
+                    "change_reference": "CHG-ROLE-MATRIX-DENIED",
+                    "expires_at": expires_at,
+                },
+                ("planner-token", "operator-token", "auditor-token"),
+            ),
+            (
+                "/v1/workflow-actions/run",
+                {
+                    "plan_id": plan_id,
+                    "mode": "dry_run",
+                    "idempotency_key": "role-matrix-denied-run-001",
+                },
+                ("planner-token", "approver-token", "auditor-token"),
+            ),
+        )
+        for path, payload, denied_tokens in denied_actions:
+            for token in denied_tokens:
+                with self.subTest(path=path, token=token):
+                    response = self.client.post(path, json=payload, headers=self.headers(token))
+                    self.assertEqual(403, response.status_code, response.get_json())
+                    self.assertEqual("forbidden", response.get_json()["error"])
+
+        approved = self.client.post(
+            "/v1/workflow-actions/approve",
+            json={
+                "plan_id": plan_id,
+                "decision": "approved",
+                "change_reference": "CHG-ROLE-MATRIX-001",
+                "expires_at": expires_at,
+            },
+            headers=self.headers("approver-token"),
+        )
+        self.assertEqual(200, approved.status_code, approved.get_json())
+        started = self.client.post(
+            "/v1/workflow-actions/run",
+            json={
+                "plan_id": plan_id,
+                "mode": "dry_run",
+                "idempotency_key": "role-matrix-run-001",
+            },
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(200, started.status_code, started.get_json())
+        run_id = started.get_json()["run"]["run_id"]
+
+        for path in (
+            "/v1/workflow-actions/process-dry-run",
+            "/v1/workflow-actions/evidence",
+        ):
+            owner = "operator-token" if path.endswith("process-dry-run") else "auditor-token"
+            for token in set(TOKENS) - {owner}:
+                with self.subTest(path=path, token=token):
+                    response = self.client.post(
+                        path,
+                        json={"run_id": run_id},
+                        headers=self.headers(token),
+                    )
+                    self.assertEqual(403, response.status_code, response.get_json())
+                    self.assertEqual("forbidden", response.get_json()["error"])
+
+        completed = self.client.post(
+            "/v1/workflow-actions/process-dry-run",
+            json={"run_id": run_id},
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(200, completed.status_code, completed.get_json())
+        for token in TOKENS:
+            with self.subTest(path="/v1/workflow-actions/status", token=token):
+                response = self.client.post(
+                    "/v1/workflow-actions/status",
+                    json={"run_id": run_id},
+                    headers=self.headers(token),
+                )
+                self.assertEqual(200, response.status_code, response.get_json())
+
     def test_dynamic_requirements_are_allocated_planned_and_idempotent(self):
         payload = {
             "requirements": self.requirements,

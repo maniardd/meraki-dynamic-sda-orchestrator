@@ -189,6 +189,28 @@ Use HTTP Bearer Authentication when it is available in the tenant. HTTP Custom
 Header Authentication or client-certificate authentication is an acceptable
 planned alternative. The role must still be a separate backend identity.
 
+### Role-denial acceptance procedure
+
+After all four targets use distinct Account Keys, run the following **safe
+negative tests** from temporary copies of the child workflows. Each test must
+stop at the first HTTP response; do not create an Apply workflow and do not
+use an Apply URL. Capture only the HTTP status, action name, target role,
+request ID, and timestamp in the acceptance record—never an Account Key,
+request body, response body, or configuration.
+
+| Target role used | Action attempted | Expected result |
+|---|---|---|
+| Planner | `approve`, `run`, `process-dry-run`, `evidence` | HTTP `403`, `forbidden` |
+| Approver | `plan`, `run`, `process-dry-run`, `evidence` | HTTP `403`, `forbidden` |
+| Operator | `plan`, `approve`, `evidence` | HTTP `403`, `forbidden` |
+| Auditor | `plan`, `approve`, `run`, `process-dry-run` | HTTP `403`, `forbidden` |
+
+`status` is intentionally read-only and is permitted to all four identities.
+The backend test suite pins this matrix; the live Meraki record proves that
+the four tenant targets really use distinct backend identities. A successful
+negative test does not clear `meraki.role_negative` until the native-package
+import gate has passed.
+
 ### 4. Assemble child workflows first
 
 Use the compiled `native_implementation` on every step and the exact composite
