@@ -40,7 +40,10 @@ def summarize_tunnels(document: dict[str, object]) -> list[dict[str, object]]:
         config = tunnel.get("config")
         if not public.scheme or not public.hostname or not isinstance(config, dict):
             raise ValueError("tunnel API response contained an incomplete tunnel")
-        upstream = urlparse("//" + str(config.get("addr", "")))
+        raw_upstream = str(config.get("addr", ""))
+        upstream = urlparse(
+            raw_upstream if "://" in raw_upstream else "//" + raw_upstream
+        )
         if not upstream.hostname or upstream.port is None:
             raise ValueError("tunnel API response contained an incomplete tunnel")
         summaries.append(

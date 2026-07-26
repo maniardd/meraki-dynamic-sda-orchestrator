@@ -24,6 +24,20 @@ class InspectPocIngressTests(unittest.TestCase):
         )
         self.assertNotIn("must-not-leak", str(summary))
 
+    def test_url_form_upstream_is_supported(self):
+        summary = summarize_tunnels(
+            {
+                "tunnels": [
+                    {
+                        "public_url": "https://example.ngrok-free.dev",
+                        "config": {"addr": "http://localhost:5000"},
+                    }
+                ]
+            }
+        )
+        self.assertEqual("localhost", summary[0]["upstream_host"])
+        self.assertEqual(5000, summary[0]["upstream_port"])
+
     def test_incomplete_tunnel_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "incomplete tunnel"):
             summarize_tunnels({"tunnels": [{"public_url": "https://example.ngrok-free.dev", "config": {}}]})
