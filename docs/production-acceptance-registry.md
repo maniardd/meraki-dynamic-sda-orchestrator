@@ -73,14 +73,15 @@ the other authorities.
 
 ## Current SJC23 state
 
-The registry contains twenty required gates across software, Meraki native
-workflows, ingress, runtime, IOS XE, fusion/BGP, multicast, policy/ISE,
-reconciliation, telemetry, scale, security, and pilot operations.
+The registry contains twenty gates across software, Meraki native workflows,
+ingress, runtime, IOS XE, fusion/BGP, multicast, policy/ISE, reconciliation,
+telemetry, scale, security, and pilot operations. Nineteen are currently
+required; Fusion/BGP is optional only for an explicitly isolated release scope.
 
 The completed child-level and integrated-parent Meraki
 plan/approval/dry-run/evidence paths and the authenticated SJC23 IOS XE
 read-only precheck are backed by committed, secret-free evidence summaries.
-Five of nineteen applicable gates are passed. The IOS XE license-state gate passed
+5 of 19 applicable gates are passed. The IOS XE license-state gate passed
 after the border reboot: both active fabric devices now report Network
 Advantage and DNA Advantage as their current and next-reboot packages. This
 unblocks planning for underlay acceptance, but it does not authorize a device

@@ -28,7 +28,7 @@ workflow Account Keys.
 | 2:15–3:05 | Planner output or accepted run details | Show plan, intent, and artifact hash fields; redact values if a screen unexpectedly contains sensitive data | "The planner allocates addressing and fabric objects from governed pools and binds them to immutable hashes." |
 | 3:05–3:45 | Approval child / accepted approval task | Show the human approval point and expiry/acknowledgement concept | "Approval is for this exact immutable plan—not a vague request that can drift afterwards." |
 | 3:45–4:35 | Start Dry Run / evidence child | Show the zero-write child and redacted evidence output | "The dry run proves the integration path while device and ISE writes remain prohibited." |
-| 4:35–5:20 | Production acceptance registry summary | Show 5/19 applicable gates passed and the explicit blockers | "A real production workflow must make its incomplete controls visible. Apply is deliberately unavailable." |
+| 4:35–5:20 | Production acceptance registry summary | Show 5 of 19 applicable gates passed and the explicit blockers | "A real production workflow must make its incomplete controls visible. Apply is deliberately unavailable." |
 | 5:20–6:00 | FigJam storyboard / closing | State next steps and value | "This is the path from a static POC to a governed, repeatable fabric-automation capability." |
 
 ### Short opening script

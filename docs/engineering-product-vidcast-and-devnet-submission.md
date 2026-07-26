@@ -109,7 +109,7 @@ orchestrator API. Only the guarded relay reaches the device-management plane.
 - Read-only relay access and license prechecks passed against actual OOB targets.
 - Network Advantage and DNA Advantage current/next-reboot state passed on both
   fabric devices.
-- Five of twenty required production gates are passed. Apply remains disabled.
+- 5 of 19 applicable gates are passed for this production release scope. Apply remains disabled.
 
 ## What must still happen before Apply
 
@@ -179,7 +179,7 @@ handoff in the isolated lab. That fail-closed result is the correct demo.
 ### 7:10–9:00 — Prove safety and production maturity
 
 Show `acceptance/production-acceptance.sjc23.yaml` or the validator summary.
-State that five of nineteen applicable gates are passed: software suite, Meraki child path,
+State that 5 of 19 applicable gates are passed: software suite, Meraki child path,
 integrated parent, read-only hardware precheck and licensing. Show that Apply
 remains disabled. Do not present a dry-run success as configuration acceptance.
 
