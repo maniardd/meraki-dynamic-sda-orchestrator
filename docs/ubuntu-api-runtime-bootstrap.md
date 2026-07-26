@@ -66,6 +66,39 @@ Only after local health passes may the POC ngrok ingress be repointed from
 port 5000 to port 8080. Production still requires a stable approved ingress,
 permanent DNS, and trusted TLS rather than the temporary ngrok endpoint.
 
+## Production ingress handoff (prepared; not yet activated)
+
+The durable handoff is deliberately separate from the loopback API service.
+The platform team renders
+[`deploy/nginx/sda-orchestrator.conf.template`](../deploy/nginx/sda-orchestrator.conf.template)
+with its approved FQDN and certificate paths, validates it, then installs it
+behind the organization-managed reverse proxy or load balancer:
+
+```bash
+python3 tools/validate_ingress_handoff.py \
+  --config /etc/nginx/conf.d/sda-orchestrator.conf \
+  --hostname sda-poc.<approved-domain>
+```
+
+The preflight rejects unresolved placeholders, IP-address/temporary hostnames,
+ngrok, non-loopback upstreams, incomplete TLS controls, a broadened API path,
+and any Apply endpoint. It makes no network call and cannot enable execution.
+
+Before the platform owner changes Meraki targets, they must confirm all of the
+following:
+
+1. the public FQDN resolves externally and presents the trusted certificate;
+2. HTTPS 443 reaches only the proxy, while the API remains `127.0.0.1:8080`;
+3. the proxy permits only `/health`, `/ready`, and the six non-Apply workflow
+   actions; and
+4. health monitoring, certificate renewal, and incident ownership are active.
+
+At that point, replace the temporary endpoint in each role-specific Meraki
+HTTP target and capture a new **zero-write** Plan → Approval → Dry Run →
+Evidence acceptance run. This is necessary evidence for `ingress.stable_tls`;
+the gate is intentionally still pending until the actual controlled endpoint
+is verified.
+
 ## Role-identity readiness inspection
 
 `Inspect Meraki API Role Identity Readiness` is a manually dispatched,

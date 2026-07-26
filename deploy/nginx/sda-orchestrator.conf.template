@@ -1,0 +1,54 @@
+# Production ingress template for the SDA orchestrator.
+#
+# Render only after the platform owner has supplied a controlled public FQDN,
+# a publicly trusted certificate, and the approved certificate-key paths. Do
+# not point this template at ngrok or expose the Gunicorn listener directly.
+# The API continues to bind only to 127.0.0.1:8080.
+
+server {
+    listen 443 ssl http2;
+    server_name ${ORCHESTRATOR_PUBLIC_FQDN};
+
+    ssl_certificate     ${ORCHESTRATOR_TLS_CERTIFICATE_PATH};
+    ssl_certificate_key ${ORCHESTRATOR_TLS_PRIVATE_KEY_PATH};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SDA_TLS:10m;
+    ssl_session_tickets off;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    server_tokens off;
+
+    # Health endpoints are intentionally unauthenticated. Restrict their
+    # monitoring source at the load balancer or firewall policy.
+    location = /health {
+        proxy_pass http://127.0.0.1:8080;
+        include proxy_params;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location = /ready {
+        proxy_pass http://127.0.0.1:8080;
+        include proxy_params;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # This explicit allow-list intentionally contains no Apply endpoint.
+    location ~ ^/v1/workflow-actions/(plan|approve|run|process-dry-run|status|evidence)$ {
+        limit_except POST { deny all; }
+        proxy_pass http://127.0.0.1:8080;
+        include proxy_params;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 35s;
+    }
+
+    location / {
+        return 404;
+    }
+}
