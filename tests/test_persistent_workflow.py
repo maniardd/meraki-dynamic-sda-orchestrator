@@ -447,7 +447,22 @@ class PersistentWorkflowTests(unittest.TestCase):
             headers=self.headers("auditor-token"),
         )
         self.assertEqual(200, evidence.status_code, evidence.get_json())
-        self.assertTrue(evidence.get_json()["chain_valid"])
+        body = evidence.get_json()
+        self.assertTrue(body["chain_valid"])
+        self.assertFalse(body["contains_secret_values"])
+        self.assertFalse(body["contains_raw_configuration"])
+        self.assertTrue(body["evidence"])
+        self.assertTrue(body["audit"])
+        self.assertEqual(
+            {"evidence_id", "phase_id", "evidence_type", "payload_hash", "created_at"},
+            set(body["evidence"][0]),
+        )
+        self.assertEqual(
+            {"sequence", "event_type", "event_hash", "previous_hash", "created_at"},
+            set(body["audit"][0]),
+        )
+        self.assertNotIn('"payload":', json.dumps(body, sort_keys=True))
+        self.assertNotIn("command_count", json.dumps(body, sort_keys=True))
 
     def test_string_encoded_meraki_action_contract(self):
         def encoded(document):
