@@ -245,6 +245,24 @@ class ProductionAcceptanceTests(unittest.TestCase):
             {issue["code"] for issue in invalid["issues"]},
         )
 
+    def test_acceptance_collateral_matches_live_applicable_gate_count(self):
+        result = self.validate()
+        expected = (
+            f'{result["passed_required_gate_count"]} of '
+            f'{result["required_gate_count"]} applicable gates'
+        )
+        collateral = [
+            ROOT / "docs" / "engineering-product-vidcast-and-devnet-submission.md",
+            ROOT / "docs" / "production-acceptance-registry.md",
+            ROOT / "docs" / "vidcast-and-ciscolive-demo-kit.md",
+        ]
+        for path in collateral:
+            rendered = path.read_text(encoding="utf-8")
+            self.assertIn(expected, rendered, path.name)
+            self.assertNotIn("5/20", rendered, path.name)
+            self.assertNotIn("five of twenty", rendered.lower(), path.name)
+            self.assertNotIn("twenty required gates", rendered.lower(), path.name)
+
     def test_failed_meraki_native_package_audit_is_hash_bound_and_secret_free(self):
         gate = next(
             gate
