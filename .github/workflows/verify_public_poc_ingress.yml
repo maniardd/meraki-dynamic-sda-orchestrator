@@ -1,0 +1,29 @@
+name: Verify SDA POC Public Ingress
+
+on:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: Temporary ngrok HTTPS origin, without a path
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out reviewed verifier
+        uses: actions/checkout@v4
+
+      - name: Verify public POC health and execution lock
+        shell: bash
+        env:
+          POC_ORIGIN: ${{ inputs.origin }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify_public_poc_ingress.py --origin "${POC_ORIGIN}"
