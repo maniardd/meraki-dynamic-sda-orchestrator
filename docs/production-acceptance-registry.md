@@ -80,10 +80,12 @@ reconciliation, telemetry, scale, security, and pilot operations.
 The completed child-level and integrated-parent Meraki
 plan/approval/dry-run/evidence paths and the authenticated SJC23 IOS XE
 read-only precheck are backed by committed, secret-free evidence summaries.
-Four of twenty required gates are passed. IOS XE license state is a distinct
-pending gate because the border is configured to return to Network Essentials
-at its next reboot; underlay acceptance cannot begin until both fabric devices
-pass the exact current-and-next Advantage license precheck.
+Five of twenty required gates are passed. The IOS XE license-state gate passed
+after the border reboot: both active fabric devices now report Network
+Advantage and DNA Advantage as their current and next-reboot packages. This
+unblocks planning for underlay acceptance, but it does not authorize a device
+change or clear the independent underlay, LISP/VXLAN, reconciliation, or
+operational gates.
 
 Two native Meraki package exports have been audited and both failed closed.
 The first secret-free summary recorded twenty structural findings. The v5
