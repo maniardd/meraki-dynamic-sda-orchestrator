@@ -118,6 +118,12 @@ To close a gate:
 7. Obtain the required role sign-offs through the approved change system.
 
 Never change a pending gate to `not_applicable` merely because the current
-two-node lab lacks the capability. A production capability may be declared
-not applicable only with an explicit design rationale and an independently
-approved release scope; required gates remain incomplete until passed.
+two-node lab lacks the capability. A capability may be declared not applicable
+only when the release scope explicitly excludes it, its gate is marked
+`required: false`, and the rationale names the controlling design condition.
+
+Fusion is one such optional capability. It is required only when the user's
+intent enables `border_handoff.enabled`. An isolated SDA fabric does not need a
+Fusion router and must not be blocked by its absence. Conversely, a customer
+design that enables an external BGP handoff must make the Fusion/external-BGP
+acceptance gate required and prove the topology selected for that design.

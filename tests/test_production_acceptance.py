@@ -217,9 +217,33 @@ class ProductionAcceptanceTests(unittest.TestCase):
         )
 
         result = self.validate()
-        self.assertEqual(20, result["required_gate_count"])
+        self.assertEqual(19, result["required_gate_count"])
         self.assertEqual(5, result["passed_required_gate_count"])
         self.assertNotIn("iosxe.license_state", result["incomplete_gate_ids"])
+
+    def test_fusion_is_optional_only_for_an_explicit_isolated_scope(self):
+        by_id = {gate["id"]: gate for gate in self.registry["gates"]}
+        fusion_gate = by_id["fusion.bgp_handoff"]
+        self.assertFalse(fusion_gate["required"])
+        self.assertEqual("not_applicable", fusion_gate["status"])
+        self.assertIn("border_handoff.enabled false", fusion_gate["rationale"])
+
+        result = self.validate()
+        self.assertNotIn("fusion.bgp_handoff", result["incomplete_gate_ids"])
+
+        candidate = copy.deepcopy(self.registry)
+        candidate_gate = next(
+            gate
+            for gate in candidate["gates"]
+            if gate["id"] == "fusion.bgp_handoff"
+        )
+        candidate_gate["required"] = True
+        invalid = self.validate(candidate)
+        self.assertFalse(invalid["registry_valid"])
+        self.assertIn(
+            "gate.not_applicable_required",
+            {issue["code"] for issue in invalid["issues"]},
+        )
 
     def test_failed_meraki_native_package_audit_is_hash_bound_and_secret_free(self):
         gate = next(

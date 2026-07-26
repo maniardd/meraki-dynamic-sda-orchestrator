@@ -237,7 +237,31 @@
           "minLength": 1,
           "maxLength": 1024
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_applicable"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "required": {
+                "const": false
+              }
+            },
+            "required": [
+              "rationale"
+            ]
+          }
+        }
+      ]
     },
     "signoff": {
       "type": "object",

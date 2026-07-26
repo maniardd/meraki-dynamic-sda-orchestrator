@@ -268,6 +268,13 @@ def validate_production_acceptance(
                 gate_path,
                 "A not-applicable gate requires an explicit rationale",
             )
+        if status == "not_applicable" and gate.get("required") is not False:
+            _issue(
+                issues,
+                "gate.not_applicable_required",
+                gate_path,
+                "A not-applicable gate must be explicitly optional for this release scope",
+            )
 
     for index, gate in enumerate(registry.get("gates") or []):
         if not isinstance(gate, Mapping):
