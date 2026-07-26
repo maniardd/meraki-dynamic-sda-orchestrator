@@ -87,16 +87,17 @@ unblocks planning for underlay acceptance, but it does not authorize a device
 change or clear the independent underlay, LISP/VXLAN, reconciliation, or
 operational gates.
 
-Two native Meraki package exports have been audited and both failed closed.
-The first secret-free summary recorded twenty structural findings. The v5
-correction reduced that count to eighteen by removing both obsolete embedded
-child versions, adding three workflow descriptions, and adding a genuine final
-prompt activity. Exact production workflow/activity labels, the disabled Apply
-and baseline workflows, Account Key bindings, stable TLS targets, and three
-child descriptions remain incomplete. This evidence does not pass
-`meraki.native_export_import`; it narrows the correction checklist for the next
-export. Raw Meraki exports, raw device output, credentials, and tenant Account
-Keys are not committed.
+Three native Meraki package exports have been audited and each failed closed.
+The first secret-free summary recorded twenty structural findings; the v5
+correction reduced that to eighteen. The current exact-name parent export
+reduces it further to eight: all five production workflow labels, the final
+Create Prompt label, and all exported child descriptions now pass. The raw
+native export still serializes four Account Key bearer values and retains four
+temporary ngrok targets, so it is not safe as an import artifact. This evidence
+does not pass `meraki.native_export_import`; a secret-free native export,
+stable trusted-TLS ingress, and duplicate-workspace import remain required.
+Raw Meraki exports, raw device output, credentials, and tenant Account Keys are
+not committed.
 
 Evidence files contain only reviewed summaries and immutable identifiers. They
 are not a substitute for the protected source evidence retained by the owning

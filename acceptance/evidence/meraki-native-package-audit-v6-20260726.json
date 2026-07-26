@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "meraki.native-package-audit-v6.20260726",
+  "evidence_type": "meraki_native_export_structural_audit",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-26T10:18:00Z",
+  "result": "failed",
+  "source": {
+    "kind": "meraki_native_package_export",
+    "workflow": "SDA Fabric - Plan, Approve, and Execute",
+    "export_sha256": "2e7db7ebf339750a47a062fc7be91aeba70d0826dedd980ff5789d39cf05d735",
+    "raw_export_committed": false
+  },
+  "audit": {
+    "native_export_set_valid": false,
+    "production_package_complete": false,
+    "workflow_count": 5,
+    "error_count": 8,
+    "warning_count": 0,
+    "issue_counts": {
+      "secret.inline_value": 4,
+      "transport.ngrok": 4
+    },
+    "exact_production_workflow_labels_present": true,
+    "final_prompt_activity_present": true,
+    "strict_final_prompt_label_match": true,
+    "inline_credential_field_count": 4,
+    "temporary_ingress_target_count": 4,
+    "missing_workflow_description_count": 0
+  },
+  "comparison_to_previous_audit": {
+    "previous_error_count": 18,
+    "current_error_count": 8,
+    "resolved_structural_finding_count": 10,
+    "resolved_items": [
+      "exact unversioned production workflow labels",
+      "genuine final Create Prompt label",
+      "all exported workflow descriptions"
+    ]
+  },
+  "safety": {
+    "audit_report_contains_property_values": false,
+    "contains_secret_values": false,
+    "contains_raw_configuration": false,
+    "contains_tenant_identifiers": false,
+    "workflow_run_performed": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "apply_enabled": false
+  },
+  "remaining_requirements": [
+    "use a native export path that serializes Account Key bindings without bearer-token values",
+    "replace the four temporary ngrok targets with approved stable DNS and trusted TLS ingress",
+    "re-export the package and pass the structural auditor",
+    "import the corrected package into a duplicate workspace and remap targets"
+  ]
+}
