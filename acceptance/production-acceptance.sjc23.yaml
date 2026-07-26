@@ -176,7 +176,13 @@ gates:
         sha256: c66c888eb872ae3c0ac8225a10b1b9598233f595ffef3c8d0962ae32dc50c472
         captured_at: "2026-07-24T11:08:06Z"
         result: pending
-    rationale: The border is running Network Advantage but is configured to return to Network Essentials at next reboot. Both switches must pass the exact current-and-next Network Advantage plus DNA/Catalyst Advantage precheck before this gate can pass. License changes and reloads require separately approved operator action.
+      - id: iosxe.license-state.20260726
+        kind: test_report
+        ref: evidence://acceptance/evidence/iosxe-license-state-20260726.json
+        sha256: 93e40f54a1a56d078a26a9b9b6f9a08cf372709a2a933bbd9ba0c6920b057db4
+        captured_at: "2026-07-26T08:33:05Z"
+        result: failed
+    rationale: The 2026-07-26 read-only precheck confirms that the edge now satisfies both current and next-reboot Network Advantage plus DNA Advantage requirements. The border still returns to Network Essentials and DNA Essentials at next reboot, so it remains the sole license-policy blocker. License changes and reloads require separately approved operator action.
 
   - id: iosxe.underlay
     category: iosxe
