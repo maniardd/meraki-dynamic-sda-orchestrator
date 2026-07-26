@@ -16,6 +16,12 @@ WORKFLOW = ROOT / ".github" / "workflows" / "inspect_meraki_role_identities.yml"
 
 
 class InspectMerakiRoleIdentitiesTests(unittest.TestCase):
+    @property
+    def _posix_file_modes_supported(self) -> bool:
+        """Windows ACLs cannot be represented by POSIX chmod mode bits."""
+
+        return os.name != "nt"
+
     def _identity_file(self, actors: list[str], mode: int = 0o600) -> Path:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -46,8 +52,14 @@ class InspectMerakiRoleIdentitiesTests(unittest.TestCase):
         report = json.loads(completed.stdout)
         self.assertEqual(4, report["identity_count"])
         self.assertEqual([], report["missing_meraki_role_actors"])
-        self.assertTrue(report["private_file_mode"])
-        self.assertTrue(report["ready_for_meraki_targets"])
+        self.assertEqual(
+            self._posix_file_modes_supported,
+            report["private_file_mode"],
+        )
+        self.assertEqual(
+            self._posix_file_modes_supported,
+            report["ready_for_meraki_targets"],
+        )
         self.assertFalse(report["contains_secret_values"])
         self.assertFalse(report["contains_token_digests"])
         self.assertNotIn("a" * 64, completed.stdout)
@@ -62,9 +74,16 @@ class InspectMerakiRoleIdentitiesTests(unittest.TestCase):
         )
         report = json.loads(completed.stdout)
         self.assertEqual(["meraki-operator", "meraki-auditor"], report["missing_meraki_role_actors"])
-        self.assertTrue(report["private_file_mode"])
+        self.assertEqual(
+            self._posix_file_modes_supported,
+            report["private_file_mode"],
+        )
         self.assertFalse(report["ready_for_meraki_targets"])
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Windows does not expose POSIX chmod mode bits for this security test",
+    )
     def test_insecure_mode_fails_closed_without_disclosure(self):
         path = self._identity_file(["meraki-planner"], 0o640)
         completed = subprocess.run(
