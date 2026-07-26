@@ -1,0 +1,25 @@
+name: Inspect SDA POC Ingress
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, sda-relay]
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out reviewed inspector
+        uses: actions/checkout@v4
+
+      - name: Inspect POC tunnel and local API
+        shell: bash
+        env:
+          RUNTIME_PYTHON: /home/sdaadmin/sda-orchestrator/current/.venv/bin/python
+        run: |
+          set -euo pipefail
+          test -x "${RUNTIME_PYTHON}"
+          "${RUNTIME_PYTHON}" tools/inspect_poc_ingress.py
