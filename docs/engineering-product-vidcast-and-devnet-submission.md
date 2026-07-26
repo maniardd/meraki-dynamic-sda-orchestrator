@@ -118,9 +118,9 @@ orchestrator API. Only the guarded relay reaches the device-management plane.
 | Stable DNS and trusted TLS | Replace temporary ngrok targets with durable ingress | Awaiting platform service |
 | Native export/import | Prove safe duplicate-workspace import and target remapping | Current export has eight fail-closed findings |
 | Underlay and LISP/VXLAN | Real protocol, convergence, gate and rollback acceptance | Controlled hardware test pending |
-| Fusion/BGP | Redundant external handoff evidence | No Fusion node in current lab |
+| Fusion/BGP (when selected) | Redundant external handoff evidence | Not applicable to the isolated SJC23 lab |
 | Multicast | BUM, ASM/SSM, stale-state and rollback traffic proof | Pending |
-| ISE/SXP/SGT | Policy ownership, enforcement and rollback proof | No ISE in current lab |
+| ISE/SXP/SGT (when selected) | Policy ownership, enforcement and rollback proof | Not selected in the current lab |
 | HA, DR, telemetry and scale | Demonstrate operations at production scale | Pending platform and representative topology |
 | Pilot sign-offs | Network, security, platform, automation and change authority | Pending |
 
@@ -173,8 +173,9 @@ Get-Content $evidence
 
 Current result: a valid two-device plan with seven phases, 203 rendered
 commands in 27 blocks, a valid audit chain, **zero device calls**, and **zero
-resolved secrets**. It stops at `dry_run_blocked` because there is no Fusion/BGP
-handoff in the isolated lab. That fail-closed result is the correct demo.
+resolved secrets**. It completes as `dry_run_succeeded`: the lab explicitly
+selects an isolated fabric, so a Fusion/BGP handoff is not required. This is a
+zero-write planning proof, not hardware configuration acceptance.
 
 ### 7:10–9:00 — Prove safety and production maturity
 
@@ -185,8 +186,9 @@ remains disabled. Do not present a dry-run success as configuration acceptance.
 
 ### 9:00–10:50 — Explain the production evolution
 
-Use the gate table above. Explain that stable TLS, Fusion, ISE, telemetry, HA,
-scale and pilot evidence do not change the planning contract. They supply the
+Use the gate table above. Explain that stable TLS, telemetry, HA, scale and
+pilot evidence are production controls, while Fusion/BGP and ISE policy
+acceptance apply only when selected by the customer design. They supply the
 proof that lets the existing Apply gate be considered.
 
 ### 10:50–12:00 — Product feedback and close
@@ -239,9 +241,10 @@ evidence export through separated planner, approver, operator and auditor
 identities. The session demonstrates why PostgreSQL IPAM, fabric locks,
 idempotency, checkpoint/rollback, exact operational verification and audit
 chains belong outside a low-code workflow. It also shows why stable TLS ingress,
-hardware protocol acceptance, Fusion/BGP, ISE/SXP/SGT, multicast, recovery,
-observability, scale and pilot change control remain explicit gates before Apply
-is reachable.
+hardware protocol acceptance, recovery, observability, scale and pilot change
+control remain explicit gates before Apply is reachable. Fusion/BGP,
+ISE/SXP/SGT and multicast are additional gates when the customer design selects
+those capabilities.
 
 This is not a replacement for Cisco Catalyst Center and does not claim a small
 lab is production-ready. It is a practical architecture for using Meraki-native

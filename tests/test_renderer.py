@@ -46,7 +46,9 @@ class RendererTests(unittest.TestCase):
         self.assertIn("overlay", edge_phases)
 
     def test_missing_bgp_handoff_blocks_execution(self):
-        artifact = render_configuration(self.intent, self.plan)
+        candidate = copy.deepcopy(self.intent)
+        candidate.pop("border_handoff")
+        artifact = render_configuration(candidate, create_plan(candidate))
         self.assertIn(
             "border_handoff.missing",
             {item["code"] for item in artifact["blocking_requirements"]},
@@ -54,9 +56,7 @@ class RendererTests(unittest.TestCase):
         self.assertFalse(artifact["executable"])
 
     def test_explicit_isolated_lab_has_no_handoff_blocker(self):
-        candidate = copy.deepcopy(self.intent)
-        candidate["border_handoff"] = {"mode": "isolated", "enabled": False}
-        artifact = render_configuration(candidate, create_plan(candidate))
+        artifact = render_configuration(self.intent, self.plan)
         self.assertEqual([], artifact["blocking_requirements"])
 
     def test_explicit_multicast_and_bfd_are_rendered(self):

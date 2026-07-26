@@ -50,6 +50,10 @@ lisp:
   auth_key_ref: secret://sda-lab/lisp/site-sjc23
   map_servers: [border-cp-01]
 
+border_handoff:
+  enabled: false
+  mode: isolated
+
 virtual_networks:
   - name: Corporate
     vrf: CORP_VN
