@@ -70,9 +70,10 @@ and artifact hashes, performs a zero-write dry run, and produces redacted
 evidence and audit-chain output.
 
 The session is deliberately honest about production readiness. It shows why
-stable TLS ingress, hardware acceptance, Fusion/BGP validation, ISE policy
-validation, recovery testing, observability, scale testing, and controlled pilot
-sign-off must remain explicit gates before Apply is enabled. Rather than
+stable TLS ingress, hardware acceptance, recovery testing, observability, scale
+testing, and controlled pilot sign-off must remain explicit gates before Apply
+is enabled. Fusion/BGP and ISE policy validation are additional gates only when
+the customer design selects those capabilities. Rather than
 presenting automation as a shortcut around engineering controls, the session
 shows how workflow automation can make those controls visible, repeatable, and
 auditable.
@@ -116,5 +117,5 @@ and a checklist for evolving an SDA lab POC into a governed automation program.
 - Apply: disabled; no device or ISE configuration is authorized by the
   workflow.
 - Current remaining external work: stable DNS/TLS ingress, safe native export
-  import handling, hardware acceptance, Fusion, ISE, resilience, telemetry,
-  scale, and pilot sign-offs.
+  import handling, hardware acceptance, resilience, telemetry, scale, and
+  pilot sign-offs; Fusion and ISE acceptance apply only when selected.

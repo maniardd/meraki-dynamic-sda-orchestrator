@@ -458,7 +458,7 @@ class PersistentWorkflowTests(unittest.TestCase):
             headers=self.headers("operator-token"),
         )
         self.assertEqual(200, processed.status_code, processed.get_json())
-        self.assertEqual("dry_run_blocked", processed.get_json()["run"]["status"])
+        self.assertEqual("dry_run_succeeded", processed.get_json()["run"]["status"])
         self.assertGreater(processed.get_json()["summary"]["command_count"], 0)
         self.assertGreater(len(processed.get_json()["evidence"]), 1)
 
@@ -535,7 +535,7 @@ class PersistentWorkflowTests(unittest.TestCase):
             json={"run_id": run_id},
             headers=self.headers("operator-token"),
         )
-        self.assertEqual("dry_run_blocked", status.get_json()["status"])
+        self.assertEqual("dry_run_succeeded", status.get_json()["status"])
 
         evidence = self.client.post(
             "/v1/workflow-actions/evidence",
@@ -615,7 +615,7 @@ class PersistentWorkflowTests(unittest.TestCase):
             headers=self.headers("operator-token"),
         )
         self.assertEqual(200, status.status_code, status.get_json())
-        self.assertEqual("dry_run_blocked", status.get_json()["status"])
+        self.assertEqual("dry_run_succeeded", status.get_json()["status"])
 
         evidence = self.client.post(
             "/v1/workflow-actions/evidence",
