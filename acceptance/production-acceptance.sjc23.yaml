@@ -218,28 +218,36 @@ gates:
 
   - id: multicast.native_overlay
     category: multicast
-    required: true
-    status: pending
+    required: false
+    status: not_applicable
     owner_roles: [network_design_authority, automation_owner]
-    dependencies: [iosxe.lisp_vxlan]
+    dependencies: []
     evidence: []
-    rationale: ASM/SSM, BUM, RP/MSDP, traffic-flow, stale-state, and rollback evidence is required.
+    rationale: >-
+      The SJC23 release scope selects no multicast overlay virtual network and
+      multicast.enabled is false by design. Any customer scope that enables
+      multicast must make this gate required and prove the selected ASM/SSM,
+      BUM, RP/MSDP, traffic-flow, stale-state, and rollback behavior.
 
   - id: policy.ise_sxp_sgt
     category: policy
-    required: true
-    status: pending
+    required: false
+    status: not_applicable
     owner_roles: [network_design_authority, security_owner, platform_owner]
-    dependencies: [iosxe.lisp_vxlan]
+    dependencies: []
     evidence: []
-    rationale: ISE ERS ownership, SGT/SGACL, SXP release semantics, propagation, enforcement, and rollback require acceptance.
+    rationale: >-
+      The SJC23 release scope selects policy_plane.mode none, so ISE/SXP/SGT
+      integration is not applicable. Any customer scope that selects ise, sxp,
+      or hybrid policy must make this gate required and prove ISE ERS ownership,
+      SGT/SGACL, SXP release semantics, propagation, enforcement, and rollback.
 
   - id: reconciliation.owned_state
     category: reconciliation
     required: true
     status: pending
     owner_roles: [automation_owner, network_design_authority]
-    dependencies: [iosxe.lisp_vxlan, multicast.native_overlay]
+    dependencies: [iosxe.lisp_vxlan]
     evidence: []
     rationale: Approved baseline adoption, removal, mode-change, absence gates, and stale-state rollback require evidence.
 
@@ -269,8 +277,6 @@ gates:
     dependencies:
       - meraki.role_negative
       - runtime.secret_rotation
-      - multicast.native_overlay
-      - policy.ise_sxp_sgt
       - telemetry.observability
       - scale.multisite
     evidence: []
