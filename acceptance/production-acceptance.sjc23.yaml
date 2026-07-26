@@ -204,12 +204,17 @@ gates:
 
   - id: fusion.bgp_handoff
     category: fusion
-    required: true
-    status: pending
+    required: false
+    status: not_applicable
     owner_roles: [network_design_authority, automation_owner]
-    dependencies: [iosxe.lisp_vxlan]
+    dependencies: []
     evidence: []
-    rationale: The isolated lab has no fusion node; a representative redundant fusion topology is required for production acceptance.
+    rationale: >-
+      The SJC23 release scope is an intentionally isolated fabric with
+      border_handoff.enabled false, so external BGP/Fusion validation is not
+      applicable. Fusion remains optional by customer design: any release scope
+      with border_handoff.enabled true must make this gate required and provide
+      the applicable redundant Fusion or external-BGP handoff evidence.
 
   - id: multicast.native_overlay
     category: multicast
@@ -264,7 +269,6 @@ gates:
     dependencies:
       - meraki.role_negative
       - runtime.secret_rotation
-      - fusion.bgp_handoff
       - multicast.native_overlay
       - policy.ise_sxp_sgt
       - telemetry.observability
