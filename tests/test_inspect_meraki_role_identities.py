@@ -52,8 +52,21 @@ class InspectMerakiRoleIdentitiesTests(unittest.TestCase):
         self.assertFalse(report["contains_token_digests"])
         self.assertNotIn("a" * 64, completed.stdout)
 
-    def test_missing_role_or_insecure_mode_is_not_ready(self):
-        path = self._identity_file(["meraki-planner", "meraki-approver"], 0o640)
+    def test_missing_role_is_reported_as_not_ready(self):
+        path = self._identity_file(["meraki-planner", "meraki-approver"])
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), "--identity-file", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        report = json.loads(completed.stdout)
+        self.assertEqual(["meraki-operator", "meraki-auditor"], report["missing_meraki_role_actors"])
+        self.assertTrue(report["private_file_mode"])
+        self.assertFalse(report["ready_for_meraki_targets"])
+
+    def test_insecure_mode_fails_closed_without_disclosure(self):
+        path = self._identity_file(["meraki-planner"], 0o640)
         completed = subprocess.run(
             [sys.executable, str(SCRIPT), "--identity-file", str(path)],
             capture_output=True,
