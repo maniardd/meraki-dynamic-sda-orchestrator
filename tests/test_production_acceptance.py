@@ -188,27 +188,22 @@ class ProductionAcceptanceTests(unittest.TestCase):
     def test_iosxe_license_state_is_explicit_and_blocks_underlay_acceptance(self):
         by_id = {gate["id"]: gate for gate in self.registry["gates"]}
         license_gate = by_id["iosxe.license_state"]
-        self.assertEqual("pending", license_gate["status"])
+        self.assertEqual("passed", license_gate["status"])
         self.assertEqual(
             ["iosxe.read_only_precheck"],
             license_gate["dependencies"],
         )
-        self.assertEqual(2, len(license_gate["evidence"]))
-        self.assertEqual("pending", license_gate["evidence"][0]["result"])
+        self.assertEqual(1, len(license_gate["evidence"]))
+        latest = license_gate["evidence"][0]
+        self.assertEqual("passed", latest["result"])
         self.assertEqual(
-            "evidence://acceptance/evidence/iosxe-readonly-precheck-20260724.json",
-            license_gate["evidence"][0]["ref"],
-        )
-        latest = license_gate["evidence"][-1]
-        self.assertEqual("failed", latest["result"])
-        self.assertEqual(
-            "evidence://acceptance/evidence/iosxe-license-state-20260726.json",
+            "evidence://acceptance/evidence/iosxe-license-state-accepted-20260726.json",
             latest["ref"],
         )
         content = (ROOT / latest["ref"].removeprefix("evidence://")).read_bytes()
         self.assertEqual(hashlib.sha256(content).hexdigest(), latest["sha256"])
         fresh_evidence = json.loads(content)
-        self.assertFalse(
+        self.assertTrue(
             fresh_evidence["targets"]["border_control_plane"]["license_policy_passed"]
         )
         self.assertTrue(
@@ -223,8 +218,8 @@ class ProductionAcceptanceTests(unittest.TestCase):
 
         result = self.validate()
         self.assertEqual(20, result["required_gate_count"])
-        self.assertEqual(4, result["passed_required_gate_count"])
-        self.assertIn("iosxe.license_state", result["incomplete_gate_ids"])
+        self.assertEqual(5, result["passed_required_gate_count"])
+        self.assertNotIn("iosxe.license_state", result["incomplete_gate_ids"])
 
     def test_failed_meraki_native_package_audit_is_hash_bound_and_secret_free(self):
         gate = next(
