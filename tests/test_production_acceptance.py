@@ -193,12 +193,29 @@ class ProductionAcceptanceTests(unittest.TestCase):
             ["iosxe.read_only_precheck"],
             license_gate["dependencies"],
         )
-        self.assertEqual(1, len(license_gate["evidence"]))
+        self.assertEqual(2, len(license_gate["evidence"]))
         self.assertEqual("pending", license_gate["evidence"][0]["result"])
         self.assertEqual(
             "evidence://acceptance/evidence/iosxe-readonly-precheck-20260724.json",
             license_gate["evidence"][0]["ref"],
         )
+        latest = license_gate["evidence"][-1]
+        self.assertEqual("failed", latest["result"])
+        self.assertEqual(
+            "evidence://acceptance/evidence/iosxe-license-state-20260726.json",
+            latest["ref"],
+        )
+        content = (ROOT / latest["ref"].removeprefix("evidence://")).read_bytes()
+        self.assertEqual(hashlib.sha256(content).hexdigest(), latest["sha256"])
+        fresh_evidence = json.loads(content)
+        self.assertFalse(
+            fresh_evidence["targets"]["border_control_plane"]["license_policy_passed"]
+        )
+        self.assertTrue(
+            fresh_evidence["targets"]["fabric_edge"]["license_policy_passed"]
+        )
+        self.assertTrue(fresh_evidence["safety"]["read_only"])
+        self.assertFalse(fresh_evidence["safety"]["device_writes_performed"])
         self.assertEqual(
             ["iosxe.license_state"],
             by_id["iosxe.underlay"]["dependencies"],
