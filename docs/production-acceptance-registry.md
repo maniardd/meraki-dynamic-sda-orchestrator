@@ -75,13 +75,14 @@ the other authorities.
 
 The registry contains twenty gates across software, Meraki native workflows,
 ingress, runtime, IOS XE, fusion/BGP, multicast, policy/ISE, reconciliation,
-telemetry, scale, security, and pilot operations. Nineteen are currently
-required; Fusion/BGP is optional only for an explicitly isolated release scope.
+telemetry, scale, security, and pilot operations. Seventeen are currently
+required; Fusion/BGP, multicast overlay, and ISE/SXP/SGT policy are optional
+only when the release scope explicitly excludes them.
 
 The completed child-level and integrated-parent Meraki
 plan/approval/dry-run/evidence paths and the authenticated SJC23 IOS XE
 read-only precheck are backed by committed, secret-free evidence summaries.
-5 of 19 applicable gates are passed. The IOS XE license-state gate passed
+5 of 17 applicable gates are passed. The IOS XE license-state gate passed
 after the border reboot: both active fabric devices now report Network
 Advantage and DNA Advantage as their current and next-reboot packages. This
 unblocks planning for underlay acceptance, but it does not authorize a device
@@ -123,8 +124,11 @@ two-node lab lacks the capability. A capability may be declared not applicable
 only when the release scope explicitly excludes it, its gate is marked
 `required: false`, and the rationale names the controlling design condition.
 
-Fusion is one such optional capability. It is required only when the user's
-intent enables `border_handoff.enabled`. An isolated SDA fabric does not need a
-Fusion router and must not be blocked by its absence. Conversely, a customer
-design that enables an external BGP handoff must make the Fusion/external-BGP
-acceptance gate required and prove the topology selected for that design.
+Fusion, multicast overlay, and policy plane are optional capabilities. Fusion
+is required only when the user's intent enables `border_handoff.enabled`.
+Multicast is required only when one or more multicast overlay virtual networks
+are enabled. ISE/SXP/SGT acceptance is required only when the selected policy
+mode is `ise`, `sxp`, or `hybrid`. An isolated fabric with none of those
+features does not need their acceptance evidence; a customer design that
+selects any of them must make the corresponding gate required and prove its
+chosen topology and behavior.

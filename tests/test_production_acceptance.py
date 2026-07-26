@@ -217,19 +217,27 @@ class ProductionAcceptanceTests(unittest.TestCase):
         )
 
         result = self.validate()
-        self.assertEqual(19, result["required_gate_count"])
+        self.assertEqual(17, result["required_gate_count"])
         self.assertEqual(5, result["passed_required_gate_count"])
         self.assertNotIn("iosxe.license_state", result["incomplete_gate_ids"])
 
-    def test_fusion_is_optional_only_for_an_explicit_isolated_scope(self):
+    def test_unselected_design_capabilities_are_explicitly_optional(self):
         by_id = {gate["id"]: gate for gate in self.registry["gates"]}
-        fusion_gate = by_id["fusion.bgp_handoff"]
-        self.assertFalse(fusion_gate["required"])
-        self.assertEqual("not_applicable", fusion_gate["status"])
-        self.assertIn("border_handoff.enabled false", fusion_gate["rationale"])
+        expected_conditions = {
+            "fusion.bgp_handoff": "border_handoff.enabled false",
+            "multicast.native_overlay": "multicast.enabled is false",
+            "policy.ise_sxp_sgt": "policy_plane.mode none",
+        }
+        for gate_id, condition in expected_conditions.items():
+            gate = by_id[gate_id]
+            self.assertFalse(gate["required"], gate_id)
+            self.assertEqual("not_applicable", gate["status"], gate_id)
+            self.assertIn(condition, gate["rationale"], gate_id)
 
         result = self.validate()
-        self.assertNotIn("fusion.bgp_handoff", result["incomplete_gate_ids"])
+        self.assertEqual(17, result["required_gate_count"])
+        for gate_id in expected_conditions:
+            self.assertNotIn(gate_id, result["incomplete_gate_ids"])
 
         candidate = copy.deepcopy(self.registry)
         candidate_gate = next(

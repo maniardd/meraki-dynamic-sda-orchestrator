@@ -109,7 +109,7 @@ orchestrator API. Only the guarded relay reaches the device-management plane.
 - Read-only relay access and license prechecks passed against actual OOB targets.
 - Network Advantage and DNA Advantage current/next-reboot state passed on both
   fabric devices.
-- 5 of 19 applicable gates are passed for this production release scope. Apply remains disabled.
+- 5 of 17 applicable gates are passed for this production release scope. Apply remains disabled.
 
 ## What must still happen before Apply
 
@@ -119,7 +119,7 @@ orchestrator API. Only the guarded relay reaches the device-management plane.
 | Native export/import | Prove safe duplicate-workspace import and target remapping | Current export has eight fail-closed findings |
 | Underlay and LISP/VXLAN | Real protocol, convergence, gate and rollback acceptance | Controlled hardware test pending |
 | Fusion/BGP (when selected) | Redundant external handoff evidence | Not applicable to the isolated SJC23 lab |
-| Multicast | BUM, ASM/SSM, stale-state and rollback traffic proof | Pending |
+| Multicast (when selected) | BUM, ASM/SSM, stale-state and rollback traffic proof | Not selected in the current lab |
 | ISE/SXP/SGT (when selected) | Policy ownership, enforcement and rollback proof | Not selected in the current lab |
 | HA, DR, telemetry and scale | Demonstrate operations at production scale | Pending platform and representative topology |
 | Pilot sign-offs | Network, security, platform, automation and change authority | Pending |
@@ -180,7 +180,7 @@ zero-write planning proof, not hardware configuration acceptance.
 ### 7:10–9:00 — Prove safety and production maturity
 
 Show `acceptance/production-acceptance.sjc23.yaml` or the validator summary.
-State that 5 of 19 applicable gates are passed: software suite, Meraki child path,
+State that 5 of 17 applicable gates are passed: software suite, Meraki child path,
 integrated parent, read-only hardware precheck and licensing. Show that Apply
 remains disabled. Do not present a dry-run success as configuration acceptance.
 
