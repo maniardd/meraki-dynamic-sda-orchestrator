@@ -1,0 +1,45 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "iosxe.license-state.accepted.20260726",
+  "evidence_type": "iosxe_license_level_read_only_precheck",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-26T09:07:49Z",
+  "result": "passed",
+  "source": {
+    "repository": "maniardd/sda-relay",
+    "workflow": "SJC23 Read-Only Hardware Precheck",
+    "run_id": 30195886010,
+    "run_url": "https://github.com/maniardd/sda-relay/actions/runs/30195886010"
+  },
+  "license_policy": {
+    "required_network_package": "network-advantage",
+    "allowed_subscription_packages": [
+      "dna-advantage",
+      "catalyst-advantage"
+    ]
+  },
+  "targets": {
+    "border_control_plane": {
+      "current_network_package": "network-advantage",
+      "next_reboot_network_package": "network-advantage",
+      "current_subscription_package": "dna-advantage",
+      "next_reboot_subscription_package": "dna-advantage",
+      "license_policy_passed": true
+    },
+    "fabric_edge": {
+      "current_network_package": "network-advantage",
+      "next_reboot_network_package": "network-advantage",
+      "current_subscription_package": "dna-advantage",
+      "next_reboot_subscription_package": "dna-advantage",
+      "license_policy_passed": true
+    }
+  },
+  "safety": {
+    "read_only": true,
+    "configuration_mode_used": false,
+    "raw_output_persisted": false,
+    "device_writes_performed": false,
+    "contains_secret_values": false,
+    "contains_raw_configuration": false
+  }
+}

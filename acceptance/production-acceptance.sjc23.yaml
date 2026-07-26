@@ -166,23 +166,17 @@ gates:
   - id: iosxe.license_state
     category: iosxe
     required: true
-    status: pending
+    status: passed
     owner_roles: [network_design_authority, platform_owner, change_approver]
     dependencies: [iosxe.read_only_precheck]
     evidence:
-      - id: iosxe.license-state.20260724
+      - id: iosxe.license-state.accepted.20260726
         kind: test_report
-        ref: evidence://acceptance/evidence/iosxe-readonly-precheck-20260724.json
-        sha256: c66c888eb872ae3c0ac8225a10b1b9598233f595ffef3c8d0962ae32dc50c472
-        captured_at: "2026-07-24T11:08:06Z"
-        result: pending
-      - id: iosxe.license-state.20260726
-        kind: test_report
-        ref: evidence://acceptance/evidence/iosxe-license-state-20260726.json
-        sha256: 93e40f54a1a56d078a26a9b9b6f9a08cf372709a2a933bbd9ba0c6920b057db4
-        captured_at: "2026-07-26T08:33:05Z"
-        result: failed
-    rationale: The 2026-07-26 read-only precheck confirms that the edge now satisfies both current and next-reboot Network Advantage plus DNA Advantage requirements. The border still returns to Network Essentials and DNA Essentials at next reboot, so it remains the sole license-policy blocker. License changes and reloads require separately approved operator action.
+        ref: evidence://acceptance/evidence/iosxe-license-state-accepted-20260726.json
+        sha256: 9989607096e39aa3e026e3eab3296c388d6a5e750005f49c1cebe506dc520ca6
+        captured_at: "2026-07-26T09:07:49Z"
+        result: passed
+    rationale: The post-reboot read-only precheck confirms Network Advantage and DNA Advantage as both the current and next-reboot packages on every active SJC23 fabric device. No configuration mode, raw-output persistence, or device writes occurred during verification.
 
   - id: iosxe.underlay
     category: iosxe
