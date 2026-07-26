@@ -68,6 +68,18 @@ def service_state(unit: str) -> str:
     return state if state else "unknown"
 
 
+def ngrok_process_owners() -> list[str]:
+    """Return only owners of ngrok processes, never their command lines."""
+
+    completed = subprocess.run(
+        ["ps", "-C", "ngrok", "-o", "user="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return sorted({line.strip() for line in completed.stdout.splitlines() if line.strip()})
+
+
 def main() -> int:
     try:
         tunnel_document = _read_json(TUNNEL_API)
@@ -81,6 +93,7 @@ def main() -> int:
             "api_health_status": health.get("status"),
             "execution_enabled": health.get("execution_enabled"),
             "service_states": {unit: service_state(unit) for unit in SERVICE_UNITS},
+            "ngrok_process_owners": ngrok_process_owners(),
             "contains_secret_values": False,
             "configuration_changed": False,
         }

@@ -51,6 +51,12 @@ class InspectPocIngressTests(unittest.TestCase):
         self.assertNotIn("systemctl restart", workflow)
         self.assertNotIn("ngrok config", workflow)
 
+    def test_process_inspection_does_not_read_ngrok_command_lines(self):
+        source = (Path(__file__).resolve().parents[1] / "tools/inspect_poc_ingress.py").read_text(encoding="utf-8")
+        self.assertIn('["ps", "-C", "ngrok", "-o", "user="]', source)
+        self.assertNotIn("pgrep -a", source)
+        self.assertNotIn("cmdline", source)
+
 
 if __name__ == "__main__":
     unittest.main()
