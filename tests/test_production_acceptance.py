@@ -271,6 +271,30 @@ class ProductionAcceptanceTests(unittest.TestCase):
             self.assertNotIn("five of twenty", rendered.lower(), path.name)
             self.assertNotIn("twenty required gates", rendered.lower(), path.name)
 
+    def test_sjc23_closure_plan_lists_each_live_pending_gate(self):
+        result = self.validate()
+        closure_plan = (
+            ROOT / "docs" / "sjc23-acceptance-closure-plan.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Required pending-gate evidence", closure_plan)
+        self.assertIn("Safe execution order", closure_plan)
+        self.assertIn("Explicit no-go conditions", closure_plan)
+        self.assertEqual(12, len(result["incomplete_gate_ids"]))
+        for gate_id in result["incomplete_gate_ids"]:
+            self.assertIn(f"`{gate_id}`", closure_plan, gate_id)
+
+        for not_applicable_gate in (
+            "fusion.bgp_handoff",
+            "multicast.native_overlay",
+            "policy.ise_sxp_sgt",
+        ):
+            self.assertNotIn(
+                f"| `{not_applicable_gate}` |",
+                closure_plan,
+                not_applicable_gate,
+            )
+
     def test_failed_meraki_native_package_audit_is_hash_bound_and_secret_free(self):
         gate = next(
             gate

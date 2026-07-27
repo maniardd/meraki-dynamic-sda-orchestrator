@@ -122,6 +122,9 @@ To close a gate:
 For the current two-node lab, use the
 [SJC23 controlled hardware-acceptance packet](sjc23-controlled-hardware-acceptance.md)
 for the underlay, LISP/VXLAN, and owned-state proof sequence.
+Use the [SJC23 production-acceptance closure plan](sjc23-acceptance-closure-plan.md)
+to coordinate every remaining gate across the Meraki, platform, hardware,
+telemetry, scale, and pilot-change tracks.
 
 Never change a pending gate to `not_applicable` merely because the current
 two-node lab lacks the capability. A capability may be declared not applicable
