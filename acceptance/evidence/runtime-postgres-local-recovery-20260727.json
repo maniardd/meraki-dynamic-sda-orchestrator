@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "runtime.postgres-local-recovery.20260727",
+  "evidence_type": "private_backup_disposable_restore",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-27T15:02:22Z",
+  "result": "passed",
+  "source": {
+    "kind": "github_actions_self_hosted_runner",
+    "workflow": "SDA PostgreSQL Backup Restore Acceptance",
+    "run_id": "30278005614",
+    "backup_path_retained": false
+  },
+  "checks": {
+    "private_backup_created": true,
+    "production_database_modified": false,
+    "disposable_restore_passed": true,
+    "required_table_count": 11,
+    "invalid_audit_hash_count": 0,
+    "restore_seconds": 1
+  },
+  "safety": {
+    "contains_secret_values": false,
+    "contains_database_contents": false,
+    "contains_raw_configuration": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "apply_enabled": false
+  },
+  "remaining_requirements": [
+    "approved encrypted off-host backup repository",
+    "retention enforcement and recovery alerting",
+    "approved recovery objectives and operator access",
+    "a separately observed second-host recovery exercise"
+  ]
+}

@@ -365,6 +365,15 @@ class ProductionAcceptanceTests(unittest.TestCase):
                 "meraki-role-identity-readiness-20260727.json",
                 {"private_file_mode": True, "ready_for_meraki_targets": True},
             ),
+            "runtime.postgres_backup_restore": (
+                "runtime.postgres-local-recovery.20260727",
+                "runtime-postgres-local-recovery-20260727.json",
+                {
+                    "private_backup_created": True,
+                    "production_database_modified": False,
+                    "disposable_restore_passed": True,
+                },
+            ),
         }
         for gate_id, (evidence_id, filename, expected_checks) in expected.items():
             gate = by_id[gate_id]
