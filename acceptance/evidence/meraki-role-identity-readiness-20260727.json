@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "meraki.role-identity-readiness.20260727",
+  "evidence_type": "relay_role_identity_readiness",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-27T06:17:15Z",
+  "result": "passed",
+  "source": {
+    "kind": "github_actions_self_hosted_runner",
+    "workflow": "Inspect Meraki API Role Identity Readiness",
+    "run_id": "30242235533"
+  },
+  "identity_readiness": {
+    "identity_count": 4,
+    "expected_meraki_role_actors": [
+      "meraki-planner",
+      "meraki-approver",
+      "meraki-operator",
+      "meraki-auditor"
+    ],
+    "missing_meraki_role_actors": [],
+    "private_file_mode": true,
+    "ready_for_meraki_targets": true,
+    "api_health": "ok",
+    "execution_enabled": false
+  },
+  "safety": {
+    "inspection_mode": "read_only",
+    "contains_secret_values": false,
+    "contains_token_digests": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "apply_enabled": false
+  },
+  "remaining_requirements": [
+    "a native export path that does not serialize Account Key bearer values",
+    "stable trusted-TLS ingress instead of the temporary POC tunnel",
+    "a passed structural export audit and duplicate-workspace import",
+    "role-specific authorization-denial evidence after native import"
+  ]
+}

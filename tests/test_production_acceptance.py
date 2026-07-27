@@ -302,12 +302,17 @@ class ProductionAcceptanceTests(unittest.TestCase):
             if gate["id"] == "meraki.native_export_import"
         )
         self.assertEqual("pending", gate["status"])
-        self.assertEqual(3, len(gate["evidence"]))
+        audit_evidence = [
+            item
+            for item in gate["evidence"]
+            if item["id"].startswith("meraki.native-package-audit")
+        ]
+        self.assertEqual(3, len(audit_evidence))
         self.assertTrue(
-            all(evidence["result"] == "failed" for evidence in gate["evidence"])
+            all(evidence["result"] == "failed" for evidence in audit_evidence)
         )
 
-        latest = gate["evidence"][-1]
+        latest = audit_evidence[-1]
         relative = latest["ref"].removeprefix("evidence://")
         content = (ROOT / relative).read_bytes()
         self.assertEqual(
@@ -346,6 +351,43 @@ class ProductionAcceptanceTests(unittest.TestCase):
         self.assertFalse(evidence["safety"]["workflow_run_performed"])
         self.assertFalse(evidence["safety"]["device_writes_performed"])
         self.assertFalse(evidence["safety"]["apply_enabled"])
+
+    def test_poc_readiness_evidence_is_hash_bound_but_cannot_close_production_gates(self):
+        by_id = {gate["id"]: gate for gate in self.registry["gates"]}
+        expected = {
+            "ingress.stable_tls": (
+                "ingress.poc-public-readiness.20260727",
+                "ingress-poc-public-readiness-20260727.json",
+                {"public_https_health": True, "api_execution_enabled": False},
+            ),
+            "meraki.native_export_import": (
+                "meraki.role-identity-readiness.20260727",
+                "meraki-role-identity-readiness-20260727.json",
+                {"private_file_mode": True, "ready_for_meraki_targets": True},
+            ),
+        }
+        for gate_id, (evidence_id, filename, expected_checks) in expected.items():
+            gate = by_id[gate_id]
+            self.assertEqual("pending", gate["status"], gate_id)
+            record = next(
+                item for item in gate["evidence"] if item["id"] == evidence_id
+            )
+            content = (ROOT / "acceptance" / "evidence" / filename).read_bytes()
+            self.assertEqual(
+                hashlib.sha256(content).hexdigest(), record["sha256"], evidence_id
+            )
+            evidence = json.loads(content)
+            self.assertEqual("passed", evidence["result"], evidence_id)
+            self.assertFalse(evidence["safety"]["contains_secret_values"])
+            self.assertFalse(evidence["safety"]["apply_enabled"])
+            source = evidence["checks"] if "checks" in evidence else evidence["identity_readiness"]
+            for key, value in expected_checks.items():
+                self.assertEqual(value, source[key], f"{evidence_id}:{key}")
+
+        result = self.validate()
+        self.assertEqual(5, result["passed_required_gate_count"])
+        self.assertIn("ingress.stable_tls", result["incomplete_gate_ids"])
+        self.assertIn("meraki.native_export_import", result["incomplete_gate_ids"])
 
     def test_missing_or_tampered_local_evidence_fails_closed(self):
         missing = copy.deepcopy(self.registry)
