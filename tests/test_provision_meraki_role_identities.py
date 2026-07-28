@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from admin.provision_meraki_role_identities import provision_identities
+from admin.provision_meraki_role_identities import provision_identities, restore_identities
 from orchestrator.auth import load_hashed_token_identities
 
 
@@ -124,6 +124,32 @@ class ProvisionMerakiRoleIdentitiesTests(unittest.TestCase):
                     },
                 )
             self.assertEqual(before, path.read_bytes())
+
+    def test_restore_replaces_rotated_identities_from_a_valid_private_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original = digest("original-planner-token-value-with-required-length")
+            path = self.identity_file(
+                directory,
+                {original: {"actor": "meraki-planner", "roles": ["planner"]}},
+            )
+            backup = Path(directory) / "identity-backup.json"
+            backup.write_bytes(path.read_bytes())
+            os.chmod(backup, 0o600)
+            provision_identities(
+                path,
+                {
+                    "approver": digest("new-approver-token-value-with-required-length"),
+                    "operator": digest("new-operator-token-value-with-required-length"),
+                    "auditor": digest("new-auditor-token-value-with-required-length"),
+                },
+            )
+
+            restore_identities(path, backup)
+
+            self.assertFalse(backup.exists())
+            self.assertEqual({original}, set(load_hashed_token_identities(str(path))))
+            if os.name != "nt":
+                self.assertEqual(0o600, path.stat().st_mode & 0o777)
 
 
 if __name__ == "__main__":

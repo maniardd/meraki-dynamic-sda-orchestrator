@@ -15,7 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from orchestrator.auth import TOKEN_DIGEST, load_hashed_token_identities
+from orchestrator.auth import (
+    AuthenticationConfigError,
+    TOKEN_DIGEST,
+    load_hashed_token_identities,
+)
 
 
 ROLE_ACTORS = {
@@ -28,6 +32,16 @@ ROLE_ACTORS = {
 # The existing administrative workflow deliberately preserves the planner
 # identity.  A separately reviewed bootstrap path may rotate all four roles.
 DEFAULT_MANAGED_ROLES = frozenset({"approver", "operator", "auditor"})
+
+
+def _fsync_directory(directory: Path) -> None:
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    descriptor = os.open(str(directory), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def provision_identities(
@@ -80,12 +94,7 @@ def provision_identities(
             os.fsync(handle.fileno())
         os.replace(temporary_name, str(identity_path))
         os.chmod(str(identity_path), 0o600)
-        if hasattr(os, "O_DIRECTORY"):
-            directory = os.open(str(identity_path.parent), os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
+        _fsync_directory(identity_path.parent)
     except Exception:
         try:
             os.close(descriptor)
@@ -99,20 +108,44 @@ def provision_identities(
     return retained
 
 
+def restore_identities(output: Path, backup: Path) -> None:
+    """Atomically restore a validated, hash-only identity-file backup."""
+
+    identity_path = output.expanduser().resolve()
+    backup_path = backup.expanduser().resolve()
+    if identity_path == backup_path:
+        raise ValueError("identity file and backup file must differ")
+    if backup_path.is_symlink():
+        raise ValueError("identity backup must not be a symlink")
+    try:
+        load_hashed_token_identities(str(backup_path))
+    except AuthenticationConfigError as exc:
+        raise ValueError("identity backup is invalid") from exc
+    os.replace(str(backup_path), str(identity_path))
+    os.chmod(str(identity_path), 0o600)
+    _fsync_directory(identity_path.parent)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--restore-from", type=Path)
     for role in ROLE_ACTORS:
-        parser.add_argument(f"--{role}-digest", required=True)
+        parser.add_argument(f"--{role}-digest")
     arguments = parser.parse_args()
     try:
-        identities = provision_identities(
-            arguments.output,
-            {
-                role: getattr(arguments, f"{role}_digest")
-                for role in ROLE_ACTORS
-            },
-        )
+        digests = {
+            role: getattr(arguments, f"{role}_digest") for role in ROLE_ACTORS
+        }
+        if arguments.restore_from is not None:
+            if any(value is not None for value in digests.values()):
+                raise ValueError("restore must not include role digests")
+            restore_identities(arguments.output, arguments.restore_from)
+            print("restored_role_identities=true")
+            return 0
+        if any(value is None for value in digests.values()):
+            raise ValueError("every role digest is required")
+        identities = provision_identities(arguments.output, digests)
     except ValueError as exc:
         parser.error(str(exc))
     print("provisioned_role_identities=3")
