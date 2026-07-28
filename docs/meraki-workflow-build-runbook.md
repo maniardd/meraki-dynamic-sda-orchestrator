@@ -157,6 +157,9 @@ the PostgreSQL ledger. This is dynamic planning, not a renamed static template.
 A guided multi-screen UI can later construct the same requirements document.
 It must not create a second planning contract.
 
+The pinned fields, allowed design dimensions, and generated-value boundary are
+defined in the [SDA requirements intake contract](requirements-intake-contract.md).
+
 ## Build the native Meraki objects
 
 ### 1. Prepare trusted ingress

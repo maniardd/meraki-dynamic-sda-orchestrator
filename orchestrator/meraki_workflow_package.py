@@ -21,6 +21,36 @@ import yaml
 
 
 EXPECTED_ROLES = {"planner", "approver", "operator", "auditor"}
+EXPECTED_OPERATOR_INPUT_NAMES = {
+    "requirements_json",
+    "requested_mode",
+    "change_reference",
+    "approval_expires_at",
+    "maintenance_start",
+    "maintenance_end",
+}
+EXPECTED_REQUIREMENTS_INTAKE_DIMENSIONS = {
+    "site_hierarchy",
+    "device_roles_and_links",
+    "endpoint_demand_and_address_pools",
+    "virtual_networks_and_vrfs",
+    "border_handoff_selection",
+    "multicast_selection",
+    "policy_plane_selection",
+    "telemetry_selection",
+}
+FORBIDDEN_REQUIREMENTS_SUBMISSION_FIELDS = {
+    "generated_cli",
+    "allocated_underlay_prefix",
+    "allocated_overlay_prefix",
+    "allocated_vlan_id",
+    "allocated_vni",
+    "allocated_sgt",
+    "device_credential",
+    "lisp_auth_key",
+    "sxp_password",
+    "ise_password",
+}
 EXPECTED_TERMINAL_STATUSES = [
     "dry_run_succeeded",
     "dry_run_blocked",
@@ -799,6 +829,123 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
     if not isinstance(runtime, Mapping):
         runtime = {}
         _issue(issues, "runtime.missing", "$.runtime", "Runtime policy is required")
+
+    operator_inputs = document.get("operator_inputs")
+    if not isinstance(operator_inputs, list):
+        operator_inputs = []
+        _issue(
+            issues,
+            "intake.operator_inputs",
+            "$.operator_inputs",
+            "The operator intake fields must be a list",
+        )
+    input_by_name: Dict[str, Mapping[str, Any]] = {}
+    for index, item in enumerate(operator_inputs):
+        path = "$.operator_inputs[{}]".format(index)
+        if not isinstance(item, Mapping) or not isinstance(item.get("name"), str):
+            _issue(
+                issues,
+                "intake.operator_input",
+                path,
+                "Each intake field requires a name",
+            )
+            continue
+        name = item["name"]
+        if name in input_by_name:
+            _issue(issues, "intake.operator_input_duplicate", path, "Intake field names must be unique")
+        input_by_name[name] = item
+    if set(input_by_name) != EXPECTED_OPERATOR_INPUT_NAMES:
+        _issue(
+            issues,
+            "intake.operator_input_contract",
+            "$.operator_inputs",
+            "Operator inputs must match the pinned planning and change-control contract",
+        )
+    requirements_input = input_by_name.get("requirements_json") or {}
+    if (
+        requirements_input.get("type") != "string"
+        or requirements_input.get("required") is not True
+        or requirements_input.get("secret") is not False
+    ):
+        _issue(
+            issues,
+            "intake.requirements_input",
+            "$.operator_inputs",
+            "requirements_json must be a required, non-secret JSON text input",
+        )
+    mode_input = input_by_name.get("requested_mode") or {}
+    if (
+        mode_input.get("type") != "enum"
+        or mode_input.get("required") is not True
+        or mode_input.get("options") != ["plan_only", "dry_run", "apply"]
+        or mode_input.get("default") != "plan_only"
+    ):
+        _issue(
+            issues,
+            "intake.requested_mode",
+            "$.operator_inputs",
+            "requested_mode must retain the pinned plan/dry-run/apply control choices",
+        )
+
+    intake = document.get("requirements_intake")
+    if not isinstance(intake, Mapping):
+        intake = {}
+        _issue(
+            issues,
+            "intake.missing",
+            "$.requirements_intake",
+            "Requirements intake metadata is required",
+        )
+    if intake.get("contract_version") != "1.0":
+        _issue(
+            issues,
+            "intake.version",
+            "$.requirements_intake.contract_version",
+            "Expected intake contract version 1.0",
+        )
+    if intake.get("canonical_input") != "requirements_json":
+        _issue(
+            issues,
+            "intake.canonical_input",
+            "$.requirements_intake.canonical_input",
+            "Only requirements_json may carry fabric demand and topology",
+        )
+    if intake.get("requirements_contract") != package.get("requirements_contract"):
+        _issue(
+            issues,
+            "intake.schema",
+            "$.requirements_intake.requirements_contract",
+            "Intake must use the package requirements schema",
+        )
+    if intake.get("allocation_authority") != "orchestrator_postgresql_ledger":
+        _issue(
+            issues,
+            "intake.allocation_authority",
+            "$.requirements_intake.allocation_authority",
+            "Only the orchestrator PostgreSQL ledger may allocate fabric values",
+        )
+    dimensions = intake.get("design_dimensions")
+    if (
+        not isinstance(dimensions, list)
+        or set(dimensions) != EXPECTED_REQUIREMENTS_INTAKE_DIMENSIONS
+    ):
+        _issue(
+            issues,
+            "intake.design_dimensions",
+            "$.requirements_intake.design_dimensions",
+            "Intake design dimensions must match the approved SDA demand contract",
+        )
+    forbidden_fields = intake.get("forbidden_submission_fields")
+    if (
+        not isinstance(forbidden_fields, list)
+        or set(forbidden_fields) != FORBIDDEN_REQUIREMENTS_SUBMISSION_FIELDS
+    ):
+        _issue(
+            issues,
+            "intake.forbidden_fields",
+            "$.requirements_intake.forbidden_submission_fields",
+            "Generated values, credentials, and raw CLI must not be submitted as requirements",
+        )
 
     if package.get("serialization_state") != "build_spec_complete":
         _issue(
@@ -1587,6 +1734,8 @@ def compile_workflow_build_plan(document: Mapping[str, Any]) -> Dict[str, Any]:
         "manifest_hash": validation["manifest_hash"],
         "native_export_required": True,
         "credentials_included": False,
+        "requirements_intake": deepcopy(document["requirements_intake"]),
+        "operator_inputs": deepcopy(document["operator_inputs"]),
         "native_assembly": deepcopy(native_assembly),
         "native_serialization": {
             "capture_export_sha256": document["native_serialization"]["capture_export_sha256"],

@@ -29,6 +29,79 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         self.assertFalse(result["importable_exports_present"])
         self.assertFalse(result["apply_enabled"])
 
+    def test_requirements_intake_is_hash_bound_and_keeps_allocations_out_of_the_ui(self):
+        compiled = compile_workflow_build_plan(self.document)
+        intake = compiled["requirements_intake"]
+        self.assertEqual("1.0", intake["contract_version"])
+        self.assertEqual("requirements_json", intake["canonical_input"])
+        self.assertEqual(
+            "orchestrator_postgresql_ledger", intake["allocation_authority"]
+        )
+        self.assertIn("site_hierarchy", intake["design_dimensions"])
+        self.assertIn("telemetry_selection", intake["design_dimensions"])
+        self.assertIn("generated_cli", intake["forbidden_submission_fields"])
+        self.assertIn("allocated_vni", intake["forbidden_submission_fields"])
+        self.assertIn("device_credential", intake["forbidden_submission_fields"])
+        inputs = {item["name"]: item for item in compiled["operator_inputs"]}
+        self.assertTrue(inputs["requirements_json"]["required"])
+        self.assertFalse(inputs["requirements_json"]["secret"])
+        self.assertEqual(
+            ["plan_only", "dry_run", "apply"], inputs["requested_mode"]["options"]
+        )
+
+    def test_requirements_intake_contract_tampering_fails_closed_and_changes_build_hash(self):
+        baseline_hash = compile_workflow_build_plan(self.document)["build_plan_hash"]
+        cases = (
+            (
+                lambda candidate: candidate["requirements_intake"].update(
+                    {"allocation_authority": "operator_input"}
+                ),
+                "intake.allocation_authority",
+            ),
+            (
+                lambda candidate: candidate["requirements_intake"][
+                    "forbidden_submission_fields"
+                ].remove("generated_cli"),
+                "intake.forbidden_fields",
+            ),
+            (
+                lambda candidate: next(
+                    item
+                    for item in candidate["operator_inputs"]
+                    if item["name"] == "requirements_json"
+                ).update({"secret": True}),
+                "intake.requirements_input",
+            ),
+            (
+                lambda candidate: candidate["operator_inputs"].append(
+                    {
+                        "name": "generated_cli",
+                        "type": "string",
+                        "required": False,
+                        "secret": False,
+                    }
+                ),
+                "intake.operator_input_contract",
+            ),
+        )
+        for mutate, expected_code in cases:
+            with self.subTest(expected_code=expected_code):
+                candidate = copy.deepcopy(self.document)
+                mutate(candidate)
+                result = validate_workflow_package(candidate)
+                self.assertFalse(result["safe_to_build"])
+                self.assertIn(expected_code, {issue["code"] for issue in result["issues"]})
+
+        changed = copy.deepcopy(self.document)
+        changed["requirements_intake"]["design_dimensions"] = list(
+            reversed(changed["requirements_intake"]["design_dimensions"])
+        )
+        self.assertTrue(validate_workflow_package(changed)["safe_to_build"])
+        self.assertNotEqual(
+            baseline_hash,
+            compile_workflow_build_plan(changed)["build_plan_hash"],
+        )
+
     def test_native_approval_acknowledgement_and_expiry_binding_fail_closed(self):
         mutations = (
             ("require_checkbox", "", "approval.acknowledgement"),

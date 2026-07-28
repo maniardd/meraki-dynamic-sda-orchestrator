@@ -3,7 +3,7 @@ schema_version: "1.1"
 package:
   id: meraki-dynamic-sda
   name: SDA Fabric Production Automation
-  version: 0.3.0
+  version: 0.3.1
   release_state: development
   production_ready: false
   exchange_publishable: false
@@ -366,6 +366,32 @@ targets:
     role: auditor
     account_key_type: http_bearer_authentication
     trusted_https_required: true
+
+requirements_intake:
+  contract_version: "1.0"
+  canonical_input: requirements_json
+  requirements_contract: schemas/fabric-requirements.schema.json
+  allocation_authority: orchestrator_postgresql_ledger
+  design_dimensions:
+    - site_hierarchy
+    - device_roles_and_links
+    - endpoint_demand_and_address_pools
+    - virtual_networks_and_vrfs
+    - border_handoff_selection
+    - multicast_selection
+    - policy_plane_selection
+    - telemetry_selection
+  forbidden_submission_fields:
+    - generated_cli
+    - allocated_underlay_prefix
+    - allocated_overlay_prefix
+    - allocated_vlan_id
+    - allocated_vni
+    - allocated_sgt
+    - device_credential
+    - lisp_auth_key
+    - sxp_password
+    - ise_password
 
 operator_inputs:
   - name: requirements_json
