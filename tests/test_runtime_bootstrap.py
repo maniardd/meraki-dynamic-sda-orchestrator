@@ -11,6 +11,9 @@ VALIDATION_WORKFLOW = ROOT / ".github" / "workflows" / "validate_foundation.yml"
 ROLE_WORKFLOW = (
     ROOT / ".github" / "workflows" / "provision_meraki_role_identities.yml"
 )
+ACCOUNT_KEY_WORKFLOW = (
+    ROOT / ".github" / "workflows" / "generate_meraki_account_key_tokens.yml"
+)
 
 
 class RuntimeBootstrapTests(unittest.TestCase):
@@ -89,6 +92,16 @@ class RuntimeBootstrapTests(unittest.TestCase):
             "\n          python3 admin/provision_meraki_role_identities.py",
             workflow_text,
         )
+
+    def test_one_time_account_key_bootstrap_never_logs_or_uploads_tokens(self):
+        workflow_text = ACCOUNT_KEY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("GENERATE_FRESH_MERAKI_ACCOUNT_KEYS", workflow_text)
+        self.assertIn("test ! -e \"${ONE_TIME_FILE}\"", workflow_text)
+        self.assertIn("admin/generate_meraki_account_key_tokens.py", workflow_text)
+        self.assertIn("sudo systemctl restart sda-orchestrator-api.service", workflow_text)
+        self.assertIn("execution_enabled\"] is False", workflow_text)
+        self.assertNotIn("secrets.", workflow_text)
+        self.assertNotIn("upload-artifact", workflow_text)
 
 
 if __name__ == "__main__":

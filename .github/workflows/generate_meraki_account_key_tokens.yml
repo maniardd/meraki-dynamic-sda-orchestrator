@@ -1,0 +1,49 @@
+name: Generate One-Time Meraki Account Keys
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type GENERATE_FRESH_MERAKI_ACCOUNT_KEYS to rotate all four role tokens
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sda-orchestrator-api-administration
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && github.event.inputs.confirmation == 'GENERATE_FRESH_MERAKI_ACCOUNT_KEYS'
+    runs-on: [self-hosted, sda-relay]
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out reviewed administration code
+        uses: actions/checkout@v4
+
+      - name: Generate and hash one-time Account Keys
+        shell: bash
+        env:
+          IDENTITY_FILE: /home/sdaadmin/.config/sda-orchestrator/token-identities.json
+          ONE_TIME_FILE: /home/sdaadmin/.config/sda-orchestrator/meraki-account-keys.once.json
+          RUNTIME_PYTHON: /home/sdaadmin/sda-orchestrator/current/.venv/bin/python
+        run: |
+          set -euo pipefail
+          umask 077
+          test -x "${RUNTIME_PYTHON}"
+          test ! -e "${ONE_TIME_FILE}"
+          "${RUNTIME_PYTHON}" admin/generate_meraki_account_key_tokens.py \
+            --identity-file "${IDENTITY_FILE}" \
+            --one-time-file "${ONE_TIME_FILE}"
+          sudo systemctl restart sda-orchestrator-api.service
+
+      - name: Verify API health and execution lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --silent --show-error --fail --max-time 5 http://127.0.0.1:8080/health)"
+          python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"] == "ok"; assert d["execution_enabled"] is False; print("api_health=ok"); print("execution_enabled=false")' <<<"${response}"

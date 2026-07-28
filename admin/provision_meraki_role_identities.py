@@ -19,21 +19,30 @@ from orchestrator.auth import TOKEN_DIGEST, load_hashed_token_identities
 
 
 ROLE_ACTORS = {
+    "planner": "meraki-planner",
     "approver": "meraki-approver",
     "operator": "meraki-operator",
     "auditor": "meraki-auditor",
 }
 
+# The existing administrative workflow deliberately preserves the planner
+# identity.  A separately reviewed bootstrap path may rotate all four roles.
+DEFAULT_MANAGED_ROLES = frozenset({"approver", "operator", "auditor"})
+
 
 def provision_identities(
     output: Path,
     digests: Mapping[str, str],
+    *,
+    managed_roles: frozenset[str] = DEFAULT_MANAGED_ROLES,
 ) -> Dict[str, Dict[str, object]]:
     """Atomically replace the managed role identities while preserving others."""
 
     normalized = {str(role): str(digest).lower() for role, digest in digests.items()}
-    if set(normalized) != set(ROLE_ACTORS):
-        raise ValueError("exactly approver, operator, and auditor digests are required")
+    if not managed_roles or not managed_roles.issubset(ROLE_ACTORS):
+        raise ValueError("managed roles are invalid")
+    if set(normalized) != set(managed_roles):
+        raise ValueError("digests must exactly match the managed roles")
     if any(not TOKEN_DIGEST.fullmatch(digest) for digest in normalized.values()):
         raise ValueError("every role identity must be a lowercase SHA-256 digest")
     if len(set(normalized.values())) != len(normalized):
@@ -41,13 +50,14 @@ def provision_identities(
 
     identity_path = output.expanduser().resolve()
     identities = load_hashed_token_identities(str(identity_path))
-    managed_actors = set(ROLE_ACTORS.values())
+    managed_actors = {ROLE_ACTORS[role] for role in managed_roles}
     retained = {
         digest: dict(principal)
         for digest, principal in identities.items()
         if str(principal["actor"]) not in managed_actors
     }
-    for role, actor in ROLE_ACTORS.items():
+    for role in sorted(managed_roles):
+        actor = ROLE_ACTORS[role]
         digest = normalized[role]
         if digest in retained:
             raise ValueError("managed digest collides with an existing identity")
