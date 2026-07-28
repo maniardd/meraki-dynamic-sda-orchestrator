@@ -259,6 +259,7 @@ class ProductionAcceptanceTests(unittest.TestCase):
             f'{result["passed_required_gate_count"]} of '
             f'{result["required_gate_count"]} applicable gates'
         )
+        expected_pending = f'{len(result["incomplete_gate_ids"])} gates pending'
         collateral = [
             ROOT / "docs" / "engineering-product-vidcast-and-devnet-submission.md",
             ROOT / "docs" / "production-acceptance-registry.md",
@@ -273,6 +274,14 @@ class ProductionAcceptanceTests(unittest.TestCase):
             self.assertNotIn("twenty required gates", rendered.lower(), path.name)
             self.assertNotIn("remaining fifteen gates", rendered.lower(), path.name)
             self.assertNotIn("15 gates pending", rendered.lower(), path.name)
+
+        engineering = collateral[0].read_text(encoding="utf-8")
+        self.assertIn(
+            f'remaining {len(result["incomplete_gate_ids"])} applicable gates',
+            engineering,
+        )
+        figma = collateral[-1].read_text(encoding="utf-8")
+        self.assertIn(expected_pending, figma)
 
     def test_sjc23_closure_plan_lists_each_live_pending_gate(self):
         result = self.validate()
