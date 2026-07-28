@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "evidence_id": "ingress.poc-public-readiness.20260727",
+  "evidence_type": "temporary_public_ingress_readiness",
+  "environment": "SJC23-SDA",
+  "captured_at": "2026-07-27T06:15:43Z",
+  "result": "pending",
+  "source": {
+    "kind": "github_actions_hosted_runner",
+    "workflow": "Verify SDA POC Public Ingress",
+    "run_id": "30242153978",
+    "raw_endpoint_retained": false
+  },
+  "checks": {
+    "public_https_health": true,
+    "api_execution_enabled": false,
+    "temporary_ingress_kind": "ngrok",
+    "stable_production_ingress": false
+  },
+  "safety": {
+    "contains_secret_values": false,
+    "contains_raw_configuration": false,
+    "contains_tenant_identifiers": false,
+    "device_writes_performed": false,
+    "ise_writes_performed": false,
+    "apply_enabled": false
+  },
+  "remaining_requirements": [
+    "approved stable FQDN and trusted TLS certificate",
+    "organization-managed reverse proxy or load balancer",
+    "health monitoring, certificate renewal, and incident ownership",
+    "a new zero-write Meraki parent acceptance run against the stable endpoint"
+  ]
+}

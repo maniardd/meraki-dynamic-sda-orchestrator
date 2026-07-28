@@ -89,6 +89,12 @@ gates:
         sha256: 428e07f0cee636c4fd32aad93c6ab509b75776f4d52e60b7df6def34c21c95ea
         captured_at: "2026-07-26T10:18:00Z"
         result: failed
+      - id: meraki.role-identity-readiness.20260727
+        kind: test_report
+        ref: evidence://acceptance/evidence/meraki-role-identity-readiness-20260727.json
+        sha256: 3f969f8312222e067b50119d5083b062a8458e4bd36f192c41c3a32db3f503c3
+        captured_at: "2026-07-27T06:17:15Z"
+        result: passed
     rationale: The current exact-name parent export reduced the structural findings from eighteen to eight. All five production workflow labels, the final Create Prompt label, and child descriptions are now present. The remaining findings are four bearer values serialized by the raw native export despite the existing Meraki Account Key bindings, and four temporary ngrok targets. Raw tenant exports remain uncommitted. A native export that excludes Account Key material, stable trusted-TLS ingress, a passed structural audit, and a duplicate-workspace import remain required.
 
   - id: meraki.role_negative
@@ -106,7 +112,13 @@ gates:
     status: pending
     owner_roles: [platform_owner, security_owner]
     dependencies: []
-    evidence: []
+    evidence:
+      - id: ingress.poc-public-readiness.20260727
+        kind: test_report
+        ref: evidence://acceptance/evidence/ingress-poc-public-readiness-20260727.json
+        sha256: d131ff1b0da429ff1c88f83d46057568319ffdb8eabc167d89c1d1c5772711b1
+        captured_at: "2026-07-27T06:15:43Z"
+        result: pending
     rationale: Temporary ngrok ingress must be replaced by stable DNS, trusted TLS, monitoring, and controlled renewal.
 
   - id: runtime.postgres_backup_restore
@@ -121,6 +133,12 @@ gates:
         ref: evidence://acceptance/evidence/postgres-backup-restore-20260723.json
         sha256: fe12125685861c9a610d87afacfafaa8b3754bd6b9b070896aa8648ebf8bba58
         captured_at: "2026-07-23T18:15:04Z"
+        result: passed
+      - id: runtime.postgres-local-recovery.20260727
+        kind: test_report
+        ref: evidence://acceptance/evidence/runtime-postgres-local-recovery-20260727.json
+        sha256: 8dc401988438a0c64081f13904411f90d3a3e1cd6471cca1087e3f7d3711c7f4
+        captured_at: "2026-07-27T15:02:22Z"
         result: passed
     rationale: A private local backup and isolated disposable-cluster restore passed on the Ubuntu runner, but approved encrypted off-host retention, recovery objectives, alerting, and a second-host recovery exercise remain required.
 
