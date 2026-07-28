@@ -116,9 +116,9 @@ gates:
       - id: ingress.poc-public-readiness.20260727
         kind: test_report
         ref: evidence://acceptance/evidence/ingress-poc-public-readiness-20260727.json
-        sha256: 81c8d59686d03271f536e49aefe79b3edccbe318595ced0efa034a6d5c28ae4f
+        sha256: d131ff1b0da429ff1c88f83d46057568319ffdb8eabc167d89c1d1c5772711b1
         captured_at: "2026-07-27T06:15:43Z"
-        result: passed
+        result: pending
     rationale: Temporary ngrok ingress must be replaced by stable DNS, trusted TLS, monitoring, and controlled renewal.
 
   - id: runtime.postgres_backup_restore

@@ -358,16 +358,19 @@ class ProductionAcceptanceTests(unittest.TestCase):
             "ingress.stable_tls": (
                 "ingress.poc-public-readiness.20260727",
                 "ingress-poc-public-readiness-20260727.json",
+                "pending",
                 {"public_https_health": True, "api_execution_enabled": False},
             ),
             "meraki.native_export_import": (
                 "meraki.role-identity-readiness.20260727",
                 "meraki-role-identity-readiness-20260727.json",
+                "passed",
                 {"private_file_mode": True, "ready_for_meraki_targets": True},
             ),
             "runtime.postgres_backup_restore": (
                 "runtime.postgres-local-recovery.20260727",
                 "runtime-postgres-local-recovery-20260727.json",
+                "passed",
                 {
                     "private_backup_created": True,
                     "production_database_modified": False,
@@ -375,7 +378,12 @@ class ProductionAcceptanceTests(unittest.TestCase):
                 },
             ),
         }
-        for gate_id, (evidence_id, filename, expected_checks) in expected.items():
+        for gate_id, (
+            evidence_id,
+            filename,
+            expected_result,
+            expected_checks,
+        ) in expected.items():
             gate = by_id[gate_id]
             self.assertEqual("pending", gate["status"], gate_id)
             record = next(
@@ -386,7 +394,7 @@ class ProductionAcceptanceTests(unittest.TestCase):
                 hashlib.sha256(content).hexdigest(), record["sha256"], evidence_id
             )
             evidence = json.loads(content)
-            self.assertEqual("passed", evidence["result"], evidence_id)
+            self.assertEqual(expected_result, evidence["result"], evidence_id)
             self.assertFalse(evidence["safety"]["contains_secret_values"])
             self.assertFalse(evidence["safety"]["apply_enabled"])
             source = evidence["checks"] if "checks" in evidence else evidence["identity_readiness"]
@@ -397,6 +405,19 @@ class ProductionAcceptanceTests(unittest.TestCase):
         self.assertEqual(5, result["passed_required_gate_count"])
         self.assertIn("ingress.stable_tls", result["incomplete_gate_ids"])
         self.assertIn("meraki.native_export_import", result["incomplete_gate_ids"])
+
+        premature_ingress = copy.deepcopy(self.registry)
+        next(
+            gate
+            for gate in premature_ingress["gates"]
+            if gate["id"] == "ingress.stable_tls"
+        )["status"] = "passed"
+        invalid = self.validate(premature_ingress)
+        self.assertFalse(invalid["registry_valid"])
+        self.assertIn(
+            "gate.passed_without_evidence",
+            {issue["code"] for issue in invalid["issues"]},
+        )
 
     def test_missing_or_tampered_local_evidence_fails_closed(self):
         missing = copy.deepcopy(self.registry)

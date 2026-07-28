@@ -4,7 +4,7 @@
   "evidence_type": "temporary_public_ingress_readiness",
   "environment": "SJC23-SDA",
   "captured_at": "2026-07-27T06:15:43Z",
-  "result": "passed",
+  "result": "pending",
   "source": {
     "kind": "github_actions_hosted_runner",
     "workflow": "Verify SDA POC Public Ingress",
