@@ -119,17 +119,19 @@ SHA-256 digests to the API identity store, and restarts the loopback-only API
 with execution still disabled.
 
 The plaintext values are never printed to Actions logs or committed. They are
-written once to the private mode-`0600` local file
-`/home/sdaadmin/.config/sda-orchestrator/meraki-account-keys.once.json` for the
+written once to the private mode-`0600` local state file
+`/home/sdaadmin/.local/share/sda-orchestrator/meraki-account-keys.once.json` for the
 operator to enter into the matching Meraki Account Keys. Do not copy that file
 to chat, screenshots, email, Git, or an export. Immediately after all four
 Meraki targets have been tested, delete the one-time file from the Ubuntu
 console:
 
 ```bash
-rm -f /home/sdaadmin/.config/sda-orchestrator/meraki-account-keys.once.json
+rm -f /home/sdaadmin/.local/share/sda-orchestrator/meraki-account-keys.once.json
 ```
 
 The workflow refuses to overwrite an existing one-time file. A second rotation
 therefore requires the prior file to have been deliberately consumed and
-deleted by the authorized operator.
+deleted by the authorized operator. It validates the handoff file before and
+after the API restart; if that validation fails, it restores the prior
+hash-only identity store and fails rather than leaving unrecoverable values.

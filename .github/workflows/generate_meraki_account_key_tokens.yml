@@ -29,17 +29,47 @@ jobs:
         shell: bash
         env:
           IDENTITY_FILE: /home/sdaadmin/.config/sda-orchestrator/token-identities.json
-          ONE_TIME_FILE: /home/sdaadmin/.config/sda-orchestrator/meraki-account-keys.once.json
+          ONE_TIME_FILE: /home/sdaadmin/.local/share/sda-orchestrator/meraki-account-keys.once.json
           RUNTIME_PYTHON: /home/sdaadmin/sda-orchestrator/current/.venv/bin/python
         run: |
           set -euo pipefail
           umask 077
           test -x "${RUNTIME_PYTHON}"
+          test -f "${IDENTITY_FILE}"
+          test ! -L "${IDENTITY_FILE}"
+          test -d "$(dirname "${ONE_TIME_FILE}")"
+          test ! -L "$(dirname "${ONE_TIME_FILE}")"
           test ! -e "${ONE_TIME_FILE}"
+          IDENTITY_BACKUP="$(mktemp "$(dirname "${IDENTITY_FILE}")/.token-identities-rollback.XXXXXX")"
+          install -m 0600 -- "${IDENTITY_FILE}" "${IDENTITY_BACKUP}"
+          handoff_committed=false
+          rollback_identity_store() {
+            status="$?"
+            trap - EXIT
+            if [ "${handoff_committed}" != true ] && [ -f "${IDENTITY_BACKUP}" ]; then
+              echo "handoff_verification_failed=restoring_previous_hashed_identities"
+              "${RUNTIME_PYTHON}" admin/provision_meraki_role_identities.py \
+                --output "${IDENTITY_FILE}" --restore-from "${IDENTITY_BACKUP}" || true
+              sudo systemctl restart sda-orchestrator-api.service || true
+            fi
+            rm -f -- "${IDENTITY_BACKUP}"
+            exit "${status}"
+          }
+          trap rollback_identity_store EXIT
           "${RUNTIME_PYTHON}" admin/generate_meraki_account_key_tokens.py \
             --identity-file "${IDENTITY_FILE}" \
             --one-time-file "${ONE_TIME_FILE}"
+          test -f "${ONE_TIME_FILE}"
+          test ! -L "${ONE_TIME_FILE}"
+          test "$(stat -c '%a' "${ONE_TIME_FILE}")" = 600
+          test "$(stat -c '%U' "${ONE_TIME_FILE}")" = sdaadmin
           sudo systemctl restart sda-orchestrator-api.service
+          sleep 5
+          test -f "${ONE_TIME_FILE}"
+          test ! -L "${ONE_TIME_FILE}"
+          test "$(stat -c '%a' "${ONE_TIME_FILE}")" = 600
+          test "$(stat -c '%U' "${ONE_TIME_FILE}")" = sdaadmin
+          handoff_committed=true
 
       - name: Verify API health and execution lock
         shell: bash
