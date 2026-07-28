@@ -276,6 +276,6 @@ XE LISP/VXLAN fabric change can be enabled.
 |---|---|
 | Is this an official Cisco SDA product? | No. It is an independently built workflow pattern using supported IOS XE constructs and Meraki Workflow primitives. |
 | Does it replace Catalyst Center? | No. It explores an operator and external orchestration pattern; platform and support decisions remain separate. |
-| Is it production ready today? | The software foundation is tested; Apply is disabled until the remaining twelve applicable gates and required sign-offs pass. |
+| Is it production ready today? | The software foundation is tested; Apply is disabled until the remaining 12 applicable gates and required sign-offs pass. |
 | Is the design static? | No. Users provide demand/topology facts. The planner derives allocations and artifacts from governed pools. |
 | Why not have Meraki push directly to switches? | Stateful IPAM, locks, rollback, verification and audit require a separate guarded service boundary. |
