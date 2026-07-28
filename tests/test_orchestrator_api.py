@@ -71,6 +71,42 @@ class OrchestratorApiTests(unittest.TestCase):
         self.assertEqual(503, response.status_code)
         self.assertEqual("service_not_configured", response.get_json()["error"])
 
+    def test_observability_summary_is_auditor_only_and_secret_free(self):
+        token = "observability-auditor-token-value-0001"
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(token): {
+                        "actor": "runtime-observability-auditor",
+                        "roles": ["auditor"],
+                    }
+                },
+                "ORCHESTRATOR_DATABASE_PATH": ":memory:",
+            }
+        )
+        response = app.test_client().get(
+            "/v1/observability/summary",
+            headers={"Authorization": "Bearer " + token},
+        )
+        self.assertEqual(200, response.status_code, response.get_json())
+        body = response.get_json()
+        self.assertEqual("sda-orchestrator", body["service"])
+        self.assertTrue(body["database"])
+        self.assertTrue(body["audit_chain_valid"])
+        self.assertFalse(body["execution_enabled"])
+        self.assertFalse(body["contains_secret_values"])
+        self.assertFalse(body["contains_raw_configuration"])
+        self.assertFalse(body["contains_raw_identifiers"])
+        self.assertEqual([], body["run_status_counts"])
+        self.assertEqual({"active_count": 0, "expired_count": 0}, body["fabric_locks"])
+        rendered = str(body).lower()
+        self.assertNotIn(token, rendered)
+        self.assertNotIn("runtime-observability-auditor", rendered)
+
+        denied = self.client.get("/v1/observability/summary", headers=self.headers)
+        self.assertEqual(403, denied.status_code)
+
     def test_v1_requires_authentication(self):
         response = self.client.post("/v1/intents/validate", json=self.intent)
         self.assertEqual(401, response.status_code)

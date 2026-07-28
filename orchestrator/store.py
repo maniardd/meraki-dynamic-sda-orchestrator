@@ -1340,6 +1340,45 @@ class StateStore:
             "audit_chain": self.verify_audit_chain(),
         }
 
+    def observability_summary(self) -> Dict[str, Any]:
+        """Return aggregate runtime health without identifiers or payloads.
+
+        This is deliberately a count-only telemetry surface. It is suitable for
+        a restricted monitoring collector but must not become an alternate API
+        for reading intent, configuration, device, user, or secret data.
+        """
+
+        current_time = isoformat()
+        with self.connection() as connection:
+            run_rows = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM runs GROUP BY status ORDER BY status"
+            ).fetchall()
+            audit_row = connection.execute(
+                "SELECT COUNT(*) AS count FROM audit_events"
+            ).fetchone()
+            active_locks = connection.execute(
+                "SELECT COUNT(*) AS count FROM fabric_locks WHERE expires_at >= ?",
+                (current_time,),
+            ).fetchone()
+            expired_locks = connection.execute(
+                "SELECT COUNT(*) AS count FROM fabric_locks WHERE expires_at < ?",
+                (current_time,),
+            ).fetchone()
+        return {
+            "backend": self.backend_name,
+            "database": True,
+            "audit_chain_valid": self.verify_audit_chain(),
+            "audit_event_count": int(audit_row["count"] if audit_row else 0),
+            "run_status_counts": [
+                {"status": str(row["status"]), "count": int(row["count"])}
+                for row in run_rows
+            ],
+            "fabric_locks": {
+                "active_count": int(active_locks["count"] if active_locks else 0),
+                "expired_count": int(expired_locks["count"] if expired_locks else 0),
+            },
+        }
+
 
 def create_state_store(database_location: str) -> StateStore:
     if str(database_location).startswith(("postgresql://", "postgres://")):

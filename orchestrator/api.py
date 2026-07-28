@@ -299,6 +299,24 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             }
         ), (200 if ready_state else 503)
 
+    @app.get("/v1/observability/summary")
+    @require_roles("auditor")
+    def observability_summary():
+        """Expose only aggregate, non-sensitive runtime telemetry to auditors."""
+
+        summary = store().observability_summary()
+        summary.update(
+            {
+                "service": "sda-orchestrator",
+                "version": API_VERSION,
+                "execution_enabled": bool(app.config["ORCHESTRATOR_EXECUTION_ENABLED"]),
+                "contains_secret_values": False,
+                "contains_raw_configuration": False,
+                "contains_raw_identifiers": False,
+            }
+        )
+        return jsonify(summary)
+
     def json_object(*, allow_string_encoded_object: bool = False):
         if not request.is_json:
             return None, (jsonify({"error": "content_type", "message": "Use application/json"}), 415)
