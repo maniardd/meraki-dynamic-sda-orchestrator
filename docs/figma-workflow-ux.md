@@ -44,5 +44,6 @@ bypass the production acceptance registry.
 - No unnamed nodes remain within the three screens.
 - Screenshots were inspected after each major section for clipping and
   overflow.
+- The acceptance registry currently records 5 of 17 applicable gates passed.
 - The final evidence screen contains an explicit
-  `Apply unavailable — 15 gates pending` state.
+  `Apply unavailable — 12 gates pending` state.

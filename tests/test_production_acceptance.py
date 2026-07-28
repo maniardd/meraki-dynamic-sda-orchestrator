@@ -263,6 +263,7 @@ class ProductionAcceptanceTests(unittest.TestCase):
             ROOT / "docs" / "engineering-product-vidcast-and-devnet-submission.md",
             ROOT / "docs" / "production-acceptance-registry.md",
             ROOT / "docs" / "vidcast-and-ciscolive-demo-kit.md",
+            ROOT / "docs" / "figma-workflow-ux.md",
         ]
         for path in collateral:
             rendered = path.read_text(encoding="utf-8")
@@ -270,6 +271,8 @@ class ProductionAcceptanceTests(unittest.TestCase):
             self.assertNotIn("5/20", rendered, path.name)
             self.assertNotIn("five of twenty", rendered.lower(), path.name)
             self.assertNotIn("twenty required gates", rendered.lower(), path.name)
+            self.assertNotIn("remaining fifteen gates", rendered.lower(), path.name)
+            self.assertNotIn("15 gates pending", rendered.lower(), path.name)
 
     def test_sjc23_closure_plan_lists_each_live_pending_gate(self):
         result = self.validate()
