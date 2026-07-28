@@ -108,3 +108,28 @@ roles, and whether the identity file is mode `0600`. It never prints bearer
 values, token digests, URL bindings, host addresses, or raw configuration; it
 does not restart the service, modify the identity file, upload an artifact, or
 enable execution.
+
+## One-time Meraki Account Key bootstrap
+
+When the four Meraki workflow targets need fresh credentials, dispatch
+`Generate One-Time Meraki Account Keys` only from `main` and enter the exact
+confirmation `GENERATE_FRESH_MERAKI_ACCOUNT_KEYS`. It generates unique Planner,
+Approver, Operator, and Auditor values on the Ubuntu relay, writes only their
+SHA-256 digests to the API identity store, and restarts the loopback-only API
+with execution still disabled.
+
+The plaintext values are never printed to Actions logs or committed. They are
+written once to the private mode-`0600` local file
+`/home/sdaadmin/.config/sda-orchestrator/meraki-account-keys.once.json` for the
+operator to enter into the matching Meraki Account Keys. Do not copy that file
+to chat, screenshots, email, Git, or an export. Immediately after all four
+Meraki targets have been tested, delete the one-time file from the Ubuntu
+console:
+
+```bash
+rm -f /home/sdaadmin/.config/sda-orchestrator/meraki-account-keys.once.json
+```
+
+The workflow refuses to overwrite an existing one-time file. A second rotation
+therefore requires the prior file to have been deliberately consumed and
+deleted by the authorized operator.
