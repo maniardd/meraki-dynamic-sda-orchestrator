@@ -76,7 +76,15 @@ does not provide a reliable arbitrary repeating-table editor for a multi-site
 network hierarchy. The current UI therefore accepts one schema-governed JSON
 document rather than pretending to be a custom SDA design portal.
 
-A future guided multi-screen intake may help operators compose the same
-document. It must use this contract and submit only `requirements_json` to the
-existing Planner API; it must not allocate values, render IOS XE configuration,
-or bypass the hash-bound plan/approval workflow.
+The current SJC23 POC additionally uses a guided native-prompt adapter. It
+collects a fabric display name, change reference, Corporate and Guest capacity,
+the two already-approved attachment choices, a DHCP lease, and the approved
+DNS profile. The adapter constructs the same canonical document on the relay
+from a reviewed POC profile. It rejects raw interfaces, addresses, VLANs,
+credentials, CLI, and extra fields, and refuses to run unless the reviewed
+SJC23 POC guardrail policy is active.
+
+For a multi-site production deployment, a guided portal may help operators
+compose the canonical document. It must use this contract and submit only
+`requirements_json` to the existing Planner API; it must not allocate values,
+render IOS XE configuration, or bypass the hash-bound plan/approval workflow.

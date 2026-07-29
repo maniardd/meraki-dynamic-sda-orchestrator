@@ -16,6 +16,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "fabric-intent.lab.yaml"
 REQUIREMENTS_EXAMPLE = ROOT / "examples" / "fabric-requirements.lab.yaml"
+SJC23_POC_GUARDRAILS = ROOT / "policy" / "guardrails.sjc23-poc.yaml"
 TOKENS = {
     "planner-token": "planner-token-value-with-required-length",
     "approver-token": "approver-token-value-with-required-length",
@@ -279,6 +280,68 @@ class PersistentWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(422, response.status_code, response.get_json())
         self.assertEqual("intent_or_requirements_required", response.get_json()["error"])
+
+    def test_sjc23_guided_poc_form_derives_the_reviewed_profile(self):
+        database_path = str(Path(self.temporary_directory.name) / "poc-state.sqlite3")
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_DATABASE_PATH": database_path,
+                "ORCHESTRATOR_GUARDRAILS_PATH": str(SJC23_POC_GUARDRAILS),
+                "ORCHESTRATOR_EXECUTION_ENABLED": False,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(TOKENS["planner-token"]): {
+                        "actor": "meraki-planner", "roles": ["planner"]
+                    }
+                },
+            }
+        )
+        response = app.test_client().post(
+            "/v1/workflow-actions/poc-guided-plan",
+            json={
+                "form_values": {
+                    "fabric_name": "SJC23 recorded POC",
+                    "change_reference": "SJC23-POC-001",
+                    "corporate_users": "150",
+                    "guest_users": "150",
+                    "corporate_attachment": "corporate_laptop",
+                    "guest_attachment": "guest_laptop",
+                    "dhcp_lease_minutes": "60",
+                    "dns_profile": "public_google",
+                },
+                "idempotency_key": "sjc23-guided-poc-plan-0001",
+            },
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, response.status_code, response.get_json())
+        body = response.get_json()
+        self.assertEqual("plan_ready", body["status"])
+        self.assertEqual("reserved", body["reservation_state"])
+        self.assertGreater(body["allocation_summary"]["network"], 0)
+
+    def test_sjc23_guided_poc_form_rejects_unsafe_or_wrong_policy_input(self):
+        payload = {
+            "form_values": {
+                "fabric_name": "SJC23 recorded POC",
+                "change_reference": "SJC23-POC-001",
+                "corporate_users": "150",
+                "guest_users": "150",
+                "corporate_attachment": "corporate_laptop",
+                "guest_attachment": "guest_laptop",
+                "dhcp_lease_minutes": "60",
+                "dns_profile": "public_google",
+                "generated_cli": "reload",
+            },
+            "idempotency_key": "sjc23-guided-poc-plan-0002",
+        }
+        unsafe = self.client.post(
+            "/v1/workflow-actions/poc-guided-plan",
+            json=payload,
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(422, unsafe.status_code, unsafe.get_json())
+        self.assertEqual("poc_guided_intake", unsafe.get_json()["error"])
+        self.assertIn("SJC23 POC guardrail", unsafe.get_json()["message"])
 
     def test_meraki_unquoted_idempotency_token_is_repaired_with_strict_grammar(self):
         idempotency_key = "meraki-native-http-unquoted-001"
