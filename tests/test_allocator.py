@@ -315,6 +315,27 @@ class DynamicAllocatorTests(unittest.TestCase):
         self.assertEqual("10.255.0.0/31", intent["links"][0]["subnet"])
         self.assertEqual("10.30.100.0/24", pools["Corporate"]["prefix"])
         self.assertEqual("10.30.200.0/24", pools["Guest"]["prefix"])
+
+    def test_sjc23_poc_profile_derives_approved_dhcp_and_attachment_values(self):
+        requirements = yaml.safe_load(
+            (ROOT / "examples" / "fabric-requirements.sjc23-poc.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        policy = yaml.safe_load(
+            (ROOT / "policy" / "guardrails.sjc23-poc.yaml").read_text(encoding="utf-8")
+        )
+        intent = derive_fabric_intent(requirements, policy)["intent"]
+
+        pools = {item["virtual_network"]: item for item in intent["endpoint_pools"]}
+        self.assertEqual("10.30.100.0/24", pools["Corporate"]["prefix"])
+        self.assertEqual("10.30.200.0/24", pools["Guest"]["prefix"])
+        self.assertEqual(100, pools["Corporate"]["vlan_id"])
+        self.assertEqual(200, pools["Guest"]["vlan_id"])
+        self.assertEqual("10.255.255.1", pools["Corporate"]["dhcp"]["helper_address"])
+        attachments = {item["id"]: item for item in intent["endpoint_attachments"]}
+        self.assertEqual(100, attachments["corp-laptop"]["vlan_id"])
+        self.assertEqual(200, attachments["guest-laptop"]["vlan_id"])
         self.assertEqual([100, 200], [pools["Corporate"]["vlan_id"], pools["Guest"]["vlan_id"]])
 
     def test_local_border_dhcp_and_endpoint_attachments_are_derived(self):
