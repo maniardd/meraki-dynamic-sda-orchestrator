@@ -256,6 +256,30 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual(200, response.status_code, response.get_json())
         self.assertEqual("plan_ready", response.get_json()["status"])
 
+    def test_meraki_plan_accepts_the_native_requirements_json_prompt_value(self):
+        response = self.client.post(
+            "/v1/workflow-actions/plan",
+            json={
+                "requirements_json": json.dumps(self.requirements),
+                "idempotency_key": "meraki-native-prompt-value-001",
+            },
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, response.status_code, response.get_json())
+        self.assertEqual("plan_ready", response.get_json()["status"])
+
+    def test_meraki_plan_rejects_non_object_requirements_json(self):
+        response = self.client.post(
+            "/v1/workflow-actions/plan",
+            json={
+                "requirements_json": "[\"not\", \"a\", \"requirements object\"]",
+                "idempotency_key": "meraki-native-prompt-value-002",
+            },
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(422, response.status_code, response.get_json())
+        self.assertEqual("intent_or_requirements_required", response.get_json()["error"])
+
     def test_meraki_unquoted_idempotency_token_is_repaired_with_strict_grammar(self):
         idempotency_key = "meraki-native-http-unquoted-001"
         payload = {

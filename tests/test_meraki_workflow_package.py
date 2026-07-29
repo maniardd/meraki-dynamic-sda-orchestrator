@@ -102,6 +102,20 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
             compile_workflow_build_plan(changed)["build_plan_hash"],
         )
 
+    def test_plan_operation_uses_the_canonical_requirements_json_field(self):
+        self.assertEqual(
+            ["requirements_json", "idempotency_key"],
+            self.document["api_operations"]["plan"]["request_fields"],
+        )
+        candidate = copy.deepcopy(self.document)
+        candidate["api_operations"]["plan"]["request_fields"] = [
+            "requirements",
+            "idempotency_key",
+        ]
+        result = validate_workflow_package(candidate)
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn("operation.request_fields", {item["code"] for item in result["issues"]})
+
     def test_native_approval_acknowledgement_and_expiry_binding_fail_closed(self):
         mutations = (
             ("require_checkbox", "", "approval.acknowledgement"),

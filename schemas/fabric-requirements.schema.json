@@ -210,7 +210,7 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["site", "users", "dhcp_helpers"],
+              "required": ["site", "users"],
               "properties": {
                 "site": {"type": "string", "minLength": 1, "maxLength": 64},
                 "users": {"type": "integer", "minimum": 1, "maximum": 16777214},
@@ -221,10 +221,47 @@
                   "maxItems": 16,
                   "uniqueItems": true,
                   "items": {"type": "string", "format": "ipv4"}
+                },
+                "dhcp": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["mode", "server_device_id"],
+                  "properties": {
+                    "mode": {"const": "local_border"},
+                    "server_device_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+                    "lease_minutes": {"type": "integer", "minimum": 5, "maximum": 10080},
+                    "dns_servers": {
+                      "type": "array",
+                      "maxItems": 8,
+                      "uniqueItems": true,
+                      "items": {"type": "string", "format": "ipv4"}
+                    }
+                  }
                 }
-              }
+              },
+              "oneOf": [
+                {"required": ["dhcp_helpers"]},
+                {"required": ["dhcp"]}
+              ]
             }
           }
+        }
+      }
+    },
+    "endpoint_attachments": {
+      "type": "array",
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "device_id", "interface", "site", "virtual_network"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "device_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+          "interface": {"type": "string", "minLength": 1, "maxLength": 128},
+          "site": {"type": "string", "minLength": 1, "maxLength": 64},
+          "virtual_network": {"type": "string", "minLength": 1, "maxLength": 64},
+          "description": {"type": "string", "minLength": 1, "maxLength": 120}
         }
       }
     },

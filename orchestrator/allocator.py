@@ -696,6 +696,7 @@ def derive_fabric_intent(
     l2_max = int(ranges["l2_instance_id"].get("max", 16777215))
     virtual_networks = []
     endpoint_pools = []
+    devices_by_id = {str(item["id"]): item for item in devices}
     for raw_vn in sorted(requirements["virtual_networks"], key=lambda item: str(item["name"])):
         _require_keys(raw_vn, ["name", "vrf", "sites"], "$.virtual_networks[]")
         l3_id = reserve_scalar(
@@ -711,7 +712,37 @@ def derive_fabric_intent(
             }
         )
         for site in sorted(raw_vn["sites"], key=lambda item: str(item["site"])):
-            _require_keys(site, ["site", "users", "dhcp_helpers"], "$.virtual_networks[].sites[]")
+            _require_keys(site, ["site", "users"], "$.virtual_networks[].sites[]")
+            local_dhcp = site.get("dhcp")
+            if local_dhcp is not None:
+                if not isinstance(local_dhcp, Mapping):
+                    raise AllocationError("Local DHCP definition must be an object")
+                if str(local_dhcp.get("mode")) != "local_border":
+                    raise AllocationError("Unsupported DHCP mode")
+                server_device_id = str(local_dhcp.get("server_device_id", ""))
+                server = devices_by_id.get(server_device_id)
+                if server is None or "border" not in set(server.get("roles", [])):
+                    raise AllocationError(
+                        "Local DHCP server {} must be a fabric border device".format(
+                            server_device_id
+                        )
+                    )
+                dhcp_helpers = [str(server["loopback0_ip"])]
+                dhcp = {
+                    "mode": "local_border",
+                    "server_device_id": server_device_id,
+                    "helper_address": str(server["loopback0_ip"]),
+                    "relay_global": True,
+                    "lease_minutes": int(local_dhcp.get("lease_minutes", 60)),
+                    "dns_servers": sorted(str(item) for item in local_dhcp.get("dns_servers", [])),
+                }
+            else:
+                dhcp_helpers = sorted(str(item) for item in site.get("dhcp_helpers", []))
+                if not dhcp_helpers:
+                    raise AllocationError(
+                        "Each virtual-network site must select external DHCP helpers or local_border DHCP"
+                    )
+                dhcp = None
             vlan = reserve_scalar(
                 "vlan_id", int(vlan_range["min"]), int(vlan_range["max"])
             )
@@ -742,9 +773,68 @@ def derive_fabric_intent(
                     "l2_instance_id": l2_id,
                     "prefix": str(prefix),
                     "gateway": str(first_host),
-                    "dhcp_helpers": sorted(str(item) for item in site["dhcp_helpers"]),
+                    "dhcp_helpers": dhcp_helpers,
                 }
             )
+            if dhcp is not None:
+                endpoint_pools[-1]["dhcp"] = dhcp
+
+    endpoint_attachments: List[Dict[str, Any]] = []
+    endpoint_pools_by_key = {
+        (str(item["site"]), str(item["virtual_network"])): item
+        for item in endpoint_pools
+    }
+    fabric_link_interfaces = {
+        (str(endpoint["device_id"]), str(endpoint["interface"]))
+        for link in links
+        for endpoint in link["endpoints"]
+    }
+    attachment_ids = set()
+    attachment_interfaces = set()
+    for raw_attachment in sorted(
+        (copy.deepcopy(item) for item in requirements.get("endpoint_attachments", [])),
+        key=lambda item: str(item.get("id", "")),
+    ):
+        _require_keys(
+            raw_attachment,
+            ["id", "device_id", "interface", "site", "virtual_network"],
+            "$.endpoint_attachments[]",
+        )
+        attachment_id = str(raw_attachment["id"])
+        device_id = str(raw_attachment["device_id"])
+        interface = str(raw_attachment["interface"])
+        site_id = str(raw_attachment["site"])
+        virtual_network = str(raw_attachment["virtual_network"])
+        if attachment_id in attachment_ids:
+            raise AllocationError("Duplicate endpoint attachment id {}".format(attachment_id))
+        if (device_id, interface) in attachment_interfaces:
+            raise AllocationError("Duplicate endpoint attachment interface {} {}".format(device_id, interface))
+        attachment_ids.add(attachment_id)
+        attachment_interfaces.add((device_id, interface))
+        device = devices_by_id.get(device_id)
+        if device is None or "fabric_edge" not in set(device.get("roles", [])):
+            raise AllocationError(
+                "Endpoint attachment {} must reference a fabric-edge device".format(attachment_id)
+            )
+        if str(device.get("site")) != site_id:
+            raise AllocationError("Endpoint attachment {} site does not match device site".format(attachment_id))
+        if (device_id, interface) in fabric_link_interfaces:
+            raise AllocationError("Endpoint attachment {} cannot reuse a fabric link interface".format(attachment_id))
+        pool = endpoint_pools_by_key.get((site_id, virtual_network))
+        if pool is None:
+            raise AllocationError("Endpoint attachment {} references an unknown site virtual network".format(attachment_id))
+        attachment = {
+            "id": attachment_id,
+            "device_id": device_id,
+            "interface": interface,
+            "site": site_id,
+            "virtual_network": virtual_network,
+            "endpoint_pool_id": str(pool["id"]),
+            "vlan_id": int(pool["vlan_id"]),
+        }
+        if raw_attachment.get("description"):
+            attachment["description"] = str(raw_attachment["description"])
+        endpoint_attachments.append(attachment)
 
     environment = str(requirements["metadata"]["environment"])
     redundancy = policy.get("redundancy", {})
@@ -1579,6 +1669,8 @@ def derive_fabric_intent(
         "virtual_networks": virtual_networks,
         "endpoint_pools": endpoint_pools,
     }
+    if endpoint_attachments:
+        intent["endpoint_attachments"] = endpoint_attachments
     intent.update(site_context)
     if str(requirements["schema_version"]) == "1.2":
         intent["fabric"]["control_plane_mode"] = mode
