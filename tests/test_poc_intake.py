@@ -23,6 +23,17 @@ VALID_FORM = {
     "dns_profile": "public_google",
 }
 
+NATIVE_PROMPT_RESPONSE = {
+    "Fabric name": "SJC23 recorded POC",
+    "Change reference": "SJC23-POC-001",
+    "Corporate users": ["150"],
+    "Guest users": ["150"],
+    "Corporate attachment": ["corporate_laptop"],
+    "Guest attachment": ["guest_laptop"],
+    "DHCP lease minutes": ["60"],
+    "DNS profile": ["public_google"],
+}
+
 
 class PocIntakeTests(unittest.TestCase):
     def test_native_prompt_options_are_policy_locked_and_demand_only(self):
@@ -61,3 +72,17 @@ class PocIntakeTests(unittest.TestCase):
             sjc23_poc_requirements(dict(VALID_FORM, corporate_attachment="Gi1/0/1"), POLICY)
         with self.assertRaisesRegex(PocIntakeError, "requires the reviewed"):
             sjc23_poc_requirements(VALID_FORM, {"policy_version": "1.0"})
+
+    def test_native_meraki_prompt_response_is_normalized_at_the_boundary(self):
+        requirements = sjc23_poc_requirements(NATIVE_PROMPT_RESPONSE, POLICY)
+        self.assertEqual("SJC23 recorded POC", requirements["fabric"]["name"])
+        virtual_networks = {item["name"]: item for item in requirements["virtual_networks"]}
+        self.assertEqual(150, virtual_networks["Corporate"]["sites"][0]["users"])
+
+    def test_native_meraki_prompt_response_rejects_multi_select_and_injection(self):
+        multi_select = dict(NATIVE_PROMPT_RESPONSE, **{"Corporate users": ["50", "100"]})
+        with self.assertRaisesRegex(PocIntakeError, "exactly one selected"):
+            sjc23_poc_requirements(multi_select, POLICY)
+        unsafe = dict(NATIVE_PROMPT_RESPONSE, generated_cli="reload")
+        with self.assertRaisesRegex(PocIntakeError, "unsupported fields"):
+            sjc23_poc_requirements(unsafe, POLICY)

@@ -44,6 +44,29 @@ _DNS_PROFILES = {
 _USER_CAPACITY_OPTIONS = ("1", "50", "100", "150", "200")
 _LEASE_MINUTE_OPTIONS = ("30", "60", "120", "240", "480", "1440")
 
+# Meraki native Create Prompt serializes field labels as object keys. Dropdown
+# Select values are returned as a single-item array even when multi-select is
+# disabled. Keep that transport detail at this narrow boundary; every later
+# layer receives the reviewed canonical demand contract only.
+_NATIVE_PROMPT_FIELD_MAP = {
+    "Fabric name": "fabric_name",
+    "Change reference": "change_reference",
+    "Corporate users": "corporate_users",
+    "Guest users": "guest_users",
+    "Corporate attachment": "corporate_attachment",
+    "Guest attachment": "guest_attachment",
+    "DHCP lease minutes": "dhcp_lease_minutes",
+    "DNS profile": "dns_profile",
+}
+_NATIVE_PROMPT_ARRAY_FIELDS = {
+    "Corporate users",
+    "Guest users",
+    "Corporate attachment",
+    "Guest attachment",
+    "DHCP lease minutes",
+    "DNS profile",
+}
+
 
 class PocIntakeError(ValueError):
     """An untrusted form value cannot be converted into POC demand."""
@@ -100,6 +123,44 @@ def _bounded_integer(payload: Mapping[str, Any], field: str, minimum: int, maxim
     return number
 
 
+def _canonical_poc_form_values(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Normalize the exact native Prompt Response shape, or canonical API input.
+
+    The public endpoint remains demand-only. A native form can never add a
+    topology, addressing, credential, or CLI field through this convenience
+    translation, and it may not mix native display labels with canonical API
+    keys. Dropdown arrays must contain exactly one reviewed choice.
+    """
+
+    supplied_keys = set(payload)
+    native_keys = set(_NATIVE_PROMPT_FIELD_MAP)
+    canonical_keys = set(_ALLOWED_FIELDS)
+    uses_native_keys = bool(supplied_keys & native_keys)
+    uses_canonical_keys = bool(supplied_keys & canonical_keys)
+    if uses_native_keys and uses_canonical_keys:
+        raise PocIntakeError("guided POC input cannot mix native prompt labels and canonical fields")
+    if not uses_native_keys:
+        return dict(payload)
+
+    unexpected = sorted(supplied_keys - native_keys)
+    if unexpected:
+        raise PocIntakeError("guided POC input contains unsupported fields: {}".format(", ".join(unexpected)))
+
+    canonical: Dict[str, Any] = {}
+    for native_label, canonical_field in _NATIVE_PROMPT_FIELD_MAP.items():
+        if native_label not in payload:
+            continue
+        value = payload[native_label]
+        if native_label in _NATIVE_PROMPT_ARRAY_FIELDS:
+            if not isinstance(value, list) or len(value) != 1:
+                raise PocIntakeError("{} must contain exactly one selected value".format(native_label))
+            value = value[0]
+        elif isinstance(value, list):
+            raise PocIntakeError("{} must be a single text value".format(native_label))
+        canonical[canonical_field] = value
+    return canonical
+
+
 def sjc23_poc_requirements(payload: Mapping[str, Any], policy: Mapping[str, Any]) -> Dict[str, Any]:
     """Create a canonical SJC23 POC requirements document from form values.
 
@@ -111,6 +172,7 @@ def sjc23_poc_requirements(payload: Mapping[str, Any], policy: Mapping[str, Any]
     _require_sjc23_poc_policy(policy)
     if not isinstance(payload, Mapping):
         raise PocIntakeError("guided POC input must be an object")
+    payload = _canonical_poc_form_values(payload)
     unexpected = sorted(set(payload) - _ALLOWED_FIELDS)
     if unexpected:
         raise PocIntakeError("guided POC input contains unsupported fields: {}".format(", ".join(unexpected)))
