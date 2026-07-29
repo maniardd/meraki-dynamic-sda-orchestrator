@@ -929,6 +929,96 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
             )
         for helper_index, helper in enumerate(helpers):
             _ipv4_address(helper, f"{path}.dhcp_helpers[{helper_index}]", issues)
+        dhcp = pool.get("dhcp")
+        if dhcp is not None:
+            dhcp_path = f"{path}.dhcp"
+            dhcp = _mapping(dhcp, dhcp_path, issues)
+            if dhcp.get("mode") != "local_border":
+                _add(issues, "dhcp.mode", f"{dhcp_path}.mode", "Only local_border DHCP is supported")
+            server_id = _required_string(dhcp, "server_device_id", dhcp_path, issues)
+            helper_address = _ipv4_address(
+                dhcp.get("helper_address"), f"{dhcp_path}.helper_address", issues
+            )
+            if server_id and "border" not in device_roles.get(server_id, set()):
+                _add(
+                    issues,
+                    "dhcp.server.role",
+                    f"{dhcp_path}.server_device_id",
+                    "Local DHCP server must be a fabric border device",
+                )
+            if helper_address and str(helper_address) not in set(str(item) for item in helpers):
+                _add(
+                    issues,
+                    "dhcp.helper.mismatch",
+                    f"{dhcp_path}.helper_address",
+                    "Local DHCP helper address must be present in dhcp_helpers",
+                )
+            if dhcp.get("relay_global") is not True:
+                _add(
+                    issues,
+                    "dhcp.relay_global",
+                    f"{dhcp_path}.relay_global",
+                    "Local border DHCP requires an explicit global relay",
+                )
+            _integer(dhcp, "lease_minutes", dhcp_path, issues, 5, 10080)
+            for dns_index, address in enumerate(
+                _list(dhcp.get("dns_servers"), f"{dhcp_path}.dns_servers", issues)
+            ):
+                _ipv4_address(address, f"{dhcp_path}.dns_servers[{dns_index}]", issues)
+
+    endpoint_attachments = _list(
+        root.get("endpoint_attachments", []), "$.endpoint_attachments", issues
+    )
+    attachment_ids: Dict[str, str] = {}
+    attachment_interfaces: Dict[Tuple[str, str], str] = {}
+    pool_context = {
+        str(item.get("id")): item
+        for item in endpoint_pools
+        if isinstance(item, Mapping) and item.get("id")
+    }
+    link_interfaces = {
+        (str(endpoint.get("device_id")), str(endpoint.get("interface")))
+        for link in _list(root.get("links"), "$.links", issues)
+        if isinstance(link, Mapping)
+        for endpoint in _list(link.get("endpoints"), "$.links[].endpoints", issues)
+        if isinstance(endpoint, Mapping)
+    }
+    for index, raw_attachment in enumerate(endpoint_attachments):
+        path = f"$.endpoint_attachments[{index}]"
+        attachment = _mapping(raw_attachment, path, issues)
+        attachment_id = _required_string(attachment, "id", path, issues)
+        device_id = _required_string(attachment, "device_id", path, issues)
+        interface = _required_string(attachment, "interface", path, issues)
+        site = _required_string(attachment, "site", path, issues)
+        virtual_network = _required_string(attachment, "virtual_network", path, issues)
+        pool_id = _required_string(attachment, "endpoint_pool_id", path, issues)
+        vlan = _integer(attachment, "vlan_id", path, issues, 1, 4094)
+        if attachment_id:
+            _check_duplicate(attachment_ids, attachment_id, f"{path}.id", "endpoint attachment id", issues)
+        if device_id and interface:
+            _check_duplicate(
+                attachment_interfaces,
+                (device_id, interface),
+                f"{path}.interface",
+                "endpoint attachment interface",
+                issues,
+            )
+        if device_id and "fabric_edge" not in device_roles.get(device_id, set()):
+            _add(issues, "attachment.device.role", f"{path}.device_id", "Endpoint attachment must target a fabric-edge device")
+        if device_id and site and device_sites.get(device_id) != site:
+            _add(issues, "attachment.site", f"{path}.site", "Endpoint attachment site must match device site")
+        if (device_id, interface) in link_interfaces:
+            _add(issues, "attachment.interface.fabric_link", f"{path}.interface", "Endpoint attachment cannot reuse a fabric-link interface")
+        pool = pool_context.get(pool_id)
+        if pool is None:
+            _add(issues, "reference.endpoint_pool", f"{path}.endpoint_pool_id", "Unknown endpoint pool")
+        else:
+            if site and str(pool.get("site")) != site:
+                _add(issues, "attachment.pool.site", f"{path}.site", "Endpoint pool site does not match attachment")
+            if virtual_network and str(pool.get("virtual_network")) != virtual_network:
+                _add(issues, "attachment.pool.virtual_network", f"{path}.virtual_network", "Endpoint pool VN does not match attachment")
+            if vlan is not None and int(pool.get("vlan_id", -1)) != vlan:
+                _add(issues, "attachment.pool.vlan", f"{path}.vlan_id", "Endpoint pool VLAN does not match attachment")
 
     handoff_raw = root.get("border_handoff")
     handoff = _mapping(handoff_raw, "$.border_handoff", issues) if handoff_raw is not None else {}

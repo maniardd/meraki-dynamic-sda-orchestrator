@@ -297,7 +297,39 @@
             "type": "array",
             "minItems": 1,
             "items": {"type": "string", "format": "ipv4"}
+          },
+          "dhcp": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mode", "server_device_id", "helper_address", "relay_global", "lease_minutes", "dns_servers"],
+            "properties": {
+              "mode": {"const": "local_border"},
+              "server_device_id": {"type": "string", "minLength": 1},
+              "helper_address": {"type": "string", "format": "ipv4"},
+              "relay_global": {"const": true},
+              "lease_minutes": {"type": "integer", "minimum": 5, "maximum": 10080},
+              "dns_servers": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "format": "ipv4"}}
+            }
           }
+        }
+      }
+    },
+    "endpoint_attachments": {
+      "type": "array",
+      "maxItems": 8192,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "device_id", "interface", "site", "virtual_network", "endpoint_pool_id", "vlan_id"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "device_id": {"type": "string", "minLength": 1},
+          "interface": {"type": "string", "minLength": 1, "maxLength": 128},
+          "site": {"type": "string", "minLength": 1},
+          "virtual_network": {"type": "string", "minLength": 1},
+          "endpoint_pool_id": {"type": "string", "minLength": 1},
+          "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+          "description": {"type": "string", "minLength": 1, "maxLength": 120}
         }
       }
     },

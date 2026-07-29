@@ -317,6 +317,56 @@ class DynamicAllocatorTests(unittest.TestCase):
         self.assertEqual("10.30.200.0/24", pools["Guest"]["prefix"])
         self.assertEqual([100, 200], [pools["Corporate"]["vlan_id"], pools["Guest"]["vlan_id"]])
 
+    def test_local_border_dhcp_and_endpoint_attachments_are_derived(self):
+        candidate = copy.deepcopy(self.requirements)
+        for site in (vn["sites"][0] for vn in candidate["virtual_networks"]):
+            site.pop("dhcp_helpers")
+            site["dhcp"] = {
+                "mode": "local_border",
+                "server_device_id": "border-cp-01",
+                "lease_minutes": 60,
+            }
+        candidate["endpoint_attachments"] = [
+            {
+                "id": "corp-laptop-01",
+                "device_id": "edge-01",
+                "interface": "GigabitEthernet1/0/10",
+                "site": "SITE-001",
+                "virtual_network": "Corporate",
+            },
+            {
+                "id": "guest-laptop-01",
+                "device_id": "edge-01",
+                "interface": "GigabitEthernet1/0/11",
+                "site": "SITE-001",
+                "virtual_network": "Guest",
+            },
+        ]
+        intent = self.derive(candidate)["intent"]
+        pools = {item["virtual_network"]: item for item in intent["endpoint_pools"]}
+        self.assertEqual("local_border", pools["Corporate"]["dhcp"]["mode"])
+        self.assertEqual("10.253.0.0", pools["Corporate"]["dhcp"]["helper_address"])
+        self.assertEqual(["10.253.0.0"], pools["Guest"]["dhcp_helpers"])
+        self.assertEqual(
+            [100, 101], [item["vlan_id"] for item in intent["endpoint_attachments"]]
+        )
+        validation = validate_intent(intent)
+        self.assertTrue(validation.is_valid, validation.as_dict())
+
+    def test_endpoint_attachment_cannot_reuse_the_fabric_link(self):
+        candidate = copy.deepcopy(self.requirements)
+        candidate["endpoint_attachments"] = [
+            {
+                "id": "unsafe-uplink-reuse",
+                "device_id": "edge-01",
+                "interface": "GigabitEthernet1/0/1",
+                "site": "SITE-001",
+                "virtual_network": "Corporate",
+            }
+        ]
+        with self.assertRaisesRegex(AllocationError, "cannot reuse a fabric link"):
+            self.derive(candidate)
+
     def test_pool_exhaustion_fails_without_partial_result(self):
         policy = copy.deepcopy(self.policy)
         policy["supernets"]["underlay_p2p"] = {"cidr": "192.0.2.0/31", "prefix_len": 31}

@@ -29,6 +29,16 @@ EXPECTED_OPERATOR_INPUT_NAMES = {
     "maintenance_start",
     "maintenance_end",
 }
+EXPECTED_OPERATION_REQUEST_FIELDS = {
+    "plan": ["requirements_json", "idempotency_key"],
+    "approve": ["plan_id", "decision", "change_reference", "expires_at"],
+    "adopt_owned_state_baseline": ["fabric_id", "manifest", "evidence_hash", "change_reference", "discovered_by"],
+    "get_owned_state_baseline": ["fabric_id"],
+    "create_run": ["plan_id", "mode", "idempotency_key", "maintenance_window"],
+    "process_dry_run": ["run_id"],
+    "status": ["run_id"],
+    "evidence": ["run_id"],
+}
 EXPECTED_REQUIREMENTS_INTAKE_DIMENSIONS = {
     "site_hierarchy",
     "device_roles_and_links",
@@ -1270,6 +1280,13 @@ def validate_workflow_package(document: Mapping[str, Any]) -> Dict[str, Any]:
             )
         if operation.get("method") != "POST":
             _issue(issues, "operation.method", path + ".method", "Operation must use POST")
+        if operation.get("request_fields") != EXPECTED_OPERATION_REQUEST_FIELDS.get(name):
+            _issue(
+                issues,
+                "operation.request_fields",
+                path + ".request_fields",
+                "Operation request fields must match the pinned API contract",
+            )
         if operation.get("role") not in role_to_target:
             _issue(issues, "operation.role", path + ".role", "Operation role has no target")
         statuses = operation.get("success_statuses") or []

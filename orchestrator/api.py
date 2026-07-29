@@ -392,7 +392,17 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         intent_document = document.get("intent")
         reservation = None
         if not isinstance(intent_document, dict):
-            requirements = document.get("requirements")
+            # Meraki's native Parse JSON action can expose either the parsed
+            # object (``requirements``) or the original prompt value
+            # (``requirements_json``).  Accept both fixed names on this
+            # workflow-only endpoint, but decode at most once and only when
+            # the resulting value is a JSON object.
+            requirements = document.get("requirements", document.get("requirements_json"))
+            if isinstance(requirements, str):
+                try:
+                    requirements = json.loads(requirements)
+                except (TypeError, ValueError):
+                    return jsonify({"error": "requirements_json", "message": "requirements_json must contain one JSON object"}), 422
             if not isinstance(requirements, dict):
                 return jsonify({"error": "intent_or_requirements_required"}), 422
             try:

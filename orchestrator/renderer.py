@@ -452,7 +452,13 @@ def _edge_overlay_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
             " no ip redirects",
         ]
         for helper in pool.get("dhcp_helpers", []):
-            svi.append(" ip helper-address {}".format(_safe(helper, "DHCP helper")))
+            dhcp = pool.get("dhcp") or {}
+            helper_command = " ip helper-address global" if (
+                dhcp.get("mode") == "local_border"
+                and dhcp.get("relay_global") is True
+                and str(dhcp.get("helper_address")) == str(helper)
+            ) else " ip helper-address"
+            svi.append("{} {}".format(helper_command, _safe(helper, "DHCP helper")))
         svi.append(" no shutdown")
         blocks.append(_block("svi_{}".format(vlan), svi))
         lisp_pool_commands = [
@@ -487,6 +493,88 @@ def _edge_overlay_blocks(intent: Mapping[str, Any]) -> List[Dict[str, Any]]:
             _block(
                 "lisp_pool_{}".format(_safe(pool["id"], "pool id")),
                 lisp_pool_commands,
+            )
+        )
+    return blocks
+
+
+def _edge_endpoint_attachment_blocks(
+    intent: Mapping[str, Any], device: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Render demand-selected endpoint ports only on their selected edge.
+
+    The operator supplies a device, physical interface, site, and VN.  VLAN
+    identifiers are allocator outputs and are never accepted from the native
+    Meraki prompt as a free-form configuration value.
+    """
+
+    blocks: List[Dict[str, Any]] = []
+    device_id = str(device["id"])
+    for attachment in sorted(
+        (
+            item
+            for item in intent.get("endpoint_attachments", [])
+            if str(item.get("device_id")) == device_id
+        ),
+        key=lambda item: str(item["id"]),
+    ):
+        description = attachment.get("description") or "SDA endpoint {}".format(
+            attachment["id"]
+        )
+        blocks.append(
+            _block(
+                "endpoint_attachment_{}".format(
+                    _safe(attachment["id"], "endpoint attachment id")
+                ),
+                [
+                    "interface {}".format(
+                        _safe(attachment["interface"], "endpoint interface")
+                    ),
+                    " description {}".format(
+                        _safe(description, "endpoint description", True)
+                    ),
+                    " switchport mode access",
+                    " switchport access vlan {}".format(int(attachment["vlan_id"])),
+                    " spanning-tree portfast",
+                    " no shutdown",
+                ],
+            )
+        )
+    return blocks
+
+
+def _border_local_dhcp_blocks(
+    intent: Mapping[str, Any], device: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Render ledger-derived local DHCP pools on the selected border only."""
+
+    blocks: List[Dict[str, Any]] = []
+    device_id = str(device["id"])
+    for pool in sorted(intent.get("endpoint_pools", []), key=lambda item: str(item["id"])):
+        dhcp = pool.get("dhcp") or {}
+        if (
+            dhcp.get("mode") != "local_border"
+            or str(dhcp.get("server_device_id")) != device_id
+        ):
+            continue
+        prefix = ip_network(str(pool["prefix"]))
+        lease_minutes = int(dhcp["lease_minutes"])
+        days, remainder = divmod(lease_minutes, 1440)
+        hours, minutes = divmod(remainder, 60)
+        pool_name = "SDA-DHCP-{}".format(sha256_json(str(pool["id"]))[:12].upper())
+        commands = [
+            "ip dhcp excluded-address {}".format(_safe(pool["gateway"], "DHCP gateway")),
+            "ip dhcp pool {}".format(pool_name),
+            " network {} {}".format(prefix.network_address, prefix.netmask),
+            " default-router {}".format(_safe(pool["gateway"], "DHCP gateway")),
+            " lease {} {} {}".format(days, hours, minutes),
+        ]
+        for server in sorted(dhcp.get("dns_servers", [])):
+            commands.append(" dns-server {}".format(_safe(server, "DHCP DNS server")))
+        blocks.append(
+            _block(
+                "local_dhcp_{}".format(_safe(pool["id"], "endpoint pool id")),
+                commands,
             )
         )
     return blocks
@@ -1375,6 +1463,16 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
                 "message": "ISE reconciliation, SXP transport, SGACL policy, and edge enforcement are rendered but await ISE API and IOS XE hardware acceptance",
             }
         )
+    if any(
+        (pool.get("dhcp") or {}).get("mode") == "local_border"
+        for pool in intent.get("endpoint_pools", [])
+    ) or intent.get("endpoint_attachments"):
+        blockers.append(
+            {
+                "code": "poc.local_dhcp_and_attachment_hardware_acceptance_pending",
+                "message": "C9500 local DHCP relay and fabric-edge endpoint-port rendering are plan-derived but require controlled IOS XE DHCP, relay, endpoint DHCP, and rollback acceptance before Apply can be enabled",
+            }
+        )
 
     for device in sorted(intent["devices"], key=lambda item: str(item["id"])):
         roles = set(device.get("roles", []))
@@ -1402,6 +1500,7 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
         if "fabric_edge" in roles:
             phases.append({"phase_id": "lisp_edges", "blocks": _edge_lisp_blocks(intent)})
             overlay_blocks = _edge_overlay_blocks(intent)
+            overlay_blocks.extend(_edge_endpoint_attachment_blocks(intent, device))
             if "border" in roles:
                 overlay_blocks.extend(_pubsub_subscriber_blocks(intent, device))
             phases.append({"phase_id": "overlay", "blocks": overlay_blocks})
@@ -1410,7 +1509,8 @@ def render_configuration(intent: Mapping[str, Any], plan: Mapping[str, Any]) -> 
                 {
                     "phase_id": "overlay",
                     "blocks": _vrf_blocks(intent)
-                    + _pubsub_subscriber_blocks(intent, device),
+                    + _pubsub_subscriber_blocks(intent, device)
+                    + _border_local_dhcp_blocks(intent, device),
                 }
             )
         multicast_blocks = _multicast_overlay_blocks(intent, device)

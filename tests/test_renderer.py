@@ -59,6 +59,58 @@ class RendererTests(unittest.TestCase):
         artifact = render_configuration(self.intent, self.plan)
         self.assertEqual([], artifact["blocking_requirements"])
 
+    def test_local_border_dhcp_and_derived_endpoint_ports_are_rendered_but_blocked(self):
+        candidate = copy.deepcopy(self.intent)
+        for pool in candidate["endpoint_pools"]:
+            pool["dhcp_helpers"] = [candidate["devices"][0]["loopback0_ip"]]
+            pool["dhcp"] = {
+                "mode": "local_border",
+                "server_device_id": "border-cp-01",
+                "helper_address": candidate["devices"][0]["loopback0_ip"],
+                "relay_global": True,
+                "lease_minutes": 60,
+                "dns_servers": [],
+            }
+        candidate["endpoint_attachments"] = [
+            {
+                "id": "corp-laptop-01",
+                "device_id": "edge-01",
+                "interface": "GigabitEthernet1/0/10",
+                "site": "SJC23",
+                "virtual_network": "Corporate",
+                "endpoint_pool_id": candidate["endpoint_pools"][0]["id"],
+                "vlan_id": candidate["endpoint_pools"][0]["vlan_id"],
+                "description": "CORP laptop",
+            },
+            {
+                "id": "guest-laptop-01",
+                "device_id": "edge-01",
+                "interface": "GigabitEthernet1/0/11",
+                "site": "SJC23",
+                "virtual_network": "Guest",
+                "endpoint_pool_id": candidate["endpoint_pools"][1]["id"],
+                "vlan_id": candidate["endpoint_pools"][1]["vlan_id"],
+                "description": "GUEST laptop",
+            },
+        ]
+        artifact = render_configuration(candidate, create_plan(candidate))
+        border = str(artifact["devices"]["border-cp-01"])
+        edge = str(artifact["devices"]["edge-01"])
+        self.assertIn("ip dhcp pool SDA-DHCP-", border)
+        self.assertIn(
+            "ip helper-address global {}".format(candidate["devices"][0]["loopback0_ip"]),
+            edge,
+        )
+        self.assertIn("interface GigabitEthernet1/0/10", edge)
+        self.assertIn("switchport access vlan 100", edge)
+        self.assertIn("interface GigabitEthernet1/0/11", edge)
+        self.assertIn("switchport access vlan 200", edge)
+        self.assertIn(
+            "poc.local_dhcp_and_attachment_hardware_acceptance_pending",
+            {item["code"] for item in artifact["blocking_requirements"]},
+        )
+        self.assertFalse(artifact["executable"])
+
     def test_explicit_multicast_and_bfd_are_rendered(self):
         candidate = copy.deepcopy(self.intent)
         candidate["fabric"]["multicast"] = {
