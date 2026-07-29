@@ -41,10 +41,45 @@ _ATTACHMENTS = {
 _DNS_PROFILES = {
     "public_google": ["8.8.8.8", "8.8.4.4"],
 }
+_USER_CAPACITY_OPTIONS = ("1", "50", "100", "150", "200")
+_LEASE_MINUTE_OPTIONS = ("30", "60", "120", "240", "480", "1440")
 
 
 class PocIntakeError(ValueError):
     """An untrusted form value cannot be converted into POC demand."""
+
+
+def _require_sjc23_poc_policy(policy: Mapping[str, Any]) -> None:
+    """Ensure the guided helpers cannot be reused against another policy."""
+
+    if policy.get("policy_version") != SJC23_POC_POLICY_VERSION:
+        raise PocIntakeError("SJC23 guided POC intake requires the reviewed SJC23 POC guardrail policy")
+
+
+def sjc23_poc_form_options(policy: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return native-prompt choices without exposing fabric implementation data.
+
+    Meraki's native Dropdown Select task takes its option array from a variable
+    reference. The fixed arrays here are demand vocabulary only: server-side
+    code still owns the reviewed profile, allocation, and every secret.
+    """
+
+    _require_sjc23_poc_policy(policy)
+    return {
+        "succeeded": True,
+        "status": "poc_options_ready",
+        "policy_version": SJC23_POC_POLICY_VERSION,
+        "options": {
+            "corporate_users": list(_USER_CAPACITY_OPTIONS),
+            "guest_users": list(_USER_CAPACITY_OPTIONS),
+            "corporate_attachment": ["corporate_laptop"],
+            "guest_attachment": ["guest_laptop"],
+            "dhcp_lease_minutes": list(_LEASE_MINUTE_OPTIONS),
+            "dns_profile": list(_DNS_PROFILES),
+        },
+        "contains_secret_values": False,
+        "contains_raw_configuration": False,
+    }
 
 
 def _required_text(payload: Mapping[str, Any], field: str, pattern: re.Pattern[str]) -> str:
@@ -73,8 +108,7 @@ def sjc23_poc_requirements(payload: Mapping[str, Any], policy: Mapping[str, Any]
     convenience endpoint from being used against a customer production policy.
     """
 
-    if policy.get("policy_version") != SJC23_POC_POLICY_VERSION:
-        raise PocIntakeError("SJC23 guided POC intake requires the reviewed SJC23 POC guardrail policy")
+    _require_sjc23_poc_policy(policy)
     if not isinstance(payload, Mapping):
         raise PocIntakeError("guided POC input must be an object")
     unexpected = sorted(set(payload) - _ALLOWED_FIELDS)

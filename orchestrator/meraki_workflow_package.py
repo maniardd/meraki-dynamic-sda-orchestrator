@@ -32,6 +32,7 @@ EXPECTED_OPERATOR_INPUT_NAMES = {
 EXPECTED_OPERATION_REQUEST_FIELDS = {
     "plan": ["requirements_json", "idempotency_key"],
     "poc_guided_plan": ["form_values", "idempotency_key"],
+    "poc_guided_options": [],
     "approve": ["plan_id", "decision", "change_reference", "expires_at"],
     "adopt_owned_state_baseline": ["fabric_id", "manifest", "evidence_hash", "change_reference", "discovered_by"],
     "get_owned_state_baseline": ["fabric_id"],

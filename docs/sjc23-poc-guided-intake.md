@@ -5,19 +5,24 @@ produces a zero-write plan only and does not enable Apply.
 
 ## Native prompt fields
 
-Create a disabled child workflow named **SDA Fabric - SJC23 POC Guided Intake**
-with one Create Prompt task. Operators never paste JSON.
+Create a disabled child workflow named **SDA Fabric - SJC23 POC Guided Intake**.
+Its first task is a Planner-target `POST` HTTP Request to the fixed relative
+path `/v1/workflow-actions/poc-guided-options`, followed by Parse JSON / Set
+Variables. This source is zero-write and exposes only the reviewed demand
+choices. In each native **Dropdown Select**, click **Variable Reference** for
+the Options Array and select the matching parsed option array. Operators never
+paste JSON, addresses, VLANs, interfaces, or credentials.
 
 | Label | Variable | Type | Required | POC value |
 | --- | --- | --- | --- | --- |
 | Fabric name | `fabricName` | Text | Yes | 3–128 letters/numbers/spaces/`._-` |
 | Change reference | `changeReference` | Text | Yes | `SJC23-POC-001` |
-| Corporate capacity | `corporateUsers` | Dropdown | Yes | `150` (range 1–200) |
-| Guest capacity | `guestUsers` | Dropdown | Yes | `150` (range 1–200) |
+| Corporate capacity | `corporateUsers` | Dropdown | Yes | `150` (approved choices 1-200) |
+| Guest capacity | `guestUsers` | Dropdown | Yes | `150` (approved choices 1-200) |
 | Corporate attachment | `corporateAttachment` | Dropdown | Yes | `corporate_laptop` — Edge Gi1/0/10 |
 | Guest attachment | `guestAttachment` | Dropdown | Yes | `guest_laptop` — Edge Gi1/0/11 |
-| DHCP lease | `dhcpLeaseMinutes` | Dropdown | Yes | `60` (range 30–1440) |
-| DNS profile | `dnsProfile` | Dropdown | Yes | `public_google` — 8.8.8.8 / 8.8.4.4 |
+| DHCP lease | `dhcpLeaseMinutes` | Dropdown | Yes | `60` (approved choices 30-1440) |
+| DNS profile | `dnsProfile` | Dropdown | Yes | `public_google` - reviewed public resolver profile |
 
 After the prompt, add a Planner-target `POST` HTTP Request to the fixed
 relative URL `/v1/workflow-actions/poc-guided-plan`. Build the body with native

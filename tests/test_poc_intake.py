@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from orchestrator.poc_intake import PocIntakeError, sjc23_poc_requirements
+from orchestrator.poc_intake import PocIntakeError, sjc23_poc_form_options, sjc23_poc_requirements
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +25,21 @@ VALID_FORM = {
 
 
 class PocIntakeTests(unittest.TestCase):
+    def test_native_prompt_options_are_policy_locked_and_demand_only(self):
+        options = sjc23_poc_form_options(POLICY)
+        self.assertEqual("poc_options_ready", options["status"])
+        self.assertEqual(["1", "50", "100", "150", "200"], options["options"]["corporate_users"])
+        self.assertEqual(["corporate_laptop"], options["options"]["corporate_attachment"])
+        self.assertEqual(["guest_laptop"], options["options"]["guest_attachment"])
+        self.assertEqual(["public_google"], options["options"]["dns_profile"])
+        self.assertFalse(options["contains_secret_values"])
+        self.assertFalse(options["contains_raw_configuration"])
+        rendered = str(options)
+        self.assertNotIn("10.30.100.0", rendered)
+        self.assertNotIn("vlan", rendered.lower())
+        with self.assertRaisesRegex(PocIntakeError, "requires the reviewed"):
+            sjc23_poc_form_options({"policy_version": "1.0"})
+
     def test_guided_form_only_changes_approved_demand_fields(self):
         requirements = sjc23_poc_requirements(VALID_FORM, POLICY)
         self.assertEqual("SJC23 recorded POC", requirements["metadata"]["name"])

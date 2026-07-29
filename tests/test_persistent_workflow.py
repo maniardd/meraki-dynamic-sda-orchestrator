@@ -319,6 +319,42 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual("reserved", body["reservation_state"])
         self.assertGreater(body["allocation_summary"]["network"], 0)
 
+    def test_sjc23_guided_poc_options_are_planner_only_and_secret_free(self):
+        database_path = str(Path(self.temporary_directory.name) / "poc-options.sqlite3")
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_DATABASE_PATH": database_path,
+                "ORCHESTRATOR_GUARDRAILS_PATH": str(SJC23_POC_GUARDRAILS),
+                "ORCHESTRATOR_EXECUTION_ENABLED": False,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(TOKENS["planner-token"]): {
+                        "actor": "meraki-planner", "roles": ["planner"]
+                    },
+                    token_sha256(TOKENS["operator-token"]): {
+                        "actor": "fabric-operator", "roles": ["operator"]
+                    },
+                },
+            }
+        )
+        client = app.test_client()
+        allowed = client.post(
+            "/v1/workflow-actions/poc-guided-options",
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, allowed.status_code, allowed.get_json())
+        body = allowed.get_json()
+        self.assertEqual("poc_options_ready", body["status"])
+        self.assertEqual("corporate_laptop", body["options"]["corporate_attachment"][0])
+        self.assertFalse(body["contains_secret_values"])
+        self.assertFalse(body["contains_raw_configuration"])
+        self.assertNotIn("10.30.100.0", json.dumps(body))
+        denied = client.post(
+            "/v1/workflow-actions/poc-guided-options",
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(403, denied.status_code, denied.get_json())
+
     def test_sjc23_guided_poc_form_rejects_unsafe_or_wrong_policy_input(self):
         payload = {
             "form_values": {
