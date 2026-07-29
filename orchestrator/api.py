@@ -17,7 +17,7 @@ from .allocator import AllocationError
 from .auth import load_hashed_token_identities, match_hashed_principal
 from .intent import validate_intent
 from .planner import PlanValidationError, create_plan
-from .poc_intake import PocIntakeError, sjc23_poc_requirements
+from .poc_intake import PocIntakeError, sjc23_poc_form_options, sjc23_poc_requirements
 from .renderer import RenderError, render_configuration
 from .simulator import process_dry_run
 from .store import (
@@ -521,6 +521,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         except PocIntakeError as exc:
             return jsonify({"error": "poc_guided_intake", "message": str(exc)}), 422
         return plan_from_requirements(requirements, idempotency_key)
+
+    @app.post("/v1/workflow-actions/poc-guided-options")
+    @require_roles("planner")
+    def workflow_action_poc_guided_options():
+        """Fixed native-prompt option source; it never reads or changes fabric state."""
+        try:
+            return jsonify(sjc23_poc_form_options(guardrails())), 200
+        except PocIntakeError as exc:
+            return jsonify({"error": "poc_guided_intake", "message": str(exc)}), 422
 
     @app.get("/v1/intents/<intent_id>")
     @require_roles("viewer", "planner", "approver", "operator")

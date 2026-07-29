@@ -783,6 +783,12 @@ api_operations:
     role: planner
     success_statuses: [200]
     request_fields: [form_values, idempotency_key]
+  poc_guided_options:
+    method: POST
+    path: /v1/workflow-actions/poc-guided-options
+    role: planner
+    success_statuses: [200]
+    request_fields: []
   approve:
     method: POST
     path: /v1/workflow-actions/approve
