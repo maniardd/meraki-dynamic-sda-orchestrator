@@ -1,0 +1,88 @@
+schema_version: "1.0"
+allocation_domain: sjc23-poc-001
+
+metadata:
+  name: SJC23 isolated SDA POC
+  environment: lab
+  organization: SJC23-POC-LAB
+  region: AMER-WEST
+  change_reference: SJC23-POC-001
+
+fabric:
+  id: sjc23-poc-fabric
+  name: SJC23-POC-FABRIC
+  mtu: 9100
+  control_plane_mode: classic_lisp
+  lisp_auth_key_ref: secret://sda-lab/lisp/site-sjc23
+  lisp_site_name: site_sjc23
+  isis_process: SDA-ISIS
+  isis_area: "49.0001"
+
+devices:
+  - id: border-cp-01
+    hostname: SJC23-BORDER-CP-01
+    site: SJC23
+    platform: C9500-48Y4C
+    software_version: 17.18.2
+    management_ip: 192.168.128.9
+    dashboard_management_ip: 192.168.128.9
+    roles: [border, control_plane]
+    credential_ref: secret://sda-lab/devices/border-cp-01
+  - id: edge-01
+    hostname: SJC23-EDGE-01
+    site: SJC23
+    platform: C9300-24P
+    software_version: 17.18.3
+    management_ip: 192.168.128.7
+    dashboard_management_ip: 192.168.128.7
+    roles: [fabric_edge]
+    credential_ref: secret://sda-lab/devices/edge-01
+
+links:
+  - id: border-cp-01--edge-01
+    endpoints:
+      - {device_id: border-cp-01, interface: TwentyFiveGigE1/0/2}
+      - {device_id: edge-01, interface: GigabitEthernet1/0/2}
+    bfd: {enabled: true, interval_ms: 100, min_rx_ms: 100, multiplier: 3}
+
+virtual_networks:
+  - name: Corporate
+    vrf: CORP_VN
+    sites:
+      - site: SJC23
+        users: 150
+        headroom_percent: 25
+        dhcp:
+          mode: local_border
+          server_device_id: border-cp-01
+          lease_minutes: 60
+          dns_servers: [8.8.8.8, 8.8.4.4]
+  - name: Guest
+    vrf: GUEST_VN
+    sites:
+      - site: SJC23
+        users: 150
+        headroom_percent: 25
+        dhcp:
+          mode: local_border
+          server_device_id: border-cp-01
+          lease_minutes: 60
+          dns_servers: [8.8.8.8, 8.8.4.4]
+
+endpoint_attachments:
+  - id: corp-laptop
+    device_id: edge-01
+    interface: GigabitEthernet1/0/10
+    site: SJC23
+    virtual_network: Corporate
+    description: POC CORP DHCP laptop
+  - id: guest-laptop
+    device_id: edge-01
+    interface: GigabitEthernet1/0/11
+    site: SJC23
+    virtual_network: Guest
+    description: POC GUEST DHCP laptop
+
+border_handoff:
+  enabled: false
+  mode: isolated
