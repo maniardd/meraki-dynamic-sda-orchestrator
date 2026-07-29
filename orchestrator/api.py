@@ -17,6 +17,7 @@ from .allocator import AllocationError
 from .auth import load_hashed_token_identities, match_hashed_principal
 from .intent import validate_intent
 from .planner import PlanValidationError, create_plan
+from .poc_intake import PocIntakeError, sjc23_poc_requirements
 from .renderer import RenderError, render_configuration
 from .simulator import process_dry_run
 from .store import (
@@ -163,6 +164,69 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
     def create_state_bound_plan(intent: Mapping[str, Any]) -> Dict[str, Any]:
         fabric_id = str(intent["fabric"]["id"])
         return create_plan(intent, store().latest_owned_state(fabric_id))
+
+    def plan_from_requirements(requirements: Mapping[str, Any], idempotency_key: str):
+        """Reserve, validate, render and persist a planner-owned requirements document."""
+        try:
+            reservation, _created = store().reserve_design(
+                requirements=requirements,
+                policy=guardrails(),
+                idempotency_key=idempotency_key,
+                actor=g.principal["actor"],
+            )
+        except (AllocationError, ValueError) as exc:
+            return jsonify(
+                {
+                    "succeeded": False,
+                    "status": "allocation_failed",
+                    "error": "requirements_unsatisfied",
+                    "message": str(exc),
+                }
+            ), 422
+        intent_document = reservation["intent"]
+        validation = validate_intent(intent_document)
+        if not validation.is_valid:
+            return jsonify(
+                {
+                    "succeeded": False,
+                    "status": "validation_failed",
+                    "validation": validation.as_dict(),
+                }
+            ), 422
+        intent_record, _ = store().save_intent(intent_document, g.principal["actor"])
+        generated = create_state_bound_plan(intent_document)
+        artifact = render_configuration(intent_document, generated)
+        plan_record, _ = store().save_plan(
+            intent_record["intent_id"],
+            generated,
+            g.principal["actor"],
+            artifact_hash=artifact["artifact_hash"],
+            intent_version=str(intent_document["schema_version"]),
+            reservation_id=reservation["reservation_id"],
+        )
+        return jsonify(
+            {
+                "succeeded": True,
+                "status": "plan_ready",
+                "intent_id": intent_record["intent_id"],
+                "intent_hash": intent_record["intent_hash"],
+                "plan_id": plan_record["plan_id"],
+                "plan_hash": plan_record["plan_hash"],
+                "artifact_hash": artifact["artifact_hash"],
+                "blocking_requirements": artifact["blocking_requirements"],
+                "device_count": len(artifact["devices"]),
+                "validation": validation.as_dict(),
+                "reservation_id": reservation["reservation_id"],
+                "reservation_state": reservation["state"],
+                "requirements_hash": reservation["requirements_hash"],
+                "policy_hash": reservation["policy_hash"],
+                "reservation_hash": reservation["reservation_hash"],
+                "allocation_summary": {
+                    "network": len(reservation["network_allocations"]),
+                    "scalar": len(reservation["scalar_allocations"]),
+                },
+            }
+        ), 200
 
     @app.before_request
     def authorize_v1_requests():
@@ -390,7 +454,6 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
         if error:
             return error
         intent_document = document.get("intent")
-        reservation = None
         if not isinstance(intent_document, dict):
             # Meraki's native Parse JSON action can expose either the parsed
             # object (``requirements``) or the original prompt value
@@ -405,23 +468,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                     return jsonify({"error": "requirements_json", "message": "requirements_json must contain one JSON object"}), 422
             if not isinstance(requirements, dict):
                 return jsonify({"error": "intent_or_requirements_required"}), 422
-            try:
-                reservation, _created = store().reserve_design(
-                    requirements=requirements,
-                    policy=guardrails(),
-                    idempotency_key=str(document.get("idempotency_key", "")),
-                    actor=g.principal["actor"],
-                )
-            except (AllocationError, ValueError) as exc:
-                return jsonify(
-                    {
-                        "succeeded": False,
-                        "status": "allocation_failed",
-                        "error": "requirements_unsatisfied",
-                        "message": str(exc),
-                    }
-                ), 422
-            intent_document = reservation["intent"]
+            return plan_from_requirements(requirements, str(document.get("idempotency_key", "")))
         validation = validate_intent(intent_document)
         if not validation.is_valid:
             return jsonify(
@@ -440,7 +487,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             g.principal["actor"],
             artifact_hash=artifact["artifact_hash"],
             intent_version=str(intent_document["schema_version"]),
-            reservation_id=reservation["reservation_id"] if reservation else None,
+            reservation_id=None,
         )
         response = {
                 "succeeded": True,
@@ -454,21 +501,26 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 "device_count": len(artifact["devices"]),
                 "validation": validation.as_dict(),
             }
-        if reservation:
-            response.update(
-                {
-                    "reservation_id": reservation["reservation_id"],
-                    "reservation_state": reservation["state"],
-                    "requirements_hash": reservation["requirements_hash"],
-                    "policy_hash": reservation["policy_hash"],
-                    "reservation_hash": reservation["reservation_hash"],
-                    "allocation_summary": {
-                        "network": len(reservation["network_allocations"]),
-                        "scalar": len(reservation["scalar_allocations"]),
-                    },
-                }
-            )
         return jsonify(response), 200
+
+    @app.post("/v1/workflow-actions/poc-guided-plan")
+    @require_roles("planner")
+    def workflow_action_poc_guided_plan():
+        """POC-only native-prompt adapter; it never accepts topology or secrets."""
+        document, error = workflow_json_object()
+        if error:
+            return error
+        form_values = document.get("form_values")
+        idempotency_key = document.get("idempotency_key")
+        if not isinstance(form_values, dict):
+            return jsonify({"error": "form_values", "message": "form_values object required"}), 422
+        if not isinstance(idempotency_key, str) or REQUEST_ID.fullmatch(idempotency_key) is None:
+            return jsonify({"error": "idempotency_key", "message": "valid idempotency_key required"}), 422
+        try:
+            requirements = sjc23_poc_requirements(form_values, guardrails())
+        except PocIntakeError as exc:
+            return jsonify({"error": "poc_guided_intake", "message": str(exc)}), 422
+        return plan_from_requirements(requirements, idempotency_key)
 
     @app.get("/v1/intents/<intent_id>")
     @require_roles("viewer", "planner", "approver", "operator")

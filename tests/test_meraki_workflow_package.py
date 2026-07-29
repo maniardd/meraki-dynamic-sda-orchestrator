@@ -116,6 +116,19 @@ class MerakiWorkflowPackageTests(unittest.TestCase):
         self.assertFalse(result["safe_to_build"])
         self.assertIn("operation.request_fields", {item["code"] for item in result["issues"]})
 
+    def test_poc_guided_plan_has_a_separate_pinned_demand_only_contract(self):
+        self.assertEqual(
+            ["form_values", "idempotency_key"],
+            self.document["api_operations"]["poc_guided_plan"]["request_fields"],
+        )
+        candidate = copy.deepcopy(self.document)
+        candidate["api_operations"]["poc_guided_plan"]["request_fields"].append(
+            "generated_cli"
+        )
+        result = validate_workflow_package(candidate)
+        self.assertFalse(result["safe_to_build"])
+        self.assertIn("operation.request_fields", {item["code"] for item in result["issues"]})
+
     def test_native_approval_acknowledgement_and_expiry_binding_fail_closed(self):
         mutations = (
             ("require_checkbox", "", "approval.acknowledgement"),
