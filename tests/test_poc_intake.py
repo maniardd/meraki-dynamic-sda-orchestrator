@@ -34,6 +34,17 @@ NATIVE_PROMPT_RESPONSE = {
     "DNS profile": ["public_google"],
 }
 
+NATIVE_PROMPT_TEXT_FALLBACK = {
+    "Fabric name": "SJC23 recorded POC",
+    "Change reference": "SJC23-POC-001",
+    "Corporate users": "150",
+    "Guest users": "150",
+    "Corporate attachment": "corporate_laptop",
+    "Guest attachment": "guest_laptop",
+    "DHCP lease minutes": "60",
+    "DNS profile": "public_google",
+}
+
 
 class PocIntakeTests(unittest.TestCase):
     def test_native_prompt_options_are_policy_locked_and_demand_only(self):
@@ -78,6 +89,20 @@ class PocIntakeTests(unittest.TestCase):
         self.assertEqual("SJC23 recorded POC", requirements["fabric"]["name"])
         virtual_networks = {item["name"]: item for item in requirements["virtual_networks"]}
         self.assertEqual(150, virtual_networks["Corporate"]["sites"][0]["users"])
+
+    def test_native_prompt_text_fallback_is_equally_demand_only(self):
+        requirements = sjc23_poc_requirements(NATIVE_PROMPT_TEXT_FALLBACK, POLICY)
+        self.assertEqual("SJC23 recorded POC", requirements["fabric"]["name"])
+        virtual_networks = {item["name"]: item for item in requirements["virtual_networks"]}
+        self.assertEqual(150, virtual_networks["Corporate"]["sites"][0]["users"])
+        with self.assertRaisesRegex(PocIntakeError, "approved Corporate laptop"):
+            sjc23_poc_requirements(
+                dict(NATIVE_PROMPT_TEXT_FALLBACK, **{"Corporate attachment": "reload"}), POLICY
+            )
+        with self.assertRaisesRegex(PocIntakeError, "reviewed text value or one selected value"):
+            sjc23_poc_requirements(
+                dict(NATIVE_PROMPT_TEXT_FALLBACK, **{"Corporate users": {"value": "150"}}), POLICY
+            )
 
     def test_native_meraki_prompt_response_rejects_multi_select_and_injection(self):
         multi_select = dict(NATIVE_PROMPT_RESPONSE, **{"Corporate users": ["50", "100"]})

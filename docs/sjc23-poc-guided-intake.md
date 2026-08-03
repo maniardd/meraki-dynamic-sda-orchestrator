@@ -13,6 +13,18 @@ choices. In each native **Dropdown Select**, click **Variable Reference** for
 the Options Array and select the matching parsed option array. Operators never
 paste JSON, addresses, VLANs, interfaces, or credentials.
 
+### Current SJC23 tenant fallback
+
+The current SJC23 tenant fails before creating a task when a Create Prompt
+dropdown consumes a dynamically produced Options Array. Until Cisco resolves
+that tenant/runtime behavior, configure the six reviewed-choice fields below
+as **Text** fields instead. This is a POC UI fallback, not a relaxation of the
+guardrail: the API accepts only the exact reviewed values and rejects any other
+value, including CLI, IP addressing, VLAN, topology, or credential input. Keep
+**Fabric name** and **Change reference** as Text fields. Return to Dropdown
+Select only after a zero-write native task acceptance test passes in the target
+tenant.
+
 | Label | Variable | Type | Required | POC value |
 | --- | --- | --- | --- | --- |
 | Fabric name | `fabricName` | Text | Yes | 3–128 letters/numbers/spaces/`._-` |
@@ -29,7 +41,7 @@ relative URL `/v1/workflow-actions/poc-guided-plan`. Bind the whole native
 **Prompt Response** object to `form_values`; do not reconstruct JSON one field
 at a time and do not use quoted string interpolation. The API accepts exactly
 the eight reviewed display labels above and normalizes native single-select
-arrays at its boundary:
+arrays, or the reviewed scalar Text fallback, at its boundary:
 
 ```json
 {
