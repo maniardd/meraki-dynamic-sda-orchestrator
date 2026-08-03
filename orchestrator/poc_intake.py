@@ -44,10 +44,13 @@ _DNS_PROFILES = {
 _USER_CAPACITY_OPTIONS = ("1", "50", "100", "150", "200")
 _LEASE_MINUTE_OPTIONS = ("30", "60", "120", "240", "480", "1440")
 
-# Meraki native Create Prompt serializes field labels as object keys. Dropdown
-# Select values are returned as a single-item array even when multi-select is
-# disabled. Keep that transport detail at this narrow boundary; every later
-# layer receives the reviewed canonical demand contract only.
+# Meraki native Create Prompt serializes field labels as object keys. A native
+# Dropdown Select returns a single-item array when multi-select is disabled.
+# Some tenant releases cannot create a task whose Dropdown Select Options Array
+# is dynamically sourced from a prior activity; the reviewed POC then uses a
+# Text field for the same restricted choice. Accept either transport shape at
+# this narrow boundary, while every later layer still validates the exact
+# reviewed value and receives only the canonical demand contract.
 _NATIVE_PROMPT_FIELD_MAP = {
     "Fabric name": "fabric_name",
     "Change reference": "change_reference",
@@ -152,9 +155,12 @@ def _canonical_poc_form_values(payload: Mapping[str, Any]) -> Dict[str, Any]:
             continue
         value = payload[native_label]
         if native_label in _NATIVE_PROMPT_ARRAY_FIELDS:
-            if not isinstance(value, list) or len(value) != 1:
-                raise PocIntakeError("{} must contain exactly one selected value".format(native_label))
-            value = value[0]
+            if isinstance(value, list):
+                if len(value) != 1:
+                    raise PocIntakeError("{} must contain exactly one selected value".format(native_label))
+                value = value[0]
+            elif not isinstance(value, str):
+                raise PocIntakeError("{} must be a reviewed text value or one selected value".format(native_label))
         elif isinstance(value, list):
             raise PocIntakeError("{} must be a single text value".format(native_label))
         canonical[canonical_field] = value
