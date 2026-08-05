@@ -35,6 +35,56 @@ _EXPECTED_PHASES = {
 }
 
 
+def authorize_sjc23_poc_execution(
+    intent: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    artifact: Mapping[str, Any],
+    policy: Mapping[str, Any],
+    authorization: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the sole narrowly-scoped exception usable by the POC worker.
+
+    This function never removes a blocker from the artifact and never opens a
+    device connection.  It only proves that a worker may treat the *single*
+    local-DHCP/attachment acceptance blocker as authorized for one immutable
+    SJC23 plan.  Any other blocker, policy, topology, plan, or artifact drift
+    stays fail-closed.
+    """
+
+    _require(isinstance(authorization, Mapping), "POC execution authorization must be an object")
+    _require(
+        set(authorization) == {"change_reference", "plan_hash", "artifact_hash"},
+        "POC execution authorization has unsupported fields",
+    )
+    _require(
+        str(authorization.get("change_reference", "")) == _CHANGE_REFERENCE,
+        "SJC23 POC execution change reference is required",
+    )
+    _require(
+        str(authorization.get("plan_hash", "")) == str(plan.get("plan_hash", "")),
+        "POC execution authorization does not match the plan hash",
+    )
+    _require(
+        str(authorization.get("artifact_hash", "")) == str(artifact.get("artifact_hash", "")),
+        "POC execution authorization does not match the artifact hash",
+    )
+
+    preview = build_sjc23_poc_deployment_preview(intent, plan, artifact, policy)
+    blockers = list(preview["blocking_requirements"])
+    _require(
+        blockers == [_REQUIRED_BLOCKER],
+        "SJC23 POC execution permits only the local-DHCP/attachment blocker",
+    )
+    return {
+        "scope": str(preview["scope"]),
+        "change_reference": _CHANGE_REFERENCE,
+        "plan_hash": str(plan["plan_hash"]),
+        "artifact_hash": str(artifact["artifact_hash"]),
+        "allowed_blocker_codes": [_REQUIRED_BLOCKER],
+        "deployment_authorized": False,
+    }
+
+
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise PocExecutionError(message)

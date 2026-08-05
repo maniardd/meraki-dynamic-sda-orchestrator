@@ -37,6 +37,23 @@ def _resolve_commands(commands: List[str], resolver: Callable[[str], str]) -> Li
     return resolved
 
 
+def _unresolved_blocker_codes(
+    blockers: Any, allowed_blocker_codes: Optional[List[str]] = None
+) -> List[str]:
+    """Return non-authorized blockers, treating malformed entries as blocking."""
+
+    allowed = {str(code) for code in (allowed_blocker_codes or [])}
+    unresolved = []
+    for blocker in list(blockers or []):
+        if not isinstance(blocker, Mapping):
+            unresolved.append("")
+            continue
+        code = str(blocker.get("code", ""))
+        if not code or code not in allowed:
+            unresolved.append(code)
+    return sorted(unresolved)
+
+
 class TransactionWorker:
     def __init__(
         self,
@@ -83,6 +100,7 @@ class TransactionWorker:
         intent: Mapping[str, Any],
         plan: Mapping[str, Any],
         artifact: Mapping[str, Any],
+        allowed_blocker_codes: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         run = self.store.get_run(run_id)
         if run["mode"] != "apply" or run["status"] != "apply_queued":
@@ -100,12 +118,18 @@ class TransactionWorker:
             or str(plan.get("plan_hash")) != str(run["plan_hash"])
         ):
             raise ConflictError("Plan integrity or run binding check failed")
-        if artifact.get("blocking_requirements"):
+        unresolved_blocker_codes = _unresolved_blocker_codes(
+            artifact.get("blocking_requirements"), allowed_blocker_codes
+        )
+        if unresolved_blocker_codes:
             updated = self.store.transition_run(
                 run_id,
                 "apply_failed",
                 self.actor,
-                {"reason": "artifact_has_blocking_requirements"},
+                {
+                    "reason": "artifact_has_blocking_requirements",
+                    "unresolved_blocker_codes": unresolved_blocker_codes,
+                },
             )
             return {"succeeded": False, "run": updated, "rolled_back": False}
 

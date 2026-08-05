@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+from pathlib import Path
 from typing import Any, Mapping
+
+import yaml
 
 from .adapters import IosXeSshAdapter
 from .ise import IseErsAdapter
@@ -13,6 +17,7 @@ from .renderer import render_configuration
 from .secrets import build_secret_provider
 from .store import create_state_store
 from .worker import TransactionWorker
+from .poc_execution import PocExecutionError, authorize_sjc23_poc_execution
 
 
 class WorkerRuntimeError(RuntimeError):
@@ -21,6 +26,50 @@ class WorkerRuntimeError(RuntimeError):
 
 def _enabled(name: str, environment: Mapping[str, str]) -> bool:
     return str(environment.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _sjc23_poc_authorization(
+    environment: Mapping[str, str],
+    intent: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    artifact: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Return the one blocker a separately-enabled SJC23 worker may consume."""
+
+    if not _enabled("ORCHESTRATOR_SJC23_POC_EXECUTION_ENABLED", environment):
+        return {"allowed_blocker_codes": []}
+    policy_path = Path(str(environment.get("ORCHESTRATOR_GUARDRAILS_PATH", "")).strip())
+    if not policy_path.is_file() or policy_path.is_symlink():
+        raise WorkerRuntimeError("SJC23 POC execution requires a regular guardrails file")
+    try:
+        policy_bytes = policy_path.read_bytes()
+        expected_policy_sha256 = str(
+            environment.get("ORCHESTRATOR_SJC23_POC_GUARDRAILS_SHA256", "")
+        ).strip().lower()
+        if (
+            len(expected_policy_sha256) != 64
+            or expected_policy_sha256 != hashlib.sha256(policy_bytes).hexdigest()
+        ):
+            raise WorkerRuntimeError("SJC23 POC guardrails hash did not match the approved value")
+        policy = yaml.safe_load(policy_bytes.decode("utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise WorkerRuntimeError("SJC23 POC guardrails could not be loaded") from exc
+    if not isinstance(policy, Mapping):
+        raise WorkerRuntimeError("SJC23 POC guardrails must be an object")
+    try:
+        return authorize_sjc23_poc_execution(
+            intent,
+            plan,
+            artifact,
+            policy,
+            {
+                "change_reference": str(environment.get("ORCHESTRATOR_SJC23_POC_CHANGE_REFERENCE", "")),
+                "plan_hash": str(environment.get("ORCHESTRATOR_SJC23_POC_PLAN_HASH", "")),
+                "artifact_hash": str(environment.get("ORCHESTRATOR_SJC23_POC_ARTIFACT_HASH", "")),
+            },
+        )
+    except PocExecutionError as exc:
+        raise WorkerRuntimeError("SJC23 POC authorization was rejected") from exc
 
 
 def process_run(run_id: str, environment: Mapping[str, str]) -> Mapping[str, Any]:
@@ -46,6 +95,13 @@ def process_run(run_id: str, environment: Mapping[str, str]) -> Mapping[str, Any
     if artifact["artifact_hash"] != plan_record["artifact_hash"]:
         raise WorkerRuntimeError("Rendered artifact hash changed after approval")
 
+    poc_authorization = _sjc23_poc_authorization(
+        environment,
+        intent_record["document"],
+        plan_record["document"],
+        artifact,
+    )
+
     secrets = build_secret_provider(environment)
 
     def adapter_factory(device):
@@ -70,6 +126,7 @@ def process_run(run_id: str, environment: Mapping[str, str]) -> Mapping[str, Any
         intent_record["document"],
         plan_record["document"],
         artifact,
+        allowed_blocker_codes=list(poc_authorization["allowed_blocker_codes"]),
     )
 
 
