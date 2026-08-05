@@ -62,3 +62,26 @@ cross-VN communication is neither requested nor enabled here.
 
 This endpoint refuses to run unless policy version `1.0-sjc23-poc` is active.
 It is not a generic production intake endpoint.
+
+## Review result: POC deployment preview
+
+On a successful guided-plan response, the planner also returns
+`poc_deployment_preview`. Bind this object to a non-blocking **Create Prompt**
+or final summary in the Meraki child workflow. It is a safe recording and
+review surface, not an Apply control.
+
+The preview shows only these approved facts:
+
+- the C9500 Border/Control-Plane and C9300 Fabric-Edge roles;
+- the IS-IS `/31` fabric link and its two link IP addresses;
+- Corporate and Guest VRF names, VLANs, endpoint pools, gateways, DHCP mode,
+  lease and DNS profile;
+- the two selected edge attachment ports;
+- phase names, command counts and SHA-256 command-block hashes for each
+  device; and
+- the plan/artifact hashes and active blocking requirements.
+
+It intentionally never returns IOS XE command text, secret references, device
+credentials, or an Apply authorization. `deployment_authorized` must remain
+`false`; the local-DHCP-and-attachments hardware-acceptance blocker remains in
+the response until a separately reviewed POC execution path is approved.
