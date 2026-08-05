@@ -12,7 +12,7 @@ from orchestrator.intent import load_intent
 from orchestrator.planner import create_plan
 from orchestrator.renderer import render_configuration
 from orchestrator.store import ConflictError, StateStore, isoformat
-from orchestrator.worker import TransactionWorker
+from orchestrator.worker import TransactionWorker, _unresolved_blocker_codes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +181,24 @@ class TransactionWorkerTests(unittest.TestCase):
         )
         self.assertTrue(created)
         self.assertEqual("apply_queued", replacement["status"])
+
+    def test_only_an_explicitly_named_blocker_can_be_consumed(self):
+        blockers = [
+            {"code": "poc.local_dhcp_and_attachment_hardware_acceptance_pending"},
+            {"code": "another.required.blocker"},
+            {"missing": "code"},
+            "malformed",
+        ]
+        self.assertEqual(
+            ["", "", "another.required.blocker", "poc.local_dhcp_and_attachment_hardware_acceptance_pending"],
+            _unresolved_blocker_codes(blockers),
+        )
+        self.assertEqual(
+            ["", "", "another.required.blocker"],
+            _unresolved_blocker_codes(
+                blockers, ["poc.local_dhcp_and_attachment_hardware_acceptance_pending"]
+            ),
+        )
 
     def use_dynamic_plan(self, suffix):
         requirements = yaml.safe_load(REQUIREMENTS.read_text(encoding="utf-8"))

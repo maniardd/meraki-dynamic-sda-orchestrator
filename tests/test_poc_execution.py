@@ -11,7 +11,11 @@ from orchestrator.api import create_app
 from orchestrator.allocator import derive_fabric_intent
 from orchestrator.auth import token_sha256
 from orchestrator.planner import create_plan
-from orchestrator.poc_execution import PocExecutionError, build_sjc23_poc_deployment_preview
+from orchestrator.poc_execution import (
+    PocExecutionError,
+    authorize_sjc23_poc_execution,
+    build_sjc23_poc_deployment_preview,
+)
 from orchestrator.renderer import RenderError, render_configuration
 
 
@@ -42,6 +46,44 @@ def _candidate():
 
 
 class PocExecutionPreviewTests(unittest.TestCase):
+    def test_execution_authorization_allows_only_the_hash_bound_poc_blocker(self):
+        intent, plan, artifact = _candidate()
+        authorization = authorize_sjc23_poc_execution(
+            intent,
+            plan,
+            artifact,
+            POLICY,
+            {
+                "change_reference": "SJC23-POC-001",
+                "plan_hash": plan["plan_hash"],
+                "artifact_hash": artifact["artifact_hash"],
+            },
+        )
+
+        self.assertEqual("sjc23_isolated_two_node", authorization["scope"])
+        self.assertEqual(
+            ["poc.local_dhcp_and_attachment_hardware_acceptance_pending"],
+            authorization["allowed_blocker_codes"],
+        )
+        self.assertFalse(authorization["deployment_authorized"])
+
+    def test_execution_authorization_fails_closed_for_hash_or_blocker_drift(self):
+        intent, plan, artifact = _candidate()
+        valid = {
+            "change_reference": "SJC23-POC-001",
+            "plan_hash": plan["plan_hash"],
+            "artifact_hash": artifact["artifact_hash"],
+        }
+        wrong_hash = dict(valid, artifact_hash="0" * 64)
+        with self.assertRaisesRegex(PocExecutionError, "artifact hash"):
+            authorize_sjc23_poc_execution(intent, plan, artifact, POLICY, wrong_hash)
+
+        extra_blocker = copy.deepcopy(artifact)
+        extra_blocker["blocking_requirements"].append({"code": "unexpected.blocker"})
+        extra_blocker["artifact_hash"] = artifact["artifact_hash"]
+        with self.assertRaisesRegex(PocExecutionError, "only the local-DHCP"):
+            authorize_sjc23_poc_execution(intent, plan, extra_blocker, POLICY, valid)
+
     def test_preview_is_poc_scoped_secret_free_and_non_executable(self):
         intent, plan, artifact = _candidate()
         preview = build_sjc23_poc_deployment_preview(intent, plan, artifact, POLICY)
