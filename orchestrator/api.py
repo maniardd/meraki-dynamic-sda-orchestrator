@@ -18,6 +18,10 @@ from .auth import load_hashed_token_identities, match_hashed_principal
 from .intent import validate_intent
 from .planner import PlanValidationError, create_plan
 from .poc_intake import PocIntakeError, sjc23_poc_form_options, sjc23_poc_requirements
+from .poc_execution import (
+    PocExecutionError,
+    build_sjc23_poc_deployment_preview,
+)
 from .renderer import RenderError, render_configuration
 from .simulator import process_dry_run
 from .store import (
@@ -520,7 +524,23 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             requirements = sjc23_poc_requirements(form_values, guardrails())
         except PocIntakeError as exc:
             return jsonify({"error": "poc_guided_intake", "message": str(exc)}), 422
-        return plan_from_requirements(requirements, idempotency_key)
+        response, status = plan_from_requirements(requirements, idempotency_key)
+        if status != 200:
+            return response, status
+        result = response.get_json()
+        try:
+            intent_record = store().get_intent(str(result["intent_id"]))
+            plan_record = store().get_plan(str(result["plan_id"]))
+            artifact = render_configuration(intent_record["document"], plan_record["document"])
+            result["poc_deployment_preview"] = build_sjc23_poc_deployment_preview(
+                intent_record["document"],
+                plan_record["document"],
+                artifact,
+                guardrails(),
+            )
+        except (PocExecutionError, RenderError, StoreError) as exc:
+            return jsonify({"error": "poc_deployment_preview", "message": str(exc)}), 422
+        return jsonify(result), 200
 
     @app.post("/v1/workflow-actions/poc-guided-options")
     @require_roles("planner")
