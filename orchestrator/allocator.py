@@ -1655,6 +1655,7 @@ def derive_fabric_intent(
             "name": str(fabric["name"]),
             "underlay_protocol": "isis",
             "mtu": int(fabric["mtu"]),
+            "mtu_headroom": int(fabric.get("mtu_headroom", 50)),
             "isis_process": str(fabric.get("isis_process", "SDA-ISIS")),
             "isis_area": str(fabric.get("isis_area", "49.0001")),
         },

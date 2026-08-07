@@ -210,5 +210,38 @@ class PocExecutionPreviewTests(unittest.TestCase):
         self.assertEqual("poc_deployment_preview", response.get_json()["error"])
 
 
+    def test_preview_includes_loopback_ip_for_each_device(self):
+        intent, plan, artifact = _candidate()
+        preview = build_sjc23_poc_deployment_preview(intent, plan, artifact, POLICY)
+        for device_entry in preview["devices"]:
+            self.assertIn("loopback_ip", device_entry)
+            self.assertTrue(
+                device_entry["loopback_ip"],
+                "loopback_ip is empty for {}".format(device_entry["device_id"]),
+            )
+
+    def test_preview_includes_l2_and_l3_vni_per_virtual_network(self):
+        intent, plan, artifact = _candidate()
+        preview = build_sjc23_poc_deployment_preview(intent, plan, artifact, POLICY)
+        for vn_entry in preview["virtual_networks"]:
+            self.assertIn("l2_vni", vn_entry, vn_entry["virtual_network"])
+            self.assertIn("l3_vni", vn_entry, vn_entry["virtual_network"])
+            self.assertGreater(vn_entry["l2_vni"], 0, vn_entry["virtual_network"])
+            self.assertGreater(vn_entry["l3_vni"], 0, vn_entry["virtual_network"])
+
+    def test_preview_includes_vni_vlan_map(self):
+        intent, plan, artifact = _candidate()
+        preview = build_sjc23_poc_deployment_preview(intent, plan, artifact, POLICY)
+        self.assertIn("vni_vlan_map", preview)
+        self.assertTrue(preview["vni_vlan_map"])
+        for entry in preview["vni_vlan_map"]:
+            self.assertIn("virtual_network", entry)
+            self.assertIn("vlan_id", entry)
+            self.assertIn("l2_vni", entry)
+            self.assertIn("l3_vni", entry)
+            self.assertGreater(entry["l2_vni"], 0)
+            self.assertGreater(entry["l3_vni"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
