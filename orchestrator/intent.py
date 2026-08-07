@@ -483,6 +483,8 @@ def validate_intent(document: Mapping[str, Any]) -> ValidationResult:
             "An MTU of at least 9100 is recommended for the validated VXLAN design",
             "warning",
         )
+    if fabric.get("mtu_headroom") is not None:
+        _integer(fabric, "mtu_headroom", "$.fabric", issues, 0, 500)
     multicast_raw = fabric.get("multicast")
     if multicast_raw is not None:
         multicast = _mapping(multicast_raw, "$.fabric.multicast", issues)

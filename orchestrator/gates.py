@@ -7,9 +7,11 @@ from typing import Any, Dict, List, Mapping
 
 from .parsers import (
     GateResult,
+    verify_bfd_neighbors,
     verify_config_lines_absent,
     verify_bgp_neighbors,
     verify_exact_config_lines,
+    verify_interface_mtu,
     verify_isis_neighbors,
     verify_ios_xe_license_level,
     verify_ios_xe_version,
@@ -154,6 +156,36 @@ def build_gate_plan(
                 "blocking": True,
             }
         )
+        for link in sorted(intent.get("links", []), key=lambda item: str(item["id"])):
+            local_ep = next(
+                (ep for ep in link["endpoints"] if str(ep["device_id"]) == device_id),
+                None,
+            )
+            if local_ep is None:
+                continue
+            gates.append(
+                {
+                    "gate_id": "underlay.mtu.{}.{}".format(device_id, str(link["id"])),
+                    "phase_id": "underlay",
+                    "device_id": device_id,
+                    "command": "show interfaces {}".format(str(local_ep["interface"])),
+                    "evaluator": "interface_mtu",
+                    "expected": {"expected_mtu": int(intent["fabric"]["mtu"])},
+                    "blocking": True,
+                }
+            )
+        if incident_links[device_id] > 0:
+            gates.append(
+                {
+                    "gate_id": "underlay.bfd.{}".format(device_id),
+                    "phase_id": "underlay",
+                    "device_id": device_id,
+                    "command": "show bfd neighbors",
+                    "evaluator": "bfd_neighbors",
+                    "expected": {"minimum_up": incident_links[device_id]},
+                    "blocking": True,
+                }
+            )
         if "fabric_edge" in roles:
             gates.append(
                 {
@@ -735,4 +767,8 @@ def evaluate_gate(gate: Mapping[str, Any], output: str) -> GateResult:
         return verify_bgp_neighbors(output, list(expected["neighbors"]))
     if evaluator == "route_prefix":
         return verify_route_prefix(output, str(expected["prefix"]))
+    if evaluator == "interface_mtu":
+        return verify_interface_mtu(output, int(expected["expected_mtu"]))
+    if evaluator == "bfd_neighbors":
+        return verify_bfd_neighbors(output, int(expected["minimum_up"]))
     return GateResult(False, "Unknown evaluator {}".format(evaluator), {"evaluator": evaluator})

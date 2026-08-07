@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 
 from orchestrator.parsers import (
+    verify_bfd_neighbors,
     verify_bgp_neighbors,
     verify_exact_config_lines,
+    verify_interface_mtu,
     verify_isis_neighbors,
     verify_ios_xe_license_level,
     verify_lisp_identity,
@@ -312,6 +314,51 @@ Neighbor        V    AS MsgRcvd MsgSent TblVer InQ OutQ Up/Down State/PfxRcd
         self.assertFalse(
             verify_route_prefix("% Network not in table", "203.0.113.0/26").passed
         )
+
+
+    def test_verify_bfd_neighbors_pass(self):
+        output = (
+            "IPv4 Sessions\n"
+            "NeighAddr                              LD/RD         RH/RS     State     Int\n"
+            "10.255.0.1                           4097/4097     Up        Up        Twe1/0/2\n"
+        )
+        result = verify_bfd_neighbors(output, minimum_up=1)
+        self.assertTrue(result.passed)
+        self.assertEqual(1, result.observations["up_session_count"])
+
+    def test_verify_bfd_neighbors_fail_wrong_count(self):
+        output = (
+            "NeighAddr                              LD/RD         RH/RS     State     Int\n"
+            "10.255.0.1                           4097/4097     Up        Up        Twe1/0/2\n"
+        )
+        result = verify_bfd_neighbors(output, minimum_up=2)
+        self.assertFalse(result.passed)
+        self.assertIn("1", result.reason)
+
+    def test_verify_bfd_neighbors_fail_empty_output(self):
+        self.assertFalse(verify_bfd_neighbors("", minimum_up=1).passed)
+
+    def test_verify_interface_mtu_pass(self):
+        output = (
+            "TwentyFiveGigE1/0/2 is up, line protocol is up\n"
+            "  Hardware is Gigabit Ethernet\n"
+            "  MTU 9100 bytes, BW 25000000 Kbit/sec\n"
+        )
+        result = verify_interface_mtu(output, 9100)
+        self.assertTrue(result.passed)
+        self.assertEqual(9100, result.observations["observed_mtu"])
+
+    def test_verify_interface_mtu_fail_wrong_value(self):
+        output = "GigabitEthernet1/0/2 is up\n  MTU 1500 bytes, BW 1000000 Kbit/sec\n"
+        result = verify_interface_mtu(output, 9100)
+        self.assertFalse(result.passed)
+        self.assertIn("1500", result.reason)
+        self.assertEqual(1500, result.observations["observed_mtu"])
+
+    def test_verify_interface_mtu_fail_no_output(self):
+        result = verify_interface_mtu("", 9100)
+        self.assertFalse(result.passed)
+        self.assertIn("not found", result.reason)
 
 
 if __name__ == "__main__":

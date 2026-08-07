@@ -107,7 +107,7 @@ def create_plan(
             "name": "Deploy and verify IS-IS underlay",
             "depends_on": [underlay_dependency],
             "targets": all_devices,
-            "gate": "expected_isis_bfd_routes_and_mtu_pass",
+            "gate": "expected_isis_bfd_and_mtu_pass",
         },
         {
             "id": "lisp_control_plane",

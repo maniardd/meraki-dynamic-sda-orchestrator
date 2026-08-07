@@ -12,7 +12,7 @@ from orchestrator.intent import load_intent
 from orchestrator.planner import create_plan
 from orchestrator.renderer import render_configuration
 from orchestrator.store import ConflictError, StateStore, isoformat
-from orchestrator.worker import TransactionWorker, _unresolved_blocker_codes
+from orchestrator.worker import PreflightSecretError, TransactionWorker, _unresolved_blocker_codes
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +69,18 @@ peer-b L2 Twe1/0/2 10.255.0.3 UP 24 0B
                     "198.51.100.5 4 65100 12 14 3 0 0 00:10:00 8",
                     "198.51.100.7 4 65100 12 14 3 0 0 00:10:00 8",
                 ]
+            )
+        elif command.startswith("show interfaces"):
+            output = (
+                "{iface} is up, line protocol is up\n"
+                "  MTU 9100 bytes, BW 1000000 Kbit/sec\n"
+            ).format(iface=command.split()[-1] if len(command.split()) > 2 else "Gig0/0")
+        elif command == "show bfd neighbors":
+            output = (
+                "IPv4 Sessions\n"
+                "NeighAddr                              LD/RD         RH/RS     State     Int\n"
+                "10.255.0.1                           4097/4097     Up        Up        Gi0/1\n"
+                "10.255.0.3                           4098/4098     Up        Up        Gi0/2\n"
             )
         else:
             output = ""
@@ -351,6 +363,63 @@ class TransactionWorkerTests(unittest.TestCase):
         self.assertEqual("rollback_failed", result["run"]["status"])
         stored = self.store.get_design_reservation(reservation["reservation_id"])
         self.assertEqual("quarantined", stored["state"])
+
+
+    def test_preflight_secret_sweep_blocks_apply_on_missing_credential(self):
+        run = self.create_apply_run("preflight-cred-fail")
+
+        def bad_credential_resolver(ref):
+            raise RuntimeError("vault unreachable")
+
+        worker = TransactionWorker(
+            self.store,
+            lambda device: FakeAdapter(device),
+            lambda _ref: "resolved-test-secret",
+            credential_resolver=bad_credential_resolver,
+        )
+        with self.assertRaises(PreflightSecretError):
+            worker.process_apply(
+                run["run_id"], self.intent, self.plan_record["document"], self.artifact
+            )
+        self.assertEqual("apply_queued", self.store.get_run(run["run_id"])["status"])
+
+    def test_preflight_secret_sweep_blocks_apply_on_missing_secret_ref(self):
+        run = self.create_apply_run("preflight-ref-fail")
+
+        def bad_value_resolver(ref):
+            raise RuntimeError("secret not found: {}".format(ref))
+
+        worker = TransactionWorker(
+            self.store,
+            lambda device: FakeAdapter(device),
+            bad_value_resolver,
+        )
+        with self.assertRaises(PreflightSecretError):
+            worker.process_apply(
+                run["run_id"], self.intent, self.plan_record["document"], self.artifact
+            )
+        self.assertEqual("apply_queued", self.store.get_run(run["run_id"])["status"])
+
+    def test_preflight_secret_sweep_passes_when_all_secrets_resolve(self):
+        transitions = []
+        original_transition = self.store.transition_run
+
+        def tracking_transition(run_id, new_status, actor, metadata=None):
+            transitions.append(new_status)
+            return original_transition(run_id, new_status, actor, metadata)
+
+        self.store.transition_run = tracking_transition
+        run = self.create_apply_run("preflight-ok")
+        result = TransactionWorker(
+            self.store,
+            lambda device: FakeAdapter(device),
+            lambda _ref: "resolved-test-secret",
+            credential_resolver=lambda _ref: {"username": "admin", "password": "pass"},
+        ).process_apply(
+            run["run_id"], self.intent, self.plan_record["document"], self.artifact
+        )
+        self.assertTrue(result["succeeded"])
+        self.assertIn("apply_running", transitions)
 
 
 if __name__ == "__main__":
