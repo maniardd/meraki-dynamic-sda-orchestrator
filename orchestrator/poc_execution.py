@@ -209,6 +209,7 @@ def build_sjc23_poc_deployment_preview(
     _require(handoff == {"enabled": False, "mode": "isolated"}, "SJC23 POC must remain isolated")
 
     pools = _index(_list(intent.get("endpoint_pools"), "endpoint pools"), "id", "endpoint pools")
+    vn_map = {str(vn["name"]): vn for vn in intent.get("virtual_networks", [])}
     expected_pools = {
         "sjc23-corporate": ("Corporate", "10.30.100.0/24", 100, "10.30.100.1"),
         "sjc23-guest": ("Guest", "10.30.200.0/24", 200, "10.30.200.1"),
@@ -224,11 +225,17 @@ def build_sjc23_poc_deployment_preview(
         dhcp = _mapping(pool.get("dhcp"), "endpoint pool dhcp")
         _require(str(dhcp.get("mode", "")) == "local_border", "SJC23 POC requires local-border DHCP")
         _require(str(dhcp.get("server_device_id", "")) == "border-cp-01", "SJC23 POC DHCP server is invalid")
+        l2_vni = int(pool.get("l2_instance_id", 0))
+        _require(l2_vni > 0, "endpoint pool l2_instance_id is required for {}".format(pool_id))
+        l3_vni = int(vn_map.get(virtual_network, {}).get("l3_instance_id", 0))
+        _require(l3_vni > 0, "virtual network l3_instance_id is required for {}".format(virtual_network))
         pool_summary.append(
             {
                 "virtual_network": virtual_network,
                 "vrf": "CORP_VN" if virtual_network == "Corporate" else "GUEST_VN",
                 "vlan_id": vlan_id,
+                "l2_vni": l2_vni,
+                "l3_vni": l3_vni,
                 "endpoint_prefix": prefix,
                 "gateway": gateway,
                 "dhcp_mode": "local_border",
@@ -279,6 +286,7 @@ def build_sjc23_poc_deployment_preview(
             {
                 "device_id": device_id,
                 "hostname": str(device.get("hostname", "")),
+                "loopback_ip": str(device.get("loopback0_ip", "")),
                 "platform": _DEVICE_SCOPE[device_id]["platform"],
                 "roles": list(_DEVICE_SCOPE[device_id]["roles"]),
                 **command_summary,
@@ -301,6 +309,15 @@ def build_sjc23_poc_deployment_preview(
         },
         "lisp": {"site_name": "site_sjc23", "map_servers": ["border-cp-01"]},
         "virtual_networks": pool_summary,
+        "vni_vlan_map": [
+            {
+                "virtual_network": entry["virtual_network"],
+                "vlan_id": entry["vlan_id"],
+                "l2_vni": entry["l2_vni"],
+                "l3_vni": entry["l3_vni"],
+            }
+            for entry in pool_summary
+        ],
         "endpoint_attachments": attachment_summary,
         "devices": device_summary,
         "blocking_requirements": blocker_codes,

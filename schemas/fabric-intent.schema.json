@@ -107,6 +107,7 @@
         "underlay_protocol": {"const": "isis"},
         "control_plane_mode": {"enum": ["classic_lisp", "lisp_bgp_transit", "lisp_pubsub"]},
         "mtu": {"type": "integer", "minimum": 1550, "maximum": 9216},
+        "mtu_headroom": {"type": "integer", "minimum": 0, "maximum": 500},
         "isis_process": {"type": "string", "minLength": 1},
         "isis_area": {"type": "string", "pattern": "^49\\.[0-9]{4}$"},
         "multicast": {

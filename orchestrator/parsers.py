@@ -48,6 +48,43 @@ def verify_isis_neighbors(output: str, minimum_up: int = 1) -> GateResult:
     return GateResult(passed, reason, {"up_neighbor_count": len(up_rows), "rows": up_rows})
 
 
+def verify_bfd_neighbors(output: str, minimum_up: int = 1) -> GateResult:
+    """Require IOS XE BFD neighbor rows whose State column is Up."""
+    up_rows: List[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        fields = line.split()
+        if len(fields) < 5:
+            continue
+        # Expected IOS XE columns: NeighAddr LD/RD RH/RS State Int
+        if re.fullmatch(IPV4_PATTERN, fields[0]) and fields[3].lower() == "up":
+            up_rows.append(line)
+    passed = len(up_rows) >= minimum_up
+    reason = (
+        "Found {} UP BFD session(s); required {}".format(len(up_rows), minimum_up)
+        if passed
+        else "Expected at least {} UP BFD session(s), found {}".format(minimum_up, len(up_rows))
+    )
+    return GateResult(passed, reason, {"up_session_count": len(up_rows), "rows": up_rows})
+
+
+def verify_interface_mtu(output: str, expected_mtu: int) -> GateResult:
+    """Require the IOS XE interface MTU line to match the expected value exactly."""
+    match = re.search(r"MTU\s+(\d+)\s+bytes", output)
+    if not match:
+        return GateResult(False, "MTU line not found in output", {})
+    observed = int(match.group(1))
+    if observed != expected_mtu:
+        return GateResult(
+            False,
+            "MTU {} bytes != expected {}".format(observed, expected_mtu),
+            {"observed_mtu": observed},
+        )
+    return GateResult(True, "MTU {} bytes confirmed".format(observed), {"observed_mtu": observed})
+
+
 def verify_lisp_sessions(output: str, minimum_established: int = 1) -> GateResult:
     """Parse the explicit established counter; never match the Up/Down header."""
     match = re.search(r"\bestablished\s*:\s*(\d+)\b", output, flags=re.IGNORECASE)

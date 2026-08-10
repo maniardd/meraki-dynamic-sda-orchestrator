@@ -192,5 +192,52 @@ class RendererTests(unittest.TestCase):
         )
 
 
+    def test_fabric_link_block_has_mtu_and_ip_mtu(self):
+        artifact = render_configuration(self.intent, self.plan)
+        for device_data in artifact["devices"].values():
+            link_commands = [
+                command
+                for phase in device_data["phases"]
+                for block in phase["blocks"]
+                if block["block_id"].startswith("link_")
+                for command in block["commands"]
+            ]
+            self.assertTrue(
+                any(c == " mtu 9100" for c in link_commands),
+                "mtu 9100 missing from fabric-link block",
+            )
+            # default mtu_headroom=50 → ip mtu 9050
+            self.assertTrue(
+                any(c == " ip mtu 9050" for c in link_commands),
+                "ip mtu 9050 missing from fabric-link block",
+            )
+
+    def test_fabric_link_ip_mtu_uses_configured_mtu_headroom(self):
+        candidate = copy.deepcopy(self.intent)
+        candidate["fabric"]["mtu_headroom"] = 100
+        artifact = render_configuration(candidate, create_plan(candidate))
+        for device_data in artifact["devices"].values():
+            link_commands = [
+                command
+                for phase in device_data["phases"]
+                for block in phase["blocks"]
+                if block["block_id"].startswith("link_")
+                for command in block["commands"]
+            ]
+            self.assertIn(" ip mtu 9000", link_commands)
+            self.assertNotIn(" ip mtu 9050", link_commands)
+
+    def test_system_mtu_command_is_unchanged(self):
+        artifact = render_configuration(self.intent, self.plan)
+        all_commands = [
+            command
+            for device_data in artifact["devices"].values()
+            for phase in device_data["phases"]
+            for block in phase["blocks"]
+            for command in block["commands"]
+        ]
+        self.assertIn("system mtu 9100", all_commands)
+
+
 if __name__ == "__main__":
     unittest.main()

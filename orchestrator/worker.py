@@ -21,6 +21,52 @@ class WorkerError(RuntimeError):
     pass
 
 
+class PreflightSecretError(WorkerError):
+    pass
+
+
+def _preflight_secret_sweep(
+    artifact: Mapping[str, Any],
+    intent: Mapping[str, Any],
+    resolve_value: Callable[[str], str],
+    resolve_credentials: Optional[Callable[[str], Any]] = None,
+) -> None:
+    """Resolve all secret_refs and credential_refs before apply_running is committed.
+
+    Raises PreflightSecretError on the first unavailable secret so the run stays
+    in apply_queued and no audit event for apply_running is written.
+    """
+    if resolve_credentials is not None:
+        for device in intent.get("devices", []):
+            ref = str(device.get("credential_ref", ""))
+            if ref:
+                try:
+                    resolve_credentials(ref)
+                except Exception as exc:
+                    raise PreflightSecretError(
+                        "Credential unavailable for {}: {}".format(device.get("id", "?"), exc)
+                    ) from exc
+        ise = (artifact.get("external_systems") or {}).get("ise") or {}
+        ise_ref = str(ise.get("credential_ref", ""))
+        if ise_ref:
+            try:
+                resolve_credentials(ise_ref)
+            except Exception as exc:
+                raise PreflightSecretError(
+                    "ISE credential unavailable: {}".format(exc)
+                ) from exc
+    for artifact_device in artifact.get("devices", {}).values():
+        for phase in artifact_device.get("phases", []):
+            for block in phase.get("blocks", []):
+                for uri in block.get("secret_refs", []):
+                    try:
+                        resolve_value(str(uri))
+                    except Exception as exc:
+                        raise PreflightSecretError(
+                            "Secret unavailable {}: {}".format(uri, exc)
+                        ) from exc
+
+
 def _resolve_commands(commands: List[str], resolver: Callable[[str], str]) -> List[str]:
     resolved: List[str] = []
     for command in commands:
@@ -62,12 +108,14 @@ class TransactionWorker:
         secret_resolver: Callable[[str], str],
         actor: str = "sda-worker",
         ise_adapter_factory: Optional[Callable[[Mapping[str, Any]], Any]] = None,
+        credential_resolver: Optional[Callable[[str], Any]] = None,
     ):
         self.store = store
         self.adapter_factory = adapter_factory
         self.secret_resolver = secret_resolver
         self.actor = actor
         self.ise_adapter_factory = ise_adapter_factory
+        self.credential_resolver = credential_resolver
 
     def _record_gate(
         self,
@@ -156,6 +204,9 @@ class TransactionWorker:
         ise_manifest = (artifact.get("external_systems") or {}).get("ise")
         ise_adapter = None
         ise_applied = False
+        _preflight_secret_sweep(
+            artifact, intent, self.secret_resolver, self.credential_resolver
+        )
         self.store.transition_run(run_id, "apply_running", self.actor)
         try:
             for device_id in sorted(devices):

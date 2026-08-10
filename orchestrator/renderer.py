@@ -177,6 +177,10 @@ def _underlay_blocks(intent: Mapping[str, Any], device: Mapping[str, Any]) -> Li
                         ],
                     )
                 )
+    fabric_mtu = int(fabric["mtu"])
+    # mtu_headroom reserves bytes for VXLAN/LISP encapsulation (VXLAN header = 50 bytes).
+    # Operators may set a larger value when double-encap or protocol stacking applies.
+    ip_mtu = fabric_mtu - int(fabric.get("mtu_headroom", 50))
     for link in sorted(intent.get("links", []), key=lambda item: str(item["id"])):
         endpoints = link["endpoints"]
         local = next((item for item in endpoints if item["device_id"] == device_id), None)
@@ -198,9 +202,11 @@ def _underlay_blocks(intent: Mapping[str, Any], device: Mapping[str, Any]) -> Li
                 _safe(peer["device_id"], "peer device", True)
             ),
             " no switchport",
+            " mtu {}".format(fabric_mtu),
             " ip address {} {}".format(
                 _safe(local["ip"], "link address"), network.netmask
             ),
+            " ip mtu {}".format(ip_mtu),
         ]
         if pim_sparse_mode:
             link_commands.append(" ip pim sparse-mode")

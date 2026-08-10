@@ -227,6 +227,19 @@ class Schema12FakeAdapter:
         elif command.startswith("show ip route vrf"):
             prefix = command.split()[-1]
             output = "Routing entry for {}\n  Known via BGP".format(prefix)
+        elif command.startswith("show interfaces"):
+            iface = command.split()[-1] if len(command.split()) > 2 else "Gig0/0"
+            output = "{} is up, line protocol is up\n  MTU 9100 bytes, BW 1000000 Kbit/sec\n".format(iface)
+        elif command == "show bfd neighbors":
+            rows = "\n".join(
+                "10.255.0.{0}                           4097/4097     Up        Up        Gi0/{0}".format(i)
+                for i in range(1, 9)
+            )
+            output = (
+                "IPv4 Sessions\n"
+                "NeighAddr                              LD/RD         RH/RS     State     Int\n"
+                + rows + "\n"
+            )
         else:
             output = ""
         return {
