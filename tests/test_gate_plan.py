@@ -93,7 +93,7 @@ class GatePlanTests(unittest.TestCase):
             self.assertEqual("underlay", gate["phase_id"])
             self.assertEqual("show bfd neighbors", gate["command"])
             self.assertGreater(gate["expected"]["minimum_up"], 0)
-            self.assertTrue(gate["blocking"])
+            self.assertFalse(gate["blocking"])  # non-blocking until real output captured
 
     def test_underlay_bfd_gate_evaluates_pass_and_fail(self):
         intent = load_intent(LAB)

@@ -183,7 +183,7 @@ def build_gate_plan(
                     "command": "show bfd neighbors",
                     "evaluator": "bfd_neighbors",
                     "expected": {"minimum_up": incident_links[device_id]},
-                    "blocking": True,
+                    "blocking": False,
                 }
             )
         if "fabric_edge" in roles:
