@@ -121,6 +121,46 @@ class AllocationStoreTests(unittest.TestCase):
         self.assertTrue(all(item["state"] == "released" for item in released["scalar_allocations"]))
         self.assertTrue(self.store.verify_audit_chain())
 
+    def test_identical_design_can_be_reserved_after_verified_release(self):
+        """Re-planning an identical design after a verified release must succeed.
+
+        The derived ``reservation_hash`` is deterministic, so an identical demand
+        re-derives the same value once the prior allocations are freed. A released
+        reservation must not keep blocking that hash, mirroring how the network and
+        scalar allocation ledgers already exclude ``released`` rows.
+        """
+        first, created = self.store.reserve_design(
+            self.requirements, self.policy, "design-request-0006", "planner-a"
+        )
+        self.assertTrue(created)
+        released = self.store.transition_design_reservation(
+            first["reservation_id"], "released", "operator", verified=True
+        )
+        self.assertEqual("released", released["state"])
+
+        # A fresh idempotency key + identical demand — this is the re-plan path
+        # that was raising ConflictError (surfaced to the API as HTTP 409).
+        second, recreated = self.store.reserve_design(
+            self.requirements, self.policy, "design-request-0007", "planner-a"
+        )
+        self.assertTrue(recreated)
+        self.assertNotEqual(first["reservation_id"], second["reservation_id"])
+        self.assertEqual("reserved", second["state"])
+
+        # The freed prefixes are re-derived identically, proving true reuse.
+        first_underlay = next(
+            item["prefix"]
+            for item in released["network_allocations"]
+            if item["resource_pool_id"] == "underlay_p2p"
+        )
+        second_underlay = next(
+            item["prefix"]
+            for item in second["network_allocations"]
+            if item["resource_pool_id"] == "underlay_p2p"
+        )
+        self.assertEqual(first_underlay, second_underlay)
+        self.assertTrue(self.store.verify_audit_chain())
+
 
 if __name__ == "__main__":
     unittest.main()

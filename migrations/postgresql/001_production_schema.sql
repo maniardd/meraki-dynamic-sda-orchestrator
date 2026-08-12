@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS design_reservations (
     idempotency_key_hash TEXT NOT NULL UNIQUE,
     requirements_hash TEXT NOT NULL,
     policy_hash TEXT NOT NULL,
-    reservation_hash TEXT NOT NULL UNIQUE,
+    reservation_hash TEXT NOT NULL,
     allocation_domain TEXT NOT NULL,
     fabric_id TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('reserved','committed','released','quarantined')),
@@ -27,6 +27,18 @@ CREATE TABLE IF NOT EXISTS design_reservations (
 
 CREATE INDEX IF NOT EXISTS design_reservations_fabric_idx
     ON design_reservations(allocation_domain, fabric_id, state);
+
+-- reservation_hash is a deterministic hash of the derived design body, so an
+-- identical demand re-derives the same value once the prior allocations are
+-- freed. Enforce uniqueness only among ACTIVE reservations so a released design
+-- can be re-planned, mirroring the network_allocations (GiST) and
+-- scalar_allocations (partial unique) ledgers which already exclude released
+-- rows. NOTE: databases created from the original 001 also carry the inline
+-- UNIQUE constraint design_reservations_reservation_hash_key; migration
+-- 002_reservation_hash_partial_unique.sql drops it on already-deployed hosts.
+CREATE UNIQUE INDEX IF NOT EXISTS design_reservations_reservation_hash_active
+    ON design_reservations(reservation_hash)
+    WHERE state IN ('reserved','committed','quarantined');
 
 CREATE TABLE IF NOT EXISTS plans (
     plan_id TEXT PRIMARY KEY,
