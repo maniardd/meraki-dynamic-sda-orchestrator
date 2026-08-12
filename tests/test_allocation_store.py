@@ -161,6 +161,40 @@ class AllocationStoreTests(unittest.TestCase):
         self.assertEqual(first_underlay, second_underlay)
         self.assertTrue(self.store.verify_audit_chain())
 
+    def test_same_idempotency_key_is_reusable_after_verified_release(self):
+        """A stable idempotency key must be re-usable once its reservation is released.
+
+        With a demand-derived stable key, an identical re-plan reuses the same key.
+        While the reservation is active it is returned idempotently; after a verified
+        release the same key must produce a fresh active reservation rather than
+        returning the released row or colliding on its retained key hash.
+        """
+        first, created = self.store.reserve_design(
+            self.requirements, self.policy, "stable-design-key-0001", "planner-a"
+        )
+        self.assertTrue(created)
+
+        # While active, the same key is idempotent (returns the same reservation).
+        again, recreated = self.store.reserve_design(
+            self.requirements, self.policy, "stable-design-key-0001", "planner-a"
+        )
+        self.assertFalse(recreated)
+        self.assertEqual(first["reservation_id"], again["reservation_id"])
+
+        self.store.transition_design_reservation(
+            first["reservation_id"], "released", "operator", verified=True
+        )
+
+        # After a verified release, the same key yields a brand-new active
+        # reservation -- not the released one, and not a ConflictError.
+        third, made = self.store.reserve_design(
+            self.requirements, self.policy, "stable-design-key-0001", "planner-a"
+        )
+        self.assertTrue(made)
+        self.assertEqual("reserved", third["state"])
+        self.assertNotEqual(first["reservation_id"], third["reservation_id"])
+        self.assertTrue(self.store.verify_audit_chain())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS intents (
 
 CREATE TABLE IF NOT EXISTS design_reservations (
     reservation_id TEXT PRIMARY KEY,
-    idempotency_key_hash TEXT NOT NULL UNIQUE,
+    idempotency_key_hash TEXT NOT NULL,
     requirements_hash TEXT NOT NULL,
     policy_hash TEXT NOT NULL,
     reservation_hash TEXT NOT NULL,
@@ -28,6 +28,17 @@ CREATE TABLE IF NOT EXISTS design_reservations (
 CREATE INDEX IF NOT EXISTS design_reservations_fabric_idx
     ON design_reservations(allocation_domain, fabric_id, state);
 
+-- Self-healing for databases created from the original 001, which declared
+-- reservation_hash and idempotency_key_hash as UNCONDITIONAL unique columns.
+-- Those constraints blocked re-planning an identical demand after a release.
+-- initialize() re-runs this file on every boot, so dropping them here (IF
+-- EXISTS) converges an already-deployed schema without a separate migration
+-- runner; on a fresh database these are no-ops.
+ALTER TABLE design_reservations
+    DROP CONSTRAINT IF EXISTS design_reservations_reservation_hash_key;
+ALTER TABLE design_reservations
+    DROP CONSTRAINT IF EXISTS design_reservations_idempotency_key_hash_key;
+
 -- reservation_hash is a deterministic hash of the derived design body, so an
 -- identical demand re-derives the same value once the prior allocations are
 -- freed. Enforce uniqueness only among ACTIVE reservations so a released design
@@ -38,6 +49,12 @@ CREATE INDEX IF NOT EXISTS design_reservations_fabric_idx
 -- 002_reservation_hash_partial_unique.sql drops it on already-deployed hosts.
 CREATE UNIQUE INDEX IF NOT EXISTS design_reservations_reservation_hash_active
     ON design_reservations(reservation_hash)
+    WHERE state IN ('reserved','committed','quarantined');
+
+-- The idempotency key dedups active reservations only; a released design must
+-- not keep blocking its key so an identical demand can be re-planned.
+CREATE UNIQUE INDEX IF NOT EXISTS design_reservations_idempotency_key_active
+    ON design_reservations(idempotency_key_hash)
     WHERE state IN ('reserved','committed','quarantined');
 
 CREATE TABLE IF NOT EXISTS plans (

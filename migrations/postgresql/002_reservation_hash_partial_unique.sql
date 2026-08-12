@@ -28,4 +28,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS design_reservations_reservation_hash_active
     ON design_reservations(reservation_hash)
     WHERE state IN ('reserved','committed','quarantined');
 
+-- Same treatment for the idempotency key: it must dedup only ACTIVE
+-- reservations, so an identical demand can be re-planned into a fresh
+-- reservation after a verified release (the released row must not block the
+-- key). Required for the server-derived stable idempotency key to be
+-- re-runnable across a release.
+ALTER TABLE design_reservations
+    DROP CONSTRAINT IF EXISTS design_reservations_idempotency_key_hash_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS design_reservations_idempotency_key_active
+    ON design_reservations(idempotency_key_hash)
+    WHERE state IN ('reserved','committed','quarantined');
+
 COMMIT;

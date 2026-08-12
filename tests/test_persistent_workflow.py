@@ -319,6 +319,54 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual("reserved", body["reservation_state"])
         self.assertGreater(body["allocation_summary"]["network"], 0)
 
+    def test_sjc23_guided_poc_plan_is_idempotent_on_demand_across_runs(self):
+        """Different per-run idempotency keys with identical demand must return the
+        same reservation and plan. The reservation is keyed on the normalized
+        demand, not the caller's token, so re-running the Meraki workflow (which
+        sends a fresh token each run) never creates a competing reservation."""
+        database_path = str(Path(self.temporary_directory.name) / "poc-idempotent.sqlite3")
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_DATABASE_PATH": database_path,
+                "ORCHESTRATOR_GUARDRAILS_PATH": str(SJC23_POC_GUARDRAILS),
+                "ORCHESTRATOR_EXECUTION_ENABLED": False,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(TOKENS["planner-token"]): {
+                        "actor": "meraki-planner", "roles": ["planner"]
+                    }
+                },
+            }
+        )
+        client = app.test_client()
+        form_values = {
+            "fabric_name": "SJC23 recorded POC",
+            "change_reference": "SJC23-POC-001",
+            "corporate_users": "150",
+            "guest_users": "150",
+            "corporate_attachment": "corporate_laptop",
+            "guest_attachment": "guest_laptop",
+            "dhcp_lease_minutes": "60",
+            "dns_profile": "public_google",
+        }
+        first = client.post(
+            "/v1/workflow-actions/poc-guided-plan",
+            json={"form_values": form_values, "idempotency_key": "sjc23-poc-run-AAAA"},
+            headers=self.headers("planner-token"),
+        )
+        second = client.post(
+            "/v1/workflow-actions/poc-guided-plan",
+            json={"form_values": form_values, "idempotency_key": "sjc23-poc-run-BBBB"},
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, first.status_code, first.get_json())
+        self.assertEqual(200, second.status_code, second.get_json())
+        a, b = first.get_json(), second.get_json()
+        # Different caller tokens, identical demand -> same reservation and plan.
+        self.assertEqual(a["reservation_id"], b["reservation_id"])
+        self.assertEqual(a["plan_hash"], b["plan_hash"])
+        self.assertEqual("reserved", b["reservation_state"])
+
     def test_sjc23_guided_poc_options_are_planner_only_and_secret_free(self):
         database_path = str(Path(self.temporary_directory.name) / "poc-options.sqlite3")
         app = create_app(
