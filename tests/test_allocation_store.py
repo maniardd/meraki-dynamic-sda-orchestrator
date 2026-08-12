@@ -121,6 +121,80 @@ class AllocationStoreTests(unittest.TestCase):
         self.assertTrue(all(item["state"] == "released" for item in released["scalar_allocations"]))
         self.assertTrue(self.store.verify_audit_chain())
 
+    def test_identical_design_can_be_reserved_after_verified_release(self):
+        """Re-planning an identical design after a verified release must succeed.
+
+        The derived ``reservation_hash`` is deterministic, so an identical demand
+        re-derives the same value once the prior allocations are freed. A released
+        reservation must not keep blocking that hash, mirroring how the network and
+        scalar allocation ledgers already exclude ``released`` rows.
+        """
+        first, created = self.store.reserve_design(
+            self.requirements, self.policy, "design-request-0006", "planner-a"
+        )
+        self.assertTrue(created)
+        released = self.store.transition_design_reservation(
+            first["reservation_id"], "released", "operator", verified=True
+        )
+        self.assertEqual("released", released["state"])
+
+        # A fresh idempotency key + identical demand — this is the re-plan path
+        # that was raising ConflictError (surfaced to the API as HTTP 409).
+        second, recreated = self.store.reserve_design(
+            self.requirements, self.policy, "design-request-0007", "planner-a"
+        )
+        self.assertTrue(recreated)
+        self.assertNotEqual(first["reservation_id"], second["reservation_id"])
+        self.assertEqual("reserved", second["state"])
+
+        # The freed prefixes are re-derived identically, proving true reuse.
+        first_underlay = next(
+            item["prefix"]
+            for item in released["network_allocations"]
+            if item["resource_pool_id"] == "underlay_p2p"
+        )
+        second_underlay = next(
+            item["prefix"]
+            for item in second["network_allocations"]
+            if item["resource_pool_id"] == "underlay_p2p"
+        )
+        self.assertEqual(first_underlay, second_underlay)
+        self.assertTrue(self.store.verify_audit_chain())
+
+    def test_same_idempotency_key_is_reusable_after_verified_release(self):
+        """A stable idempotency key must be re-usable once its reservation is released.
+
+        With a demand-derived stable key, an identical re-plan reuses the same key.
+        While the reservation is active it is returned idempotently; after a verified
+        release the same key must produce a fresh active reservation rather than
+        returning the released row or colliding on its retained key hash.
+        """
+        first, created = self.store.reserve_design(
+            self.requirements, self.policy, "stable-design-key-0001", "planner-a"
+        )
+        self.assertTrue(created)
+
+        # While active, the same key is idempotent (returns the same reservation).
+        again, recreated = self.store.reserve_design(
+            self.requirements, self.policy, "stable-design-key-0001", "planner-a"
+        )
+        self.assertFalse(recreated)
+        self.assertEqual(first["reservation_id"], again["reservation_id"])
+
+        self.store.transition_design_reservation(
+            first["reservation_id"], "released", "operator", verified=True
+        )
+
+        # After a verified release, the same key yields a brand-new active
+        # reservation -- not the released one, and not a ConflictError.
+        third, made = self.store.reserve_design(
+            self.requirements, self.policy, "stable-design-key-0001", "planner-a"
+        )
+        self.assertTrue(made)
+        self.assertEqual("reserved", third["state"])
+        self.assertNotEqual(first["reservation_id"], third["reservation_id"])
+        self.assertTrue(self.store.verify_audit_chain())
+
 
 if __name__ == "__main__":
     unittest.main()

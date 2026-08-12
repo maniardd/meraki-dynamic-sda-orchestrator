@@ -182,10 +182,10 @@ CREATE INDEX IF NOT EXISTS audit_aggregate_idx
 
 CREATE TABLE IF NOT EXISTS design_reservations (
     reservation_id TEXT PRIMARY KEY,
-    idempotency_key_hash TEXT NOT NULL UNIQUE,
+    idempotency_key_hash TEXT NOT NULL,
     requirements_hash TEXT NOT NULL,
     policy_hash TEXT NOT NULL,
-    reservation_hash TEXT NOT NULL UNIQUE,
+    reservation_hash TEXT NOT NULL,
     allocation_domain TEXT NOT NULL,
     fabric_id TEXT NOT NULL,
     state TEXT NOT NULL CHECK(state IN ('reserved','committed','released','quarantined')),
@@ -197,6 +197,21 @@ CREATE TABLE IF NOT EXISTS design_reservations (
 
 CREATE INDEX IF NOT EXISTS design_reservations_fabric_idx
     ON design_reservations(allocation_domain, fabric_id, state);
+
+-- reservation_hash is deterministic, so an identical design re-derives the same
+-- value once its allocations are freed. Enforce uniqueness only among ACTIVE
+-- reservations so a released design can be re-planned, mirroring the network and
+-- scalar allocation ledgers which already exclude released rows.
+CREATE UNIQUE INDEX IF NOT EXISTS design_reservations_reservation_hash_active
+    ON design_reservations(reservation_hash)
+    WHERE state IN ('reserved','committed','quarantined');
+
+-- The idempotency key dedups active reservations only. A released design must
+-- not keep blocking its key, so an identical demand can be re-planned into a
+-- fresh reservation after a verified release.
+CREATE UNIQUE INDEX IF NOT EXISTS design_reservations_idempotency_key_active
+    ON design_reservations(idempotency_key_hash)
+    WHERE state IN ('reserved','committed','quarantined');
 
 CREATE TABLE IF NOT EXISTS network_allocations (
     allocation_id TEXT PRIMARY KEY,
@@ -451,7 +466,8 @@ class StateStore:
                 connection, str(requirements.get("allocation_domain", ""))
             )
             existing = connection.execute(
-                "SELECT * FROM design_reservations WHERE idempotency_key_hash = ?",
+                "SELECT * FROM design_reservations WHERE idempotency_key_hash = ? "
+                "AND state IN ('reserved','committed','quarantined')",
                 (key_hash,),
             ).fetchone()
             if existing:

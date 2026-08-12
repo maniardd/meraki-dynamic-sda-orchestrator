@@ -1,0 +1,72 @@
+name: Inspect POC Reservation and Schema State
+
+# Read-only operator tool. Instantiating the store runs the idempotent
+# initialize() migration (converging the self-healing schema), then reports the
+# design_reservations constraints/indexes, the SJC23 POC reservation state
+# counts, and the latest POC plan hashes. Output is schema/hash-level only and
+# contains no secrets, tokens, or raw configuration.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sda-orchestrator-poc-inspect
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: [self-hosted, sda-relay]
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out reviewed release
+        uses: actions/checkout@v4
+
+      - name: Converge schema and report POC state (read-only, secret-free)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/sdaadmin/sda-orchestrator/current
+          .venv/bin/python - <<'PY'
+          import os, json
+          from orchestrator.postgres_store import PostgresStateStore
+
+          url = os.environ.get(
+              "ORCHESTRATOR_DATABASE_URL",
+              "postgresql:///sda_orchestrator?host=/var/run/postgresql",
+          )
+          # Instantiating the store runs initialize(), applying the idempotent
+          # self-healing schema (drops legacy unconditional unique constraints,
+          # creates the active-only partial indexes).
+          store = PostgresStateStore(url)
+          with store.connection() as c:
+              cons = [r["conname"] for r in c.execute(
+                  "SELECT conname FROM pg_constraint "
+                  "WHERE conrelid='design_reservations'::regclass AND contype='u' "
+                  "ORDER BY conname").fetchall()]
+              idx = [r["indexname"] for r in c.execute(
+                  "SELECT indexname FROM pg_indexes "
+                  "WHERE tablename='design_reservations' ORDER BY indexname").fetchall()]
+              states = [dict(r) for r in c.execute(
+                  "SELECT state, count(*) AS n FROM design_reservations "
+                  "WHERE allocation_domain='sjc23-poc-001' GROUP BY state "
+                  "ORDER BY state").fetchall()]
+              plan = c.execute(
+                  "SELECT plan_id, left(plan_hash,16) AS plan_hash, "
+                  "left(artifact_hash,16) AS artifact_hash, reservation_id, created_at "
+                  "FROM plans WHERE fabric_id='sjc23-poc-fabric' "
+                  "ORDER BY created_at DESC LIMIT 1").fetchone()
+
+          report = {
+              "design_reservations_unique_constraints": cons,
+              "design_reservations_indexes": idx,
+              "sjc23_poc_001_reservation_states": states,
+              "latest_sjc23_plan": (
+                  dict(plan, created_at=str(plan["created_at"])) if plan else None
+              ),
+          }
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY

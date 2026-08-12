@@ -33,6 +33,7 @@ from .store import (
     StateStore,
     StoreError,
     create_state_store,
+    sha256_json,
 )
 
 
@@ -524,7 +525,15 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             requirements = sjc23_poc_requirements(form_values, guardrails())
         except PocIntakeError as exc:
             return jsonify({"error": "poc_guided_intake", "message": str(exc)}), 422
-        response, status = plan_from_requirements(requirements, idempotency_key)
+        # Dedup the reservation on the DEMAND, not the caller's per-run token.
+        # Meraki sends a fresh idempotency_key every run, which would otherwise
+        # create a competing reservation each time (409 on the tiny POC pools).
+        # Keying on the normalized requirements makes an identical demand
+        # idempotent -- the same reservation is returned on every re-run, so the
+        # workflow is freely repeatable and never needs a manual release. The
+        # client key is still validated above to reject malformed requests.
+        stable_key = "sjc23-poc:" + sha256_json(requirements)
+        response, status = plan_from_requirements(requirements, stable_key)
         if status != 200:
             return response, status
         result = response.get_json()
