@@ -6,6 +6,7 @@ import json
 import os
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Set
@@ -559,6 +560,89 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
             return jsonify(sjc23_poc_form_options(guardrails())), 200
         except PocIntakeError as exc:
             return jsonify({"error": "poc_guided_intake", "message": str(exc)}), 422
+
+    @app.post("/v1/workflow-actions/poc-confirm-apply")
+    @require_roles("approver")
+    def workflow_action_poc_confirm_apply():
+        """Operator confirmation: record a plan-bound approval and queue an apply run.
+
+        The caller must be an approver identity distinct from the planner that
+        created the plan (the store rejects self-approval). When execution is not
+        armed this fails closed with execution_disabled; nothing is queued.
+        """
+        document, error = workflow_json_object()
+        if error:
+            return error
+        plan_id = str(document.get("plan_id", ""))
+        submitted_plan_hash = str(document.get("plan_hash", "")).strip()
+        change_reference = str(document.get("change_reference", "")).strip() or "SJC23-POC-001"
+        if document.get("confirm") is not True:
+            return jsonify({"error": "confirm_required", "message": "confirm must be true to authorize apply"}), 422
+        try:
+            plan_record = store().get_plan(plan_id)
+        except NotFoundError:
+            return jsonify({"error": "plan_not_found", "message": "Plan not found"}), 404
+        stored_plan_hash = str(plan_record["plan_hash"])
+        if submitted_plan_hash and submitted_plan_hash != stored_plan_hash:
+            return jsonify({"error": "plan_hash_mismatch", "message": "Submitted plan_hash does not match the stored plan"}), 409
+        now = datetime.now(timezone.utc)
+        window_end = now + timedelta(hours=2)
+        try:
+            store().record_approval(
+                plan_id=plan_id,
+                decision="approved",
+                approver=g.principal["actor"],
+                change_reference=change_reference,
+                expires_at=window_end.isoformat(),
+            )
+        except (ValueError, ConflictError) as exc:
+            return jsonify({"succeeded": False, "error": "approval_rejected", "message": str(exc)}), 409
+        try:
+            run_record, _created = store().create_run(
+                plan_id=plan_id,
+                mode="apply",
+                idempotency_key="poc-apply:" + stored_plan_hash,
+                requested_by=g.principal["actor"],
+                execution_enabled=bool(app.config["ORCHESTRATOR_EXECUTION_ENABLED"]),
+                maintenance_start=now.isoformat(),
+                maintenance_end=window_end.isoformat(),
+            )
+        except ExecutionDisabledError as exc:
+            return jsonify({"succeeded": False, "status": "execution_disabled", "error": "execution_disabled", "message": str(exc)}), 409
+        except (ValueError, ApprovalRequiredError, MaintenanceWindowError, ConflictError) as exc:
+            return jsonify({"succeeded": False, "error": "run_rejected", "message": str(exc)}), 409
+        return jsonify(
+            {
+                "succeeded": True,
+                "status": run_record["status"],
+                "run_id": run_record["run_id"],
+                "plan_hash": stored_plan_hash,
+            }
+        ), 200
+
+    @app.post("/v1/workflow-actions/poc-run-status")
+    @require_roles("viewer", "planner", "approver", "operator", "auditor")
+    def workflow_action_poc_run_status():
+        """Redacted apply-run status for Meraki polling. No secrets, no raw config."""
+        document, error = workflow_json_object()
+        if error:
+            return error
+        run_id = str(document.get("run_id", ""))
+        run_record = store().get_run(run_id)
+        status = str(run_record["status"])
+        terminal = not (status.endswith("_queued") or status.endswith("_running"))
+        return jsonify(
+            {
+                "succeeded": True,
+                "run_id": run_id,
+                "status": status,
+                "terminal": terminal,
+                "run_succeeded": status.endswith("_succeeded"),
+                "evidence_summary": _meraki_evidence_summary(store().run_evidence(run_id)),
+                "contains_secret_values": False,
+                "contains_raw_configuration": False,
+            }
+        ), 200
 
     @app.get("/v1/intents/<intent_id>")
     @require_roles("viewer", "planner", "approver", "operator")
