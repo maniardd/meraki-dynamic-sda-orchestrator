@@ -428,6 +428,97 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertNotEqual(first_json["reservation_id"], second_json["reservation_id"])
         self.assertEqual("reserved", second_json["reservation_state"])
 
+    def test_poc_confirm_apply_requires_confirm_true(self):
+        _intent, plan = self.create_intent_and_plan()
+        response = self.client.post(
+            "/v1/workflow-actions/poc-confirm-apply",
+            json={"plan_id": plan["plan_id"], "change_reference": "CHG-POC-CONFIRM", "confirm": False},
+            headers=self.headers("approver-token"),
+        )
+        self.assertEqual(422, response.status_code, response.get_json())
+        self.assertEqual("confirm_required", response.get_json()["error"])
+
+    def test_poc_confirm_apply_fails_closed_when_execution_disabled(self):
+        _intent, plan = self.create_intent_and_plan()
+        response = self.client.post(
+            "/v1/workflow-actions/poc-confirm-apply",
+            json={"plan_id": plan["plan_id"], "change_reference": "CHG-POC-CONFIRM", "confirm": True},
+            headers=self.headers("approver-token"),
+        )
+        self.assertEqual(409, response.status_code, response.get_json())
+        self.assertEqual("execution_disabled", response.get_json()["error"])
+
+    def test_poc_confirm_apply_queues_when_execution_armed(self):
+        database_path = str(Path(self.temporary_directory.name) / "poc-apply.sqlite3")
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_DATABASE_PATH": database_path,
+                "ORCHESTRATOR_EXECUTION_ENABLED": True,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(TOKENS["planner-token"]): {"actor": "meraki-planner", "roles": ["planner"]},
+                    token_sha256(TOKENS["approver-token"]): {"actor": "change-approver", "roles": ["approver"]},
+                    token_sha256(TOKENS["operator-token"]): {"actor": "fabric-operator", "roles": ["operator"]},
+                },
+            }
+        )
+        client = app.test_client()
+        intent_resp = client.post("/v1/intents", json=self.intent, headers=self.headers("planner-token"))
+        self.assertEqual(201, intent_resp.status_code, intent_resp.get_json())
+        intent_id = intent_resp.get_json()["intent_id"]
+        plan_resp = client.post(
+            "/v1/intents/{}/plans".format(intent_id), json={}, headers=self.headers("planner-token")
+        )
+        self.assertEqual(201, plan_resp.status_code, plan_resp.get_json())
+        plan = plan_resp.get_json()
+        confirm = client.post(
+            "/v1/workflow-actions/poc-confirm-apply",
+            json={
+                "plan_id": plan["plan_id"],
+                "plan_hash": plan.get("plan_hash", ""),
+                "change_reference": "CHG-POC-APPLY",
+                "confirm": True,
+            },
+            headers=self.headers("approver-token"),
+        )
+        self.assertEqual(200, confirm.status_code, confirm.get_json())
+        body = confirm.get_json()
+        self.assertEqual("apply_queued", body["status"])
+        self.assertTrue(body["run_id"].startswith("run_"))
+
+    def test_poc_run_status_reports_redacted_state(self):
+        _intent, plan = self.create_intent_and_plan()
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        self.client.post(
+            "/v1/workflow-actions/approve",
+            json={
+                "plan_id": plan["plan_id"],
+                "decision": "approved",
+                "change_reference": "CHG-STATUS",
+                "expires_at": expires_at,
+            },
+            headers=self.headers("approver-token"),
+        )
+        started = self.client.post(
+            "/v1/workflow-actions/run",
+            json={"plan_id": plan["plan_id"], "mode": "dry_run", "idempotency_key": "poc-status-run-0001"},
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(200, started.status_code, started.get_json())
+        run_id = started.get_json()["run"]["run_id"]
+        resp = self.client.post(
+            "/v1/workflow-actions/poc-run-status",
+            json={"run_id": run_id},
+            headers=self.headers("operator-token"),
+        )
+        self.assertEqual(200, resp.status_code, resp.get_json())
+        body = resp.get_json()
+        self.assertEqual(run_id, body["run_id"])
+        self.assertIn("status", body)
+        self.assertIn("terminal", body)
+        self.assertFalse(body["contains_secret_values"])
+        self.assertFalse(body["contains_raw_configuration"])
+
     def test_sjc23_guided_poc_options_are_planner_only_and_secret_free(self):
         database_path = str(Path(self.temporary_directory.name) / "poc-options.sqlite3")
         app = create_app(
