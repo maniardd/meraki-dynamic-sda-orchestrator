@@ -55,6 +55,11 @@ CREATE ROLE "sda-worker" WITH LOGIN;
 GRANT CONNECT ON DATABASE sda_orchestrator TO "sda-worker";
 GRANT SELECT, INSERT, UPDATE, DELETE
     ON ALL TABLES IN SCHEMA public TO "sda-worker";
+
+-- Required for BIGSERIAL inserts (audit_events, owned_state_manifests).
+-- Without this the worker fails a real run with InsufficientPrivilege when it
+-- writes its first audit event.
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "sda-worker";
 ```
 
 Ensure `pg_hba.conf` has a peer-auth entry for this role:
@@ -298,7 +303,11 @@ The canonical fail path is `worker_runtime.py:76-86`: both
 before any database connection. Exit code 2;
 stdout is `{"succeeded": false, "error_type": "WorkerRuntimeError"}`.
 
-For tests that call the worker directly, run under `sudo -u sda-worker`:
+For tests that call the worker directly, run under `sudo -u sda-worker`. If the
+host's sudoers deliberately forbids sdaadmin from becoming sda-worker (the
+correct hardening — it stops the CI runner reaching devices), `sudo -u
+sda-worker` is denied; use `sudo runuser -u sda-worker -- <cmd>` instead, which
+escalates to root first and cannot be done by the runner without full root:
 
 ### 6a. Execution gate disabled
 
