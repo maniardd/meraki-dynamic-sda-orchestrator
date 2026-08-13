@@ -64,6 +64,14 @@ if [ ! -d "${release_path}" ]; then
     cd "${temporary_release}"
     "${temporary_release}/.venv/bin/python" -m unittest discover -s tests -q
   )
+  # The venv is created under umask 077 (0700), which the dedicated sda-worker
+  # service user cannot traverse. Grant the sda-release group read/traverse on
+  # the whole release so sda-worker (a member of sda-release) can execute the
+  # worker without opening the tree to the world. No-op if the group is absent.
+  if getent group sda-release >/dev/null 2>&1; then
+    chgrp -R sda-release "${temporary_release}"
+    chmod -R g+rX "${temporary_release}"
+  fi
   printf '%s\n' "${release_id}" >"${temporary_release}/.release-commit"
   mv -- "${temporary_release}" "${release_path}"
   temporary_release=""
