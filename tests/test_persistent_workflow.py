@@ -367,6 +367,67 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual(a["plan_hash"], b["plan_hash"])
         self.assertEqual("reserved", b["reservation_state"])
 
+    def test_sjc23_guided_poc_plan_replans_after_reservation_release(self):
+        """After a verified release, an identical demand must re-plan cleanly.
+
+        A new reservation is created and the deterministic plan (same plan_id) is
+        rebound to it, rather than failing with 'Plan ID is already bound to a
+        different reservation' because the plan row still points at the released
+        reservation.
+        """
+        from orchestrator.store import StateStore
+
+        database_path = str(Path(self.temporary_directory.name) / "poc-replan.sqlite3")
+        app = create_app(
+            {
+                "TESTING": True,
+                "ORCHESTRATOR_DATABASE_PATH": database_path,
+                "ORCHESTRATOR_GUARDRAILS_PATH": str(SJC23_POC_GUARDRAILS),
+                "ORCHESTRATOR_EXECUTION_ENABLED": False,
+                "ORCHESTRATOR_TOKEN_HASH_IDENTITIES": {
+                    token_sha256(TOKENS["planner-token"]): {
+                        "actor": "meraki-planner", "roles": ["planner"]
+                    }
+                },
+            }
+        )
+        client = app.test_client()
+        form_values = {
+            "fabric_name": "SJC23 recorded POC",
+            "change_reference": "SJC23-POC-001",
+            "corporate_users": "150",
+            "guest_users": "150",
+            "corporate_attachment": "corporate_laptop",
+            "guest_attachment": "guest_laptop",
+            "dhcp_lease_minutes": "60",
+            "dns_profile": "public_google",
+        }
+        first = client.post(
+            "/v1/workflow-actions/poc-guided-plan",
+            json={"form_values": form_values, "idempotency_key": "sjc23-poc-run-first"},
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, first.status_code, first.get_json())
+        first_json = first.get_json()
+
+        # Evidence-gated release of the reservation the first plan is bound to.
+        store = StateStore(database_path)
+        store.transition_design_reservation(
+            first_json["reservation_id"], "released", "operator", verified=True
+        )
+
+        # Identical demand again -> new reservation, plan rebinds, still 200.
+        second = client.post(
+            "/v1/workflow-actions/poc-guided-plan",
+            json={"form_values": form_values, "idempotency_key": "sjc23-poc-run-second"},
+            headers=self.headers("planner-token"),
+        )
+        self.assertEqual(200, second.status_code, second.get_json())
+        second_json = second.get_json()
+        self.assertEqual(first_json["plan_id"], second_json["plan_id"])
+        self.assertNotEqual(first_json["reservation_id"], second_json["reservation_id"])
+        self.assertEqual("reserved", second_json["reservation_state"])
+
     def test_sjc23_guided_poc_options_are_planner_only_and_secret_free(self):
         database_path = str(Path(self.temporary_directory.name) / "poc-options.sqlite3")
         app = create_app(

@@ -707,8 +707,48 @@ class StateStore:
             if existing:
                 if str(existing["artifact_hash"]) != artifact_hash:
                     raise ConflictError("Plan ID is already bound to a different artifact hash")
-                if str(existing["reservation_id"] or "") != str(reservation_id or ""):
-                    raise ConflictError("Plan ID is already bound to a different reservation")
+                prior_reservation = str(existing["reservation_id"] or "")
+                if prior_reservation != str(reservation_id or ""):
+                    # Same plan_id + identical artifact hash means the design is
+                    # byte-identical. If the plan's previously bound reservation is
+                    # no longer active (released), rebind it to the current active
+                    # reservation instead of failing -- this is the same design
+                    # backed by freshly reserved, identical resources after a
+                    # release. A still-active prior reservation is a real conflict.
+                    prior_active = False
+                    if prior_reservation:
+                        prior = connection.execute(
+                            "SELECT state FROM design_reservations WHERE reservation_id = ?",
+                            (prior_reservation,),
+                        ).fetchone()
+                        prior_active = bool(prior) and str(prior["state"]) in (
+                            "reserved",
+                            "committed",
+                            "quarantined",
+                        )
+                    if prior_active:
+                        raise ConflictError("Plan ID is already bound to a different reservation")
+                    connection.execute(
+                        "UPDATE plans SET reservation_id = ? WHERE plan_id = ?",
+                        (reservation_id, str(plan["plan_id"])),
+                    )
+                    self._append_audit(
+                        connection,
+                        "plan",
+                        str(plan["plan_id"]),
+                        "plan.reservation_rebound",
+                        actor,
+                        {
+                            "plan_hash": str(plan["plan_hash"]),
+                            "artifact_hash": artifact_hash,
+                            "previous_reservation_id": prior_reservation,
+                            "reservation_id": reservation_id,
+                        },
+                    )
+                    rebound = connection.execute(
+                        "SELECT * FROM plans WHERE plan_id = ?", (str(plan["plan_id"]),)
+                    ).fetchone()
+                    return self._json_record(rebound), False
                 return self._json_record(existing), False
             created_at = isoformat()
             connection.execute(
