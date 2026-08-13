@@ -519,6 +519,19 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertFalse(body["contains_secret_values"])
         self.assertFalse(body["contains_raw_configuration"])
 
+    def test_active_approval_binds_the_current_plan(self):
+        from orchestrator.store import StateStore
+
+        _intent, plan = self.create_intent_and_plan()
+        self.approve(plan["plan_id"])
+        store = StateStore(str(Path(self.temporary_directory.name) / "state.sqlite3"))
+        approval = store.active_approval(plan["plan_id"])
+        self.assertIsNotNone(approval)
+        self.assertEqual("CHG-LAB-001", approval["change_reference"])
+        self.assertTrue(approval["plan_hash"])
+        self.assertTrue(approval["artifact_hash"])
+        self.assertIsNone(store.active_approval("plan_does_not_exist"))
+
     def test_sjc23_guided_poc_options_are_planner_only_and_secret_free(self):
         database_path = str(Path(self.temporary_directory.name) / "poc-options.sqlite3")
         app = create_app(

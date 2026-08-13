@@ -885,6 +885,31 @@ class StateStore:
             raise ApprovalRequiredError("The plan approval has expired")
         return row
 
+    def active_approval(self, plan_id: str) -> Optional[Dict[str, Any]]:
+        """Return the latest approved, unexpired approval for a plan, or None.
+
+        Used by the worker to bind execution authorization to the specific
+        approved plan (its plan_hash/artifact_hash), so a re-planned design
+        applies against its own approval rather than a static environment pin.
+        """
+        with self.connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM approvals WHERE plan_id = ? ORDER BY created_at DESC LIMIT 1",
+                (plan_id,),
+            ).fetchone()
+        if not row or str(row["decision"]) != "approved":
+            return None
+        if parse_timestamp(str(row["expires_at"])) <= utc_now():
+            return None
+        return {
+            "approval_id": str(row["approval_id"]),
+            "plan_id": str(row["plan_id"]),
+            "plan_hash": str(row["plan_hash"]),
+            "artifact_hash": str(row["artifact_hash"]),
+            "change_reference": str(row["change_reference"]),
+            "expires_at": str(row["expires_at"]),
+        }
+
     def create_run(
         self,
         plan_id: str,

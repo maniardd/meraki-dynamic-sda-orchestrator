@@ -66,7 +66,7 @@ class WorkerRuntimeTests(unittest.TestCase):
         intent, plan, artifact = _poc_candidate()
         self.assertEqual(
             {"allowed_blocker_codes": []},
-            _sjc23_poc_authorization({}, intent, plan, artifact),
+            _sjc23_poc_authorization({}, intent, plan, artifact, {}),
         )
 
     def test_sjc23_poc_authorization_requires_hash_bound_policy_and_artifact(self):
@@ -77,23 +77,26 @@ class WorkerRuntimeTests(unittest.TestCase):
             "ORCHESTRATOR_SJC23_POC_GUARDRAILS_SHA256": hashlib.sha256(
                 POC_POLICY_PATH.read_bytes()
             ).hexdigest(),
-            "ORCHESTRATOR_SJC23_POC_CHANGE_REFERENCE": "SJC23-POC-001",
-            "ORCHESTRATOR_SJC23_POC_PLAN_HASH": plan["plan_hash"],
-            "ORCHESTRATOR_SJC23_POC_ARTIFACT_HASH": artifact["artifact_hash"],
         }
-        authorization = _sjc23_poc_authorization(environment, intent, plan, artifact)
+        authz = {
+            "change_reference": "SJC23-POC-001",
+            "plan_hash": plan["plan_hash"],
+            "artifact_hash": artifact["artifact_hash"],
+        }
+        result = _sjc23_poc_authorization(environment, intent, plan, artifact, authz)
         self.assertEqual(
             ["poc.local_dhcp_and_attachment_hardware_acceptance_pending"],
-            authorization["allowed_blocker_codes"],
+            result["allowed_blocker_codes"],
         )
 
         wrong_policy = dict(environment, ORCHESTRATOR_SJC23_POC_GUARDRAILS_SHA256="0" * 64)
         with self.assertRaisesRegex(WorkerRuntimeError, "guardrails hash"):
-            _sjc23_poc_authorization(wrong_policy, intent, plan, artifact)
+            _sjc23_poc_authorization(wrong_policy, intent, plan, artifact, authz)
 
-        wrong_artifact = dict(environment, ORCHESTRATOR_SJC23_POC_ARTIFACT_HASH="0" * 64)
+        # The plan/artifact hashes now bind via the run's approval, not the env.
+        wrong_artifact = dict(authz, artifact_hash="0" * 64)
         with self.assertRaisesRegex(WorkerRuntimeError, "authorization was rejected"):
-            _sjc23_poc_authorization(wrong_artifact, intent, plan, artifact)
+            _sjc23_poc_authorization(environment, intent, plan, artifact, wrong_artifact)
 
 
 if __name__ == "__main__":
