@@ -33,8 +33,15 @@ def _sjc23_poc_authorization(
     intent: Mapping[str, Any],
     plan: Mapping[str, Any],
     artifact: Mapping[str, Any],
+    authorization: Mapping[str, str],
 ) -> Mapping[str, Any]:
-    """Return the one blocker a separately-enabled SJC23 worker may consume."""
+    """Return the one blocker a separately-enabled SJC23 worker may consume.
+
+    ``authorization`` binds the change reference and plan/artifact hashes for
+    this run (sourced from the run's approval, with a static environment pin as
+    fallback), so a re-planned design is authorized against its own approval.
+    The guardrails file and its expected hash remain environment-pinned.
+    """
 
     if not _enabled("ORCHESTRATOR_SJC23_POC_EXECUTION_ENABLED", environment):
         return {"allowed_blocker_codes": []}
@@ -63,9 +70,9 @@ def _sjc23_poc_authorization(
             artifact,
             policy,
             {
-                "change_reference": str(environment.get("ORCHESTRATOR_SJC23_POC_CHANGE_REFERENCE", "")),
-                "plan_hash": str(environment.get("ORCHESTRATOR_SJC23_POC_PLAN_HASH", "")),
-                "artifact_hash": str(environment.get("ORCHESTRATOR_SJC23_POC_ARTIFACT_HASH", "")),
+                "change_reference": str(authorization.get("change_reference", "")),
+                "plan_hash": str(authorization.get("plan_hash", "")),
+                "artifact_hash": str(authorization.get("artifact_hash", "")),
             },
         )
     except PocExecutionError as exc:
@@ -95,11 +102,25 @@ def process_run(run_id: str, environment: Mapping[str, str]) -> Mapping[str, Any
     if artifact["artifact_hash"] != plan_record["artifact_hash"]:
         raise WorkerRuntimeError("Rendered artifact hash changed after approval")
 
+    approval = store.active_approval(str(run["plan_id"]))
+    if approval is not None:
+        authorization = {
+            "change_reference": str(approval["change_reference"]),
+            "plan_hash": str(approval["plan_hash"]),
+            "artifact_hash": str(approval["artifact_hash"]),
+        }
+    else:
+        authorization = {
+            "change_reference": str(environment.get("ORCHESTRATOR_SJC23_POC_CHANGE_REFERENCE", "")),
+            "plan_hash": str(environment.get("ORCHESTRATOR_SJC23_POC_PLAN_HASH", "")),
+            "artifact_hash": str(environment.get("ORCHESTRATOR_SJC23_POC_ARTIFACT_HASH", "")),
+        }
     poc_authorization = _sjc23_poc_authorization(
         environment,
         intent_record["document"],
         plan_record["document"],
         artifact,
+        authorization,
     )
 
     secrets = build_secret_provider(environment)

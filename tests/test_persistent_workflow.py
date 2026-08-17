@@ -318,6 +318,9 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual("plan_ready", body["status"])
         self.assertEqual("reserved", body["reservation_state"])
         self.assertGreater(body["allocation_summary"]["network"], 0)
+        self.assertIsInstance(body.get("review_summary"), str)
+        self.assertIn("Virtual networks", body["review_summary"])
+        self.assertIn("Total commands to apply", body["review_summary"])
 
     def test_sjc23_guided_poc_plan_is_idempotent_on_demand_across_runs(self):
         """Different per-run idempotency keys with identical demand must return the
@@ -518,6 +521,19 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertIn("terminal", body)
         self.assertFalse(body["contains_secret_values"])
         self.assertFalse(body["contains_raw_configuration"])
+
+    def test_active_approval_binds_the_current_plan(self):
+        from orchestrator.store import StateStore
+
+        _intent, plan = self.create_intent_and_plan()
+        self.approve(plan["plan_id"])
+        store = StateStore(str(Path(self.temporary_directory.name) / "state.sqlite3"))
+        approval = store.active_approval(plan["plan_id"])
+        self.assertIsNotNone(approval)
+        self.assertEqual("CHG-LAB-001", approval["change_reference"])
+        self.assertTrue(approval["plan_hash"])
+        self.assertTrue(approval["artifact_hash"])
+        self.assertIsNone(store.active_approval("plan_does_not_exist"))
 
     def test_sjc23_guided_poc_options_are_planner_only_and_secret_free(self):
         database_path = str(Path(self.temporary_directory.name) / "poc-options.sqlite3")

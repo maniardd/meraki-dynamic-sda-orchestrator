@@ -90,6 +90,70 @@ def _meraki_audit_summary(records: list[Mapping[str, Any]]) -> list[Dict[str, An
     ]
 
 
+def _sjc23_poc_review_summary(preview: Mapping[str, Any]) -> str:
+    """Human-readable summary of the derived design for the Meraki review step.
+
+    Returns a single plain-text string (no secrets, no raw CLI) so the operator
+    can review subnets, VLANs, VNIs, DHCP/DNS and command volume before
+    confirming, without the workflow having to parse nested JSON.
+    """
+
+    underlay = preview.get("underlay", {}) if isinstance(preview.get("underlay"), Mapping) else {}
+    lisp = preview.get("lisp", {}) if isinstance(preview.get("lisp"), Mapping) else {}
+    lines = [
+        "SJC23 POC - derived SD-Access design (review before you confirm)",
+        "Change reference: {}".format(preview.get("change_reference", "")),
+        "Underlay: {} MTU {} on {}".format(
+            str(underlay.get("protocol", "")).upper(),
+            underlay.get("mtu", ""),
+            underlay.get("subnet", ""),
+        ),
+        "LISP site: {} (map-server: {})".format(
+            lisp.get("site_name", ""),
+            ", ".join(str(m) for m in lisp.get("map_servers", [])),
+        ),
+        "Virtual networks:",
+    ]
+    for vn in preview.get("virtual_networks", []):
+        if not isinstance(vn, Mapping):
+            continue
+        lines.append(
+            "  - {} (VRF {}): {} | VLAN {} | VNIs L2 {}/L3 {} | DHCP {} min | DNS {}".format(
+                vn.get("virtual_network", ""),
+                vn.get("vrf", ""),
+                vn.get("endpoint_prefix", ""),
+                vn.get("vlan_id", ""),
+                vn.get("l2_vni", ""),
+                vn.get("l3_vni", ""),
+                vn.get("dhcp_lease_minutes", ""),
+                ", ".join(str(s) for s in vn.get("dns_servers", [])),
+            )
+        )
+    lines.append("Devices:")
+    total_commands = 0
+    for dev in preview.get("devices", []):
+        if not isinstance(dev, Mapping):
+            continue
+        phases = dev.get("phases", []) if isinstance(dev.get("phases"), list) else []
+        cmds = sum(int(p.get("command_count", 0)) for p in phases if isinstance(p, Mapping))
+        total_commands += cmds
+        lines.append(
+            "  - {} ({}, loopback {}): {} commands".format(
+                dev.get("device_id", ""),
+                dev.get("platform", ""),
+                dev.get("loopback_ip", ""),
+                cmds,
+            )
+        )
+    lines.append("Total commands to apply: {}".format(total_commands))
+    lines.append(
+        "Deployment authorized: {} (POC hardware-acceptance pending)".format(
+            preview.get("deployment_authorized", False)
+        )
+    )
+    return "\n".join(lines)
+
+
 def _repair_meraki_unquoted_scalars(raw_document: str) -> Optional[Dict[str, Any]]:
     """Quote only approved native-workflow tokens with constrained grammars."""
 
@@ -547,6 +611,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Flask:
                 plan_record["document"],
                 artifact,
                 guardrails(),
+            )
+            result["review_summary"] = _sjc23_poc_review_summary(
+                result["poc_deployment_preview"]
             )
         except (PocExecutionError, RenderError, StoreError) as exc:
             return jsonify({"error": "poc_deployment_preview", "message": str(exc)}), 422
