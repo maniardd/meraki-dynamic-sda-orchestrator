@@ -318,6 +318,9 @@ class PersistentWorkflowTests(unittest.TestCase):
         self.assertEqual("plan_ready", body["status"])
         self.assertEqual("reserved", body["reservation_state"])
         self.assertGreater(body["allocation_summary"]["network"], 0)
+        self.assertIsInstance(body.get("review_summary"), str)
+        self.assertIn("Virtual networks", body["review_summary"])
+        self.assertIn("Total commands to apply", body["review_summary"])
 
     def test_sjc23_guided_poc_plan_is_idempotent_on_demand_across_runs(self):
         """Different per-run idempotency keys with identical demand must return the
