@@ -113,7 +113,9 @@ class PostgreSqlIntegrationTests(unittest.TestCase):
 
     def test_parallel_allocations_are_non_overlapping(self):
         def reserve(index):
-            store = PostgresStateStore(POSTGRES_DSN)
+            # Schema already migrated in setUpClass; per-thread stores must not re-run
+            # owner-only DDL, whose AccessExclusiveLock deadlocks against concurrent INSERTs.
+            store = PostgresStateStore(POSTGRES_DSN, run_migration=False)
             return store.reserve_design(
                 self.requirements_for("parallel-{}".format(index)),
                 self.policy,
