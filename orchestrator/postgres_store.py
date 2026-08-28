@@ -44,7 +44,7 @@ class PostgresStateStore(StateStore):
 
     backend_name = "postgresql"
 
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str, run_migration: bool = True):
         if not str(database_url).startswith(("postgresql://", "postgres://")):
             raise ValueError("A PostgreSQL database URL is required")
         self.database_path = str(database_url)
@@ -61,7 +61,8 @@ class PostgresStateStore(StateStore):
         self._psycopg = psycopg
         self._errors = errors
         self._dict_row = dict_row
-        self.initialize()
+        if run_migration:
+            self.initialize()
 
     def _new_raw_connection(self):
         return self._psycopg.connect(

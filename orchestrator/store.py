@@ -1461,9 +1461,9 @@ class StateStore:
         }
 
 
-def create_state_store(database_location: str) -> StateStore:
+def create_state_store(database_location: str, run_migration: bool = True) -> StateStore:
     if str(database_location).startswith(("postgresql://", "postgres://")):
         from .postgres_store import PostgresStateStore
 
-        return PostgresStateStore(str(database_location))
+        return PostgresStateStore(str(database_location), run_migration=run_migration)
     return StateStore(str(database_location))

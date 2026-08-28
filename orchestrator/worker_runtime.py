@@ -92,7 +92,10 @@ def process_run(run_id: str, environment: Mapping[str, str]) -> Mapping[str, Any
     if not database:
         raise WorkerRuntimeError("A worker database location is required")
 
-    store = create_state_store(database)
+    # The worker only uses the schema (DML); the API owns and migrates it. Running
+    # the migration here would fail because the dedicated sda-worker role is not
+    # the table owner (by least-privilege design).
+    store = create_state_store(database, run_migration=False)
     run = store.get_run(run_id)
     if run["mode"] != "apply" or run["status"] != "apply_queued":
         raise WorkerRuntimeError("Only a queued apply run may be processed")
