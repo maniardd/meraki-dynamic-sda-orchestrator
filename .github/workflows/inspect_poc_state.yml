@@ -59,6 +59,9 @@ jobs:
                   "left(artifact_hash,16) AS artifact_hash, reservation_id, created_at "
                   "FROM plans WHERE fabric_id='sjc23-poc-fabric' "
                   "ORDER BY created_at DESC LIMIT 1").fetchone()
+              runs = [dict(r, created_at=str(r["created_at"])) for r in c.execute(
+                  "SELECT run_id, mode, status, created_at FROM runs "
+                  "WHERE mode='apply' ORDER BY created_at DESC LIMIT 5").fetchall()]
 
           report = {
               "design_reservations_unique_constraints": cons,
@@ -67,6 +70,7 @@ jobs:
               "latest_sjc23_plan": (
                   dict(plan, created_at=str(plan["created_at"])) if plan else None
               ),
+              "latest_apply_runs": runs,
           }
           print(json.dumps(report, indent=2, sort_keys=True))
           PY
